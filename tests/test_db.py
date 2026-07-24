@@ -1,3 +1,4 @@
+from conftest import Q
 import sqlite3
 from code_review_ai.db import connect, init_schema
 

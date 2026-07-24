@@ -5,7 +5,7 @@ from code_review_ai.indexer import rebuild
 from code_review_ai.changes import detect_changed_symbols
 from code_review_ai.impact import get_impact
 
-from conftest import FIXTURES as FIX
+from conftest import FIXTURES as FIX, Q
 
 
 def test_end_to_end_impact(tmp_path):
@@ -16,9 +16,9 @@ def test_end_to_end_impact(tmp_path):
     init_schema(conn)
     rebuild(cfg, conn)
     # simulate a change to auth::login by passing symbols directly
-    res = get_impact(conn, detect_changed_symbols(cfg, symbols=["auth::login"]))[0]
+    res = get_impact(conn, detect_changed_symbols(cfg, symbols=[Q("auth","login")]))[0]
     assert res["found"] is True
-    assert "app::main" in res["affected_entries"]
+    assert Q("app","main") in res["affected_entries"]
 
 
 def test_diamond_flow_count_bounded(tmp_path):

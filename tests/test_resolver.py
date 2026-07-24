@@ -1,7 +1,7 @@
 from code_review_ai.parser import parse_file
 from code_review_ai.resolver import resolve_calls
 
-from conftest import FIXTURES as FIX
+from conftest import FIXTURES as FIX, Q
 
 
 def _resolve():
@@ -14,11 +14,11 @@ def test_resolve_simple_and_attribute():
     edges = _resolve()
     by = {(e.source, e.target, e.resolution) for e in edges}
     # app::main calls login (imported from auth) -> resolved to auth::login
-    assert ("app::main", "auth::login", "resolved") in by
+    assert (Q("app","main"), Q("auth","login"), "resolved") in by
     # app::main calls a.login (import module alias) -> resolved to auth::login
-    assert ("app::main", "auth::login", "resolved") in by
+    assert (Q("app","main"), Q("auth","login"), "resolved") in by
     # auth::UserService.authenticate calls check() -> unresolved
-    assert any(e.source == "auth::UserService.authenticate" and e.resolution == "unresolved"
+    assert any(e.source == Q("auth","authenticate",Q("auth","UserService")) and e.resolution == "unresolved"
                and e.target == "check" for e in edges)
 
 
