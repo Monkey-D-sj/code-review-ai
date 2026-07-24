@@ -1,4 +1,3 @@
-from __future__ import annotations
 import re
 import subprocess
 from code_review_ai.config import Config

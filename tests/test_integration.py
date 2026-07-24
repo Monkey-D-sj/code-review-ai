@@ -1,4 +1,4 @@
-from __future__ import annotations
+
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.indexer import rebuild

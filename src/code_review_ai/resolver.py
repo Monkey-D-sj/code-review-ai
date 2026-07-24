@@ -1,4 +1,4 @@
-from __future__ import annotations
+
 from dataclasses import dataclass
 
 from code_review_ai.parser import ParsedFile, RawCall
