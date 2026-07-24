@@ -5,7 +5,7 @@ from code_review_ai.indexer import rebuild
 from code_review_ai.changes import detect_changed_symbols
 from code_review_ai.impact import get_impact
 
-FIX = "tests/fixtures/repo"
+from conftest import FIXTURES as FIX
 
 
 def test_end_to_end_impact(tmp_path):

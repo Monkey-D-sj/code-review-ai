@@ -1,7 +1,7 @@
 from code_review_ai.parser import parse_file
 from code_review_ai.resolver import resolve_calls
 
-FIX = "tests/fixtures/repo"
+from conftest import FIXTURES as FIX
 
 
 def _resolve():

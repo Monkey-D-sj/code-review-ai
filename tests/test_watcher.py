@@ -5,7 +5,7 @@ from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.watcher import startup_rebuild, run_watcher
 
-FIX = "tests/fixtures/repo"
+from conftest import FIXTURES as FIX
 
 
 def _cfg(tmp_path):

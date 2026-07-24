@@ -1,6 +1,6 @@
 from code_review_ai.parser import parse_file
 
-FIX = "tests/fixtures/repo"
+from conftest import FIXTURES as FIX
 
 
 def test_parse_extracts_nodes():

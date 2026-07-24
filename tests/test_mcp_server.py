@@ -5,7 +5,7 @@ from code_review_ai.db import connect, init_schema
 from code_review_ai.indexer import rebuild
 from code_review_ai.mcp_server import create_server
 
-FIX = "tests/fixtures/repo"
+from conftest import FIXTURES as FIX
 
 
 def _server(tmp_path):

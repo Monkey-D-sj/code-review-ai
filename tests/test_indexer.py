@@ -2,7 +2,7 @@ from code_review_ai.config import Config, load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.indexer import rebuild, is_stale
 
-FIX = "tests/fixtures/repo"
+from conftest import FIXTURES as FIX
 
 
 def _cfg(tmp_path):

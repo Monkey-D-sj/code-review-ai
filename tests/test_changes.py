@@ -1,7 +1,7 @@
 from code_review_ai.config import load_config
 from code_review_ai.changes import detect_changed_symbols
 
-FIX = "tests/fixtures/repo"
+from conftest import FIXTURES as FIX
 
 
 def test_symbols_mode_passthrough():
