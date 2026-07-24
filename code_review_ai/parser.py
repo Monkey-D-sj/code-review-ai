@@ -84,7 +84,7 @@ def _module_qname(file_path: str, repo_root: str) -> str:
     parts = list(rel.with_suffix("").parts)
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
-    return "/".join(parts)
+    return ".".join(parts)
 
 
 def _sig(source: bytes, node) -> str:
@@ -93,7 +93,7 @@ def _sig(source: bytes, node) -> str:
     return source[node.start_byte:end].decode("utf-8").strip()
 
 def _get_qualified_name(name: str, module_qname: str, scope_qname: str | None):
-    return f"{scope_qname}.{name}" if scope_qname else f"{module_qname}::{name}"
+    return f"{scope_qname}:{name}" if scope_qname else f"{module_qname}:{name}"
 
 def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang, output):
     for child in node.children:
@@ -165,7 +165,7 @@ def _walk_calls(node, module_qname, cur_scope, lang, out):
                 ))
         if _is_scope(child.type, lang):
             name = child.child_by_field_name("name").text.decode("utf-8")
-            new_scope = f"{cur_scope}:{name}" if cur_scope else f"{module_qname}::{name}"
+            new_scope = f"{cur_scope}:{name}" if cur_scope else f"{module_qname}:{name}"
             _walk_calls(child, module_qname, new_scope, lang, out)
         else:
             _walk_calls(child, module_qname, cur_scope, lang, out)
