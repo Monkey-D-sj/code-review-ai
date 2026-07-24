@@ -1,4 +1,3 @@
-import sqlite3
 from code_review_ai.config import Config, load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.indexer import rebuild, is_stale

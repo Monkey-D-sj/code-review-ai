@@ -3,6 +3,7 @@ import fnmatch
 import json
 import os
 import sqlite3
+import datetime
 import time
 from dataclasses import dataclass
 
@@ -99,7 +100,7 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
                     "INSERT INTO flow_memberships(flow_id,node_id,position) VALUES(?,?,?)",
                     (fid, nid, pos),
                 )
-        built_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        built_at = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
         conn.execute("INSERT OR REPLACE INTO build_meta(key,value) VALUES('built_at',?)",
                      (built_at,))
         stats = RebuildStats(len(nodes), len(edges), len(flows), built_at)
@@ -110,7 +111,8 @@ def is_stale(config: Config, conn: sqlite3.Connection) -> bool:
     row = conn.execute("SELECT value FROM build_meta WHERE key='built_at'").fetchone()
     if row is None:
         return True
-    built = time.mktime(time.strptime(row["value"], "%Y-%m-%dT%H:%M:%S"))
+    dt = datetime.datetime.strptime(row["value"], "%Y-%m-%dT%H:%M:%S.%f")
+    built = time.mktime(dt.timetuple())
     files = list_python_files(config.repo_path)
     for f in files:
         try:
