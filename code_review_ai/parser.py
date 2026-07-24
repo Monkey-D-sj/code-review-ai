@@ -98,7 +98,7 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
         t = child.type
         if t in lang["def_nodes"]:
             name = child.child_by_field_name("name").text.decode("utf-8")
-            qn = f"{scope_qname}:{name}" if scope_qname else f"{module_qname}:{name}"
+            qn = f"{scope_qname}.{name}" if scope_qname else f"{module_qname}::{name}"
             kind = lang["def_nodes"][t]
             if kind == "function" and parent_kind == "class":
                 kind = "method"
@@ -163,7 +163,7 @@ def _walk_calls(node, module_qname, cur_scope, lang, out):
                 ))
         if _is_scope(child.type, lang):
             name = child.child_by_field_name("name").text.decode("utf-8")
-            new_scope = f"{cur_scope}:{name}" if cur_scope else f"{module_qname}:{name}"
+            new_scope = f"{cur_scope}:{name}" if cur_scope else f"{module_qname}::{name}"
             _walk_calls(child, module_qname, new_scope, lang, out)
         else:
             _walk_calls(child, module_qname, cur_scope, lang, out)
