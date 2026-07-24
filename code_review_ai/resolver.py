@@ -7,6 +7,12 @@ from code_review_ai.parser import ParsedFile, RawCall, CALL_SIMPLE, CALL_ATTRIBU
 
 @dataclass
 class Edge:
+    """A resolved call edge.
+
+    source     — caller qualified name
+    target     — callee: resolved qname (if resolution=resolved), raw expr otherwise
+    resolution — resolved / dynamic / unresolved
+    """
     source: str
     target: str
     kind: str

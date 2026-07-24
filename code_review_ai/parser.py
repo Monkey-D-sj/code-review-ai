@@ -54,6 +54,12 @@ class ParsedNode:
 
 @dataclass
 class RawCall:
+    """A call-site extracted from AST, before resolution.
+
+    source_qname — who makes the call (qualified name of enclosing function/module)
+    target_expr — the raw text of the call target, e.g. ``login``, ``a.login``, ``vals[0]``
+    call_form  — CALL_SIMPLE / CALL_ATTRIBUTE / CALL_OTHER
+    """
     source_qname: str
     target_expr: str
     call_form: str
