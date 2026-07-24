@@ -69,27 +69,26 @@ def _sig(source: bytes, node) -> str:
     return source[node.start_byte:end].decode("utf-8").strip()
 
 
-def _walk_defs_typed(node, source, module_qname, scope_qname, output):
-    """Collect function/class nodes; recurse into bodies for nested defs.
-
-    kind is assigned as 'class' for class_definition and 'function' otherwise;
-    methods are reclassified to 'method' in parse_file once parent kinds are known.
-    file_path is left empty — filled by parse_file in batch.
-    """
+def _walk_defs_typed(node, source, module_qname, scope_qname, parent_is_class, output):
     for child in node.children:
         t = child.type
         if t in ("function_definition", "class_definition"):
             name = child.child_by_field_name("name").text.decode("utf-8")
             qn = f"{scope_qname}:{name}" if scope_qname else f"{module_qname}:{name}"
-            kind = "class" if t == "class_definition" else "function"
+            if t == "class_definition":
+                kind = "class"
+            elif parent_is_class:
+                kind = "method"
+            else:
+                kind = "function"
             output.append(ParsedNode(
                 qualified_name=qn, kind=kind, file_path="",
                 start_line=child.start_point[0] + 1, end_line=child.end_point[0] + 1,
                 signature=_sig(source, child), parent_qname=scope_qname,
             ))
-            _walk_defs_typed(child, source, module_qname, qn, output)
+            _walk_defs_typed(child, source, module_qname, qn, kind == "class", output)
         else:
-            _walk_defs_typed(child, source, module_qname, scope_qname, output)
+            _walk_defs_typed(child, source, module_qname, scope_qname, parent_is_class, output)
 
 
 def parse_file(file_path: str, repo_root: str) -> ParsedFile:
@@ -105,14 +104,7 @@ def parse_file(file_path: str, repo_root: str) -> ParsedFile:
         signature="", parent_qname=None,
     ))
 
-    _walk_defs_typed(root, source, module_qname, None, pf.nodes)
-
-    # Reclassify functions inside classes to "method"
-    parents = {n.qualified_name: n.kind for n in pf.nodes}
-    for n in pf.nodes:
-        if n.parent_qname and parents.get(n.parent_qname) == "class":
-            n.kind = "method"
-
+    _walk_defs_typed(root, source, module_qname, None, False, pf.nodes)
     _walk_calls(root, module_qname, None, pf.raw_calls)
     pf.imports = _extract_imports(root, module_qname)
 
