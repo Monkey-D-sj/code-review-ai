@@ -181,7 +181,7 @@ def _extract_imports(root, module_qname) -> list[ImportEntry]:
             else:
                 module = sub
             for c in node.children:
-                if c.type == "dotted_name" and c is not mod_node:
+                if c.type == "dotted_name" and (mod_node is None or c.start_byte != mod_node.start_byte):
                     name = c.text.decode("utf-8")
                     entries.append(ImportEntry(name, module, name, False))
                 elif c.type == "aliased_import":

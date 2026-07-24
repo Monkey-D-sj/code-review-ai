@@ -11,6 +11,10 @@ def _git_diff(base: str, files: list[str] | None) -> dict[str, list[tuple[int, i
     if files:
         args += ["--"] + files
     out = subprocess.run(args, capture_output=True, text=True)
+    if out.returncode != 0:
+        raise RuntimeError(
+            f"git diff failed (exit {out.returncode}): {out.stderr.strip()}"
+        )
     ranges: dict[str, list[tuple[int, int]]] = {}
     cur_file = None
     for line in out.stdout.splitlines():
@@ -37,7 +41,10 @@ def detect_changed_symbols(config: Config,
                            files: list[str] | None = None) -> list[str]:
     if symbols is not None:
         return list(symbols)
-    diff = _git_diff(config.diff_base, files)
+    try:
+        diff = _git_diff(config.diff_base, files)
+    except RuntimeError:
+        return []
     repo = config.repo_path
     out: list[str] = []
     for rel, ranges in diff.items():

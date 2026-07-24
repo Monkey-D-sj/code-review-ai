@@ -1,6 +1,7 @@
 from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (
@@ -50,6 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_memberships_node ON flow_memberships(node_id);
 
 
 def connect(db_path: str) -> sqlite3.Connection:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
