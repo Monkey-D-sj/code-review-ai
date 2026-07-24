@@ -9,6 +9,30 @@ from tree_sitter import Language, Parser
 PY_LANGUAGE = Language(tspython.language())
 _PARSER = Parser(PY_LANGUAGE)
 
+# Language-specific node-type configuration. Add a new entry per language.
+LANG = {
+    "python": {
+        "def_nodes": {           # node_type -> semantic kind
+            "class_definition": "class",
+            "function_definition": "function",
+        },
+        "scope_nodes": {         # node types that open a new scope
+            "class_definition",
+            "function_definition",
+        },
+        "call_node": "call",
+        "import_nodes": {
+            "import_statement",
+            "import_from_statement",
+        },
+    },
+}
+
+# ── helpers ──────────────────────────────────────────────────────────
+
+def _is_scope(node_type: str, lang: dict) -> bool:
+    return node_type in lang["scope_nodes"]
+
 
 @dataclass
 class ParsedNode:
@@ -69,29 +93,28 @@ def _sig(source: bytes, node) -> str:
     return source[node.start_byte:end].decode("utf-8").strip()
 
 
-def _walk_defs_typed(node, source, module_qname, scope_qname, parent_is_class, output):
+def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang, output):
     for child in node.children:
         t = child.type
-        if t in ("function_definition", "class_definition"):
+        if t in lang["def_nodes"]:
             name = child.child_by_field_name("name").text.decode("utf-8")
             qn = f"{scope_qname}:{name}" if scope_qname else f"{module_qname}:{name}"
-            if t == "class_definition":
-                kind = "class"
-            elif parent_is_class:
+            kind = lang["def_nodes"][t]
+            if kind == "function" and parent_kind == "class":
                 kind = "method"
-            else:
-                kind = "function"
             output.append(ParsedNode(
                 qualified_name=qn, kind=kind, file_path="",
                 start_line=child.start_point[0] + 1, end_line=child.end_point[0] + 1,
                 signature=_sig(source, child), parent_qname=scope_qname,
             ))
-            _walk_defs_typed(child, source, module_qname, qn, kind == "class", output)
+            _walk_defs_typed(child, source, module_qname, qn, kind, lang, output)
         else:
-            _walk_defs_typed(child, source, module_qname, scope_qname, parent_is_class, output)
+            _walk_defs_typed(child, source, module_qname, scope_qname, parent_kind, lang, output)
 
 
-def parse_file(file_path: str, repo_root: str) -> ParsedFile:
+def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> ParsedFile:
+    if lang is None:
+        lang = LANG["python"]
     module_qname = _module_qname(file_path, repo_root)
     source = Path(file_path).read_bytes()
     tree = _PARSER.parse(source)
@@ -104,9 +127,9 @@ def parse_file(file_path: str, repo_root: str) -> ParsedFile:
         signature="", parent_qname=None,
     ))
 
-    _walk_defs_typed(root, source, module_qname, None, False, pf.nodes)
-    _walk_calls(root, module_qname, None, pf.raw_calls)
-    pf.imports = _extract_imports(root, module_qname)
+    _walk_defs_typed(root, source, module_qname, None, None, lang, pf.nodes)
+    _walk_calls(root, module_qname, None, lang, pf.raw_calls)
+    pf.imports = _extract_imports(root, module_qname, lang)
 
     # Batch-fill file_path — constant across one file
     for n in pf.nodes:
@@ -127,9 +150,9 @@ def _call_target(func_node) -> tuple[str, str]:
     return func_node.text.decode("utf-8"), "other"
 
 
-def _walk_calls(node, module_qname, cur_scope, out):
+def _walk_calls(node, module_qname, cur_scope, lang, out):
     for child in node.children:
-        if child.type == "call":
+        if child.type == lang["call_node"]:
             func = child.child_by_field_name("function")
             if func is not None:
                 expr, form = _call_target(func)
@@ -138,23 +161,25 @@ def _walk_calls(node, module_qname, cur_scope, out):
                     target_expr=expr, call_form=form,
                     file_path="", call_line=child.start_point[0] + 1,
                 ))
-        if child.type in ("function_definition", "class_definition"):
+        if _is_scope(child.type, lang):
             name = child.child_by_field_name("name").text.decode("utf-8")
             new_scope = f"{cur_scope}:{name}" if cur_scope else f"{module_qname}:{name}"
-            _walk_calls(child, module_qname, new_scope, out)
+            _walk_calls(child, module_qname, new_scope, lang, out)
         else:
-            _walk_calls(child, module_qname, cur_scope, out)
+            _walk_calls(child, module_qname, cur_scope, lang, out)
 
 
 def _dotted(node) -> str:
     return node.text.decode("utf-8") if node is not None else ""
 
 
-def _extract_imports(root, module_qname) -> list[ImportEntry]:
+def _extract_imports(root, module_qname, lang) -> list[ImportEntry]:
     entries: list[ImportEntry] = []
     parts = module_qname.split(".") if module_qname else []
     pkg = parts[:-1] if parts else []
     for node in root.children:
+        if node.type not in lang["import_nodes"]:
+            continue
         if node.type == "import_statement":
             for child in node.children:
                 if child.type == "dotted_name":
