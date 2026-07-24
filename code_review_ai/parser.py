@@ -154,7 +154,13 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
 
 
 def _call_target(func_node) -> tuple[str, str]:
-    """Return (target_expr, call_form) for a call's function child."""
+    """Return (target_expr, call_form) for a call's function child.
+
+    Node types are tree-sitter AST labels:
+      identifier — bare name:  login()
+      attribute  — dotted call: a.login()
+      other      — subscript, call-chain, etc.: vals[0]()  f()()
+    """
     t = func_node.type
     if t == "identifier":
         return func_node.text.decode("utf-8"), CALL_SIMPLE
