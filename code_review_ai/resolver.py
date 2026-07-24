@@ -45,11 +45,11 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str]) -> 
         local = mod_syms.get(pf.module_qname, {})
         imports = _import_map(pf)
         for c in pf.raw_calls:
-            edges.append(_resolve_one(c, pf.module_qname, local, imports, existing_qnames))
+            edges.append(_resolve_one(c, local, imports, existing_qnames))
     return edges
 
 
-def _resolve_one(c: RawCall, module: str, local: dict, imports: dict, existing: set[str]) -> Edge:
+def _resolve_one(c: RawCall, local: dict, imports: dict, existing: set[str]) -> Edge:
     base = Edge(source=c.source_qname, target=c.target_expr, kind="call",
                 file_path=c.file_path, call_line=c.call_line, resolution="unresolved")
     if c.call_form == "simple":
