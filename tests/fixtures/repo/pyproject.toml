@@ -1,0 +1,2 @@
+[tool.code-review-ai]
+repo_path = "tests/fixtures/repo"
