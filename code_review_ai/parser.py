@@ -84,7 +84,7 @@ def _module_qname(file_path: str, repo_root: str) -> str:
     parts = list(rel.with_suffix("").parts)
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
-    return ".".join(parts)
+    return "/".join(parts)
 
 
 def _sig(source: bytes, node) -> str:
@@ -92,13 +92,15 @@ def _sig(source: bytes, node) -> str:
     end = body.start_byte if body else node.end_byte
     return source[node.start_byte:end].decode("utf-8").strip()
 
+def _get_qualified_name(name: str, module_qname: str, scope_qname: str | None):
+    return f"{scope_qname}.{name}" if scope_qname else f"{module_qname}::{name}"
 
 def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang, output):
     for child in node.children:
         t = child.type
         if t in lang["def_nodes"]:
             name = child.child_by_field_name("name").text.decode("utf-8")
-            qn = f"{scope_qname}.{name}" if scope_qname else f"{module_qname}::{name}"
+            qn = _get_qualified_name(name, module_qname, scope_qname)
             kind = lang["def_nodes"][t]
             if kind == "function" and parent_kind == "class":
                 kind = "method"
