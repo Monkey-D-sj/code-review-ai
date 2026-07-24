@@ -1,4 +1,4 @@
-from code_review_ai.parser import parse_file
+from code_review_ai.parser import parse_file, CALL_SIMPLE, CALL_ATTRIBUTE, CALL_OTHER
 
 from conftest import FIXTURES as FIX, Q
 
@@ -23,8 +23,8 @@ def test_parse_extracts_calls_and_imports():
     assert imp["login"].module == "auth" and imp["login"].imported_name == "login"
     assert imp["a"].module == "auth" and imp["a"].imported_name is None
     calls = {(c.target_expr, c.call_form) for c in pf.raw_calls}
-    assert ("login", "simple") in calls
-    assert ("a.login", "attribute") in calls
-    assert ("obj.run", "attribute") in calls
-    assert ("vals[0]", "other") in calls
+    assert ("login", CALL_SIMPLE) in calls
+    assert ("a.login", CALL_ATTRIBUTE) in calls
+    assert ("obj.run", CALL_ATTRIBUTE) in calls
+    assert ("vals[0]", CALL_OTHER) in calls
     assert all(c.source_qname == Q("app","main") for c in pf.raw_calls)

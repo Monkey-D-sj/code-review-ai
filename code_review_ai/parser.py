@@ -30,6 +30,11 @@ LANG = {
     },
 }
 
+# Call-form constants — for RawCall.call_form and resolution dispatch.
+CALL_SIMPLE    = "simple"
+CALL_ATTRIBUTE = "attribute"
+CALL_OTHER     = "other"
+
 # ── helpers ──────────────────────────────────────────────────────────
 
 def _is_scope(node_type: str, lang: dict) -> bool:
@@ -146,10 +151,10 @@ def _call_target(func_node) -> tuple[str, str]:
     """Return (target_expr, call_form) for a call's function child."""
     t = func_node.type
     if t == "identifier":
-        return func_node.text.decode("utf-8"), "simple"
+        return func_node.text.decode("utf-8"), CALL_SIMPLE
     if t == "attribute":
-        return func_node.text.decode("utf-8"), "attribute"
-    return func_node.text.decode("utf-8"), "other"
+        return func_node.text.decode("utf-8"), CALL_ATTRIBUTE
+    return func_node.text.decode("utf-8"), CALL_OTHER
 
 
 def _walk_calls(node, module_qname, cur_scope, lang, out):

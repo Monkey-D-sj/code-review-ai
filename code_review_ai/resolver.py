@@ -2,7 +2,7 @@ from code_review_ai import qname
 
 from dataclasses import dataclass
 
-from code_review_ai.parser import ParsedFile, RawCall
+from code_review_ai.parser import ParsedFile, RawCall, CALL_SIMPLE, CALL_ATTRIBUTE
 
 
 @dataclass
@@ -52,7 +52,7 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str]) -> 
 def _resolve_one(c: RawCall, local: dict, imports: dict, existing: set[str]) -> Edge:
     base = Edge(source=c.source_qname, target=c.target_expr, kind="call",
                 file_path=c.file_path, call_line=c.call_line, resolution="unresolved")
-    if c.call_form == "simple":
+    if c.call_form == CALL_SIMPLE:
         name = c.target_expr
         if name in local:
             return _resolved(base, local[name], existing)
@@ -63,7 +63,7 @@ def _resolve_one(c: RawCall, local: dict, imports: dict, existing: set[str]) -> 
                 return _resolved(base, tgt, existing)
             return _resolved(base, mod, existing)  # imported module itself
         return base  # unresolved
-    if c.call_form == "attribute":
+    if c.call_form == CALL_ATTRIBUTE:
         head = c.target_expr.split(".", 1)[0]
         rest = c.target_expr[len(head) + 1:]
         if head in imports:
