@@ -69,11 +69,12 @@ def _sig(source: bytes, node) -> str:
     return source[node.start_byte:end].decode("utf-8").strip()
 
 
-def _walk_defs_typed(node, source, file_path, module_qname, scope_qname, out):
+def _walk_defs_typed(node, source, module_qname, scope_qname, output):
     """Collect function/class nodes; recurse into bodies for nested defs.
 
     kind is assigned as 'class' for class_definition and 'function' otherwise;
     methods are reclassified to 'method' in parse_file once parent kinds are known.
+    file_path is left empty — filled by parse_file in batch.
     """
     for child in node.children:
         t = child.type
@@ -81,14 +82,14 @@ def _walk_defs_typed(node, source, file_path, module_qname, scope_qname, out):
             name = child.child_by_field_name("name").text.decode("utf-8")
             qn = f"{scope_qname}:{name}" if scope_qname else f"{module_qname}:{name}"
             kind = "class" if t == "class_definition" else "function"
-            out.append(ParsedNode(
-                qualified_name=qn, kind=kind, file_path=file_path,
+            output.append(ParsedNode(
+                qualified_name=qn, kind=kind, file_path="",
                 start_line=child.start_point[0] + 1, end_line=child.end_point[0] + 1,
                 signature=_sig(source, child), parent_qname=scope_qname,
             ))
-            _walk_defs_typed(child, source, file_path, module_qname, qn, out)
+            _walk_defs_typed(child, source, module_qname, qn, output)
         else:
-            _walk_defs_typed(child, source, file_path, module_qname, scope_qname, out)
+            _walk_defs_typed(child, source, module_qname, scope_qname, output)
 
 
 def parse_file(file_path: str, repo_root: str) -> ParsedFile:
@@ -104,7 +105,7 @@ def parse_file(file_path: str, repo_root: str) -> ParsedFile:
         signature="", parent_qname=None,
     ))
 
-    _walk_defs_typed(root, source, file_path, module_qname, None, pf.nodes)
+    _walk_defs_typed(root, source, module_qname, None, pf.nodes)
 
     # Reclassify functions inside classes to "method"
     parents = {n.qualified_name: n.kind for n in pf.nodes}
@@ -112,8 +113,14 @@ def parse_file(file_path: str, repo_root: str) -> ParsedFile:
         if n.parent_qname and parents.get(n.parent_qname) == "class":
             n.kind = "method"
 
-    _walk_calls(root, source, file_path, module_qname, None, pf.raw_calls)
+    _walk_calls(root, module_qname, None, pf.raw_calls)
     pf.imports = _extract_imports(root, module_qname)
+
+    # Batch-fill file_path — constant across one file
+    for n in pf.nodes:
+        n.file_path = file_path
+    for c in pf.raw_calls:
+        c.file_path = file_path
 
     return pf
 
@@ -128,7 +135,7 @@ def _call_target(func_node) -> tuple[str, str]:
     return func_node.text.decode("utf-8"), "other"
 
 
-def _walk_calls(node, source, file_path, module_qname, cur_scope, out):
+def _walk_calls(node, module_qname, cur_scope, out):
     for child in node.children:
         if child.type == "call":
             func = child.child_by_field_name("function")
@@ -137,17 +144,14 @@ def _walk_calls(node, source, file_path, module_qname, cur_scope, out):
                 out.append(RawCall(
                     source_qname=cur_scope or module_qname,
                     target_expr=expr, call_form=form,
-                    file_path=file_path, call_line=child.start_point[0] + 1,
+                    file_path="", call_line=child.start_point[0] + 1,
                 ))
-            # do not recurse into the call's arguments' sub-calls separately;
-            # general traversal still picks nested calls below
-        # update scope on entering a def
         if child.type in ("function_definition", "class_definition"):
             name = child.child_by_field_name("name").text.decode("utf-8")
             new_scope = f"{cur_scope}:{name}" if cur_scope else f"{module_qname}:{name}"
-            _walk_calls(child, source, file_path, module_qname, new_scope, out)
+            _walk_calls(child, module_qname, new_scope, out)
         else:
-            _walk_calls(child, source, file_path, module_qname, cur_scope, out)
+            _walk_calls(child, module_qname, cur_scope, out)
 
 
 def _dotted(node) -> str:
