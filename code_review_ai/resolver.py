@@ -1,3 +1,4 @@
+from code_review_ai import qname
 
 from dataclasses import dataclass
 
@@ -21,7 +22,8 @@ def _module_symbols(parsed_files: list[ParsedFile]) -> dict:
         syms: dict[str, str] = {}
         for n in pf.nodes:
             if n.kind in ("function", "class"):
-                short = n.qualified_name.rsplit(":", 1)[-1]
+                short = qname.short(n.qualified_name)
+
                 syms[short] = n.qualified_name
         out[pf.module_qname] = syms
     return out
@@ -57,7 +59,7 @@ def _resolve_one(c: RawCall, module: str, local: dict, imports: dict, existing: 
         if name in imports:
             mod, imp_name, _star = imports[name]
             if imp_name:  # from m import name
-                tgt = f"{mod}:{imp_name}"
+                tgt = qname.join(mod, imp_name)
                 return _resolved(base, tgt, existing)
             return _resolved(base, mod, existing)  # imported module itself
         return base  # unresolved
@@ -67,11 +69,11 @@ def _resolve_one(c: RawCall, module: str, local: dict, imports: dict, existing: 
         if head in imports:
             mod, imp_name, _ = imports[head]
             if imp_name is None:  # import m / import m as head -> m.rest
-                tgt = f"{mod}:{rest}" if "." not in rest else f"{mod}:{rest.replace('.', ':')}"
+                tgt = qname.join(mod, rest)
                 return _resolved(base, tgt, existing)
         if head in local and local[head] in existing:
             cls_qn = local[head]
-            tgt = f"{cls_qn}:{rest}"
+            tgt = qname.join(cls_qn, rest)
             return _resolved(base, tgt, existing)
         base.resolution = "dynamic"
         return base

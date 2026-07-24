@@ -15,10 +15,10 @@ def test_end_to_end_impact(tmp_path):
     conn = connect(cfg.db_path)
     init_schema(conn)
     rebuild(cfg, conn)
-    # simulate a change to auth:login by passing symbols directly
-    res = get_impact(conn, detect_changed_symbols(cfg, symbols=["auth:login"]))[0]
+    # simulate a change to auth::login by passing symbols directly
+    res = get_impact(conn, detect_changed_symbols(cfg, symbols=["auth::login"]))[0]
     assert res["found"] is True
-    assert "app:main" in res["affected_entries"]
+    assert "app::main" in res["affected_entries"]
 
 
 def test_diamond_flow_count_bounded(tmp_path):

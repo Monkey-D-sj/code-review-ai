@@ -14,4 +14,4 @@ def test_cli_search(tmp_path, capsys):
                  "--db", str(tmp_path / "c.db")])
     assert code == 0
     out = json.loads(capsys.readouterr().out)
-    assert any(d["qname"] == "auth:login" for d in out)
+    assert any(d["qname"] == "auth::login" for d in out)

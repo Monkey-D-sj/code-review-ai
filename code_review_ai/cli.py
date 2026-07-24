@@ -1,3 +1,4 @@
+from code_review_ai import qname
 import argparse
 import json
 import sys
@@ -54,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
             "WHERE kind IN ('function','method','class')").fetchall()
         out = [{"qname": r["qualified_name"], "kind": r["kind"],
                 "file": r["file_path"], "line": r["start_line"]}
-               for r in rows if fnmatch.fnmatch(r["qualified_name"].rsplit(":", 1)[-1], args.query)]
+               for r in rows if fnmatch.fnmatch(qname.short(r["qualified_name"]), args.query)]
         print(json.dumps(out))
     return 0
 

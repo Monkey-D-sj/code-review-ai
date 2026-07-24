@@ -3,6 +3,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from code_review_ai.qname import join as qn_join
+
 import tree_sitter_python as tspython
 from tree_sitter import Language, Parser
 
@@ -92,15 +94,13 @@ def _sig(source: bytes, node) -> str:
     end = body.start_byte if body else node.end_byte
     return source[node.start_byte:end].decode("utf-8").strip()
 
-def _get_qualified_name(name: str, module_qname: str, scope_qname: str | None):
-    return f"{scope_qname}:{name}" if scope_qname else f"{module_qname}:{name}"
 
 def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang, output):
     for child in node.children:
         t = child.type
         if t in lang["def_nodes"]:
             name = child.child_by_field_name("name").text.decode("utf-8")
-            qn = _get_qualified_name(name, module_qname, scope_qname)
+            qn = qn_join(module_qname, name, scope_qname)
             kind = lang["def_nodes"][t]
             if kind == "function" and parent_kind == "class":
                 kind = "method"
@@ -165,7 +165,7 @@ def _walk_calls(node, module_qname, cur_scope, lang, out):
                 ))
         if _is_scope(child.type, lang):
             name = child.child_by_field_name("name").text.decode("utf-8")
-            new_scope = f"{cur_scope}:{name}" if cur_scope else f"{module_qname}:{name}"
+            new_scope = qn_join(module_qname, name, cur_scope)
             _walk_calls(child, module_qname, new_scope, lang, out)
         else:
             _walk_calls(child, module_qname, cur_scope, lang, out)

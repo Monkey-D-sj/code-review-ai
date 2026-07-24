@@ -13,12 +13,12 @@ def _resolve():
 def test_resolve_simple_and_attribute():
     edges = _resolve()
     by = {(e.source, e.target, e.resolution) for e in edges}
-    # app:main calls login (imported from auth) -> resolved to auth:login
-    assert ("app:main", "auth:login", "resolved") in by
-    # app:main calls a.login (import module alias) -> resolved to auth:login
-    assert ("app:main", "auth:login", "resolved") in by
-    # auth:UserService:authenticate calls check() -> unresolved
-    assert any(e.source == "auth:UserService:authenticate" and e.resolution == "unresolved"
+    # app::main calls login (imported from auth) -> resolved to auth::login
+    assert ("app::main", "auth::login", "resolved") in by
+    # app::main calls a.login (import module alias) -> resolved to auth::login
+    assert ("app::main", "auth::login", "resolved") in by
+    # auth::UserService.authenticate calls check() -> unresolved
+    assert any(e.source == "auth::UserService.authenticate" and e.resolution == "unresolved"
                and e.target == "check" for e in edges)
 
 

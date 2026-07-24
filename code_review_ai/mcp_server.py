@@ -1,3 +1,4 @@
+from code_review_ai import qname
 
 import fnmatch
 import json
@@ -43,7 +44,7 @@ def create_server(config: Config):
         ).fetchall()
         out = [{"qname": r["qualified_name"], "kind": r["kind"],
                 "file": r["file_path"], "line": r["start_line"]}
-               for r in rows if fnmatch.fnmatch(r["qualified_name"].rsplit(":", 1)[-1], query)]
+               for r in rows if fnmatch.fnmatch(qname.short(r["qualified_name"]), query)]
         return json.dumps(out)
 
     @mcp.tool()

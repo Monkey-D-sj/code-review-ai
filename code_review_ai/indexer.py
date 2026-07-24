@@ -1,3 +1,4 @@
+from code_review_ai import qname
 
 import fnmatch
 import json
@@ -29,7 +30,8 @@ def _entry_points(parsed, cfg: Config) -> list[str]:
         for n in pf.nodes:
             if n.kind not in ("function", "method"):
                 continue
-            short = n.qualified_name.rsplit(":", 1)[-1]
+            short = qname.short(n.qualified_name)
+
             if any(fnmatch.fnmatch(short, pat) for pat in cfg.entry_names):
                 out.append(n.qualified_name)
     return out
@@ -87,7 +89,8 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
         id_to_qname = {n.id: n.qualified_name for n in nodes}
         flows = build_flows(nodes, erows, entry_ids, config.max_depth)
         for f in flows:
-            name = id_to_qname.get(f.entry_point_id, "").rsplit(":", 1)[-1]
+            name = qname.short(id_to_qname.get(f.entry_point_id, ""))
+
             cur = conn.execute(
                 "INSERT INTO flows(name,entry_point_id,depth,node_count,file_count,"
                 "criticality,path_json) VALUES(?,?,?,?,?,?,?)",
