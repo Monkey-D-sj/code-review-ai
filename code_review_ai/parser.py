@@ -31,9 +31,9 @@ LANG = {
 }
 
 # Call-form constants — for RawCall.call_form and resolution dispatch.
-CALL_SIMPLE    = "simple"
-CALL_ATTRIBUTE = "attribute"
-CALL_OTHER     = "other"
+CALL_SIMPLE    = "simple"     # bare name:  login()
+CALL_ATTRIBUTE = "attribute"  # dotted:     a.login()
+CALL_OTHER     = "other"      # subscript, call-chain, etc.: vals[0]()  f()()
 
 # ── helpers ──────────────────────────────────────────────────────────
 
