@@ -112,4 +112,82 @@ def parse_file(file_path: str, repo_root: str) -> ParsedFile:
         if n.parent_qname and parents.get(n.parent_qname) == "class":
             n.kind = "method"
 
+    _walk_calls(root, source, file_path, module_qname, None, pf.raw_calls)
+    pf.imports = _extract_imports(root, module_qname)
+
     return pf
+
+
+def _call_target(func_node) -> tuple[str, str]:
+    """Return (target_expr, call_form) for a call's function child."""
+    t = func_node.type
+    if t == "identifier":
+        return func_node.text.decode("utf-8"), "simple"
+    if t == "attribute":
+        return func_node.text.decode("utf-8"), "attribute"
+    return func_node.text.decode("utf-8"), "other"
+
+
+def _walk_calls(node, source, file_path, module_qname, cur_scope, out):
+    for child in node.children:
+        if child.type == "call":
+            func = child.child_by_field_name("function")
+            if func is not None:
+                expr, form = _call_target(func)
+                out.append(RawCall(
+                    source_qname=cur_scope or module_qname,
+                    target_expr=expr, call_form=form,
+                    file_path=file_path, call_line=child.start_point[0] + 1,
+                ))
+            # do not recurse into the call's arguments' sub-calls separately;
+            # general traversal still picks nested calls below
+        # update scope on entering a def
+        if child.type in ("function_definition", "class_definition"):
+            name = child.child_by_field_name("name").text.decode("utf-8")
+            new_scope = f"{cur_scope}:{name}" if cur_scope else f"{module_qname}:{name}"
+            _walk_calls(child, source, file_path, module_qname, new_scope, out)
+        else:
+            _walk_calls(child, source, file_path, module_qname, cur_scope, out)
+
+
+def _dotted(node) -> str:
+    return node.text.decode("utf-8") if node is not None else ""
+
+
+def _extract_imports(root, module_qname) -> list[ImportEntry]:
+    entries: list[ImportEntry] = []
+    parts = module_qname.split(".") if module_qname else []
+    pkg = parts[:-1] if parts else []
+    for node in root.children:
+        if node.type == "import_statement":
+            for child in node.children:
+                if child.type == "dotted_name":
+                    mod = child.text.decode("utf-8")
+                    local = mod.split(".")[0]
+                    entries.append(ImportEntry(local, mod, None, False))
+                elif child.type == "aliased_import":
+                    name = child.child_by_field_name("name").text.decode("utf-8")
+                    alias = child.child_by_field_name("alias").text.decode("utf-8")
+                    entries.append(ImportEntry(alias, name, None, False))
+        elif node.type == "import_from_statement":
+            # count leading dots (relative) and find module dotted_name
+            dots = sum(1 for c in node.children if c.type == ".")
+            mod_node = node.child_by_field_name("module_name")
+            sub = _dotted(mod_node)
+            if dots:
+                up = dots - 1
+                base = pkg[: len(pkg) - up] if up <= len(pkg) else []
+                module = ".".join(base + ([sub] if sub else []))
+            else:
+                module = sub
+            for c in node.children:
+                if c.type == "dotted_name" and c is not mod_node:
+                    name = c.text.decode("utf-8")
+                    entries.append(ImportEntry(name, module, name, False))
+                elif c.type == "aliased_import":
+                    name = c.child_by_field_name("name").text.decode("utf-8")
+                    alias = c.child_by_field_name("alias").text.decode("utf-8")
+                    entries.append(ImportEntry(alias, module, name, False))
+                elif c.type == "wildcard_import":
+                    entries.append(ImportEntry("*", module, None, True))
+    return entries
