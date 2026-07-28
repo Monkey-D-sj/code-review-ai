@@ -8,35 +8,35 @@ def _nodes():
             for i, (q, k) in enumerate(zip([Q("m","a"), Q("m","b"), Q("m","c"), Q("m","d")], kinds))]
 
 
-def test_linear_chain_one_flow_per_reachable():
-    # a -> b -> c; one flow per reachable node (not just leaves)
+def test_linear_chain():
+    # a -> b -> c; one entry = one flow, all reachable nodes in BFS order
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","c"), "resolved")]
-    flows = build_flows(_nodes(), edges, ["a"])  # entry = a
-    paths = sorted(f.path for f in flows)
-    assert paths == [[0], [0, 1], [0, 1, 2]]
-    assert all(f.entry_point_id == 0 for f in flows)
+    flows = build_flows(_nodes(), edges, ["a"])
+    assert len(flows) == 1
+    assert flows[0].path == [0, 1, 2]
+    assert flows[0].entry_point_id == 0
 
 
 def test_diamond_no_path_explosion():
-    # a -> b -> d, a -> c -> d
+    # a -> b -> d, a -> c -> d; one flow, d appears once
     edges = [
         EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","d"), "resolved"),
         EdgeRow(Q("m","a"), Q("m","c"), "resolved"), EdgeRow(Q("m","c"), Q("m","d"), "resolved"),
     ]
     flows = build_flows(_nodes(), edges, ["a"])
-    to_d = [f for f in flows if f.path[-1] == 3]
-    assert len(to_d) == 1  # one shortest path to d, not two
+    assert len(flows) == 1
+    assert flows[0].path.count(3) == 1  # d appears once, not twice
 
 
 def test_cycle_handled():
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","a"), "resolved")]
     flows = build_flows(_nodes(), edges, ["a"])
-    # a reaches b; b not re-expanded to a (visited)
-    assert any(f.path == [0, 1] for f in flows)
-
+    assert len(flows) == 1
+    assert flows[0].path == [0, 1]  # a → b, no infinite loop
 
 
 def test_unresolved_edges_excluded():
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","c"), "unresolved")]
     flows = build_flows(_nodes(), edges, ["a"])
-    assert not any(f.path[-1] == 2 for f in flows)  # c unreachable
+    assert len(flows) == 1
+    assert 2 not in flows[0].path  # c unreachable

@@ -44,37 +44,32 @@ def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
         if s is not None and t is not None:
             adj[s].append(t)
 
-    # Detect entry points: functions/methods whose short name matches entry_names
-    entry_qnames: list[str] = []
+    flows: list[FlowRecord] = []
     for n in nodes:
-        if n.kind in ("function", "method"):
-            short = qname.short(n.qualified_name)
-            if any(fnmatch.fnmatch(short, pat) for pat in entry_names):
-                entry_qnames.append(n.qualified_name)
+        if n.kind not in ("function", "method"):
+            continue
+        short = qname.short(n.qualified_name)
+        if not any(fnmatch.fnmatch(short, pat) for pat in entry_names):
+            continue
+        entry_id = qname_to_id.get(n.qualified_name)
+        if entry_id is None:
+            continue
 
-    flows: list[FlowRecord] = []
-    for qn in entry_qnames:
-        entry_id = qname_to_id.get(qn)
-        if entry_id is not None:
-            flows.extend(_bfs_flows(entry_id, adj, id_to_file))
-    return flows
+        # BFS from entry, collect all reachable nodes into one flat path
+        visited: set[int] = {entry_id}
+        q: deque[int] = deque([entry_id])
+        path: list[int] = []
+        while q:
+            cur = q.popleft()
+            path.append(cur)
+            for nxt in adj.get(cur, []):
+                if nxt not in visited:
+                    visited.add(nxt)
+                    q.append(nxt)
 
-
-def _bfs_flows(entry: int, adj: dict[int, list[int]],
-               id_to_file: dict[int, str]) -> list[FlowRecord]:
-    visited: set[int] = {entry}
-    q: deque[tuple[int, list[int]]] = deque()
-    q.append((entry, [entry]))
-    flows: list[FlowRecord] = []
-    while q:
-        cur, path = q.popleft()
         files = {id_to_file.get(i, "") for i in path}
         flows.append(FlowRecord(
-            entry_point_id=entry, name="", depth=len(path) - 1,
+            entry_point_id=entry_id, name="", depth=0,
             node_count=len(path), file_count=len(files), path=path,
         ))
-        for nxt in adj.get(cur, []):
-            if nxt not in visited:
-                visited.add(nxt)
-                q.append((nxt, path + [nxt]))
     return flows
