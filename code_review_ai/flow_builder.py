@@ -31,7 +31,7 @@ def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
                 entry_point_ids: list[int], max_depth: int) -> list[FlowRecord]:
     qname_to_id = {n.qualified_name: n.id for n in nodes}
     id_to_file = {n.id: n.file_path for n in nodes}
-    adj: dict[int, list[int]] = defaultdict(list)
+    adj: dict[int, list[int]] = defaultdict(list)  # adjacency list: caller_id → [callee_ids]
     for e in edges:
         if e.resolution != "resolved":
             continue
