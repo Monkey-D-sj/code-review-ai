@@ -62,31 +62,32 @@ def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
 
 def _bfs_flows(entry: int, adj: dict[int, list[int]],
                id_to_file: dict[int, str]) -> list[FlowRecord]:
-    parent: dict[int, int | None] = {entry: None}
+    visited: set[int] = {entry}
+    parent: dict[int, int] = {}
     depth: dict[int, int] = {entry: 0}
     q = deque([entry])
     flows: list[FlowRecord] = []
     while q:
         cur = q.popleft()
-        path = _reconstruct(cur, parent)
+        path = _reconstruct(cur, parent, entry)
         files = {id_to_file.get(i, "") for i in path}
         flows.append(FlowRecord(
             entry_point_id=entry, name="", depth=depth[cur],
             node_count=len(path), file_count=len(files), path=path,
         ))
         for nxt in adj.get(cur, []):
-            if nxt not in parent:
+            if nxt not in visited:
+                visited.add(nxt)
                 parent[nxt] = cur
                 depth[nxt] = depth[cur] + 1
                 q.append(nxt)
     return flows
 
 
-def _reconstruct(node: int, parent: dict[int, int | None]) -> list[int]:
-    path: list[int] = []
-    cur: int | None = node
-    while cur is not None:
-        path.append(cur)
-        cur = parent[cur]
+def _reconstruct(node: int, parent: dict[int, int], entry: int) -> list[int]:
+    path: list[int] = [node]
+    while node != entry:
+        node = parent[node]
+        path.append(node)
     path.reverse()
     return path
