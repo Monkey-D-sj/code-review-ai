@@ -9,14 +9,12 @@ def _nodes():
 
 
 def test_linear_chain_one_flow_per_reachable():
-    # a -> b -> c
+    # a -> b -> c; only leaf c produces a flow
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","c"), "resolved")]
     flows = build_flows(_nodes(), edges, ["a"])  # entry = a
-    paths = sorted(f.path for f in flows)
-    assert [0, 1] in paths   # a -> b
-    assert [0, 1, 2] in paths  # a -> c
-    assert all(f.entry_point_id == 0 for f in flows)
-    # criticality lives on the DB row (NULL in v1), not on FlowRecord
+    assert len(flows) == 1
+    assert flows[0].path == [0, 1, 2]
+    assert flows[0].entry_point_id == 0
 
 
 def test_diamond_no_path_explosion():

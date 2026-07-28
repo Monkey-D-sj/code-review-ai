@@ -68,13 +68,14 @@ def _bfs_flows(entry: int, adj: dict[int, list[int]],
     flows: list[FlowRecord] = []
     while q:
         cur, path = q.popleft()
-        files = {id_to_file.get(i, "") for i in path}
-        flows.append(FlowRecord(
-            entry_point_id=entry, name="", depth=len(path) - 1,
-            node_count=len(path), file_count=len(files), path=path,
-        ))
-        for nxt in adj.get(cur, []):
-            if nxt not in visited:
-                visited.add(nxt)
-                q.append((nxt, path + [nxt]))
+        children = [nxt for nxt in adj.get(cur, []) if nxt not in visited]
+        if not children:
+            files = {id_to_file.get(i, "") for i in path}
+            flows.append(FlowRecord(
+                entry_point_id=entry, name="", depth=len(path) - 1,
+                node_count=len(path), file_count=len(files), path=path,
+            ))
+        for nxt in children:
+            visited.add(nxt)
+            q.append((nxt, path + [nxt]))
     return flows
