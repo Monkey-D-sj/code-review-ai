@@ -86,7 +86,7 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
         erows = [EdgeRow(r["source"], r["target"], r["resolution"])
                  for r in conn.execute("SELECT source,target,resolution FROM edges")]
         id_to_qname = {n.id: n.qualified_name for n in nodes}
-        flows = build_flows(nodes, erows, entry_qnames, config.max_depth)
+        flows = build_flows(nodes, erows, entry_qnames)
         for f in flows:
             name = qname.short(id_to_qname.get(f.entry_point_id, ""))
 

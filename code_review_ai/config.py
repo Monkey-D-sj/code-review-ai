@@ -8,7 +8,6 @@ DEFAULTS = dict(
     repo_path=".",
     db_path=".code-review-ai/index.db",
     diff_base="origin/main",
-    max_depth=10,
     watch_debounce_ms=500,
     entry_names=["main"],
     entry_decorators=[
@@ -23,7 +22,6 @@ class Config:
     repo_path: str
     db_path: str
     diff_base: str
-    max_depth: int
     watch_debounce_ms: int
     entry_names: list[str]
     entry_decorators: list[str]
