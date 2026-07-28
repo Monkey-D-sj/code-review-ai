@@ -28,10 +28,10 @@ class FlowRecord:
 
 
 def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
-                entry_point_ids: list[int], max_depth: int) -> list[FlowRecord]:
+                entry_qnames: list[str], max_depth: int) -> list[FlowRecord]:
     qname_to_id = {n.qualified_name: n.id for n in nodes}
     id_to_file = {n.id: n.file_path for n in nodes}
-    adj: dict[int, list[int]] = defaultdict(list)  # adjacency list: caller_id → [callee_ids]
+    adj: dict[int, list[int]] = defaultdict(list)  # adjacency list: target → [source]
     for e in edges:
         if e.resolution != "resolved":
             continue
@@ -41,8 +41,10 @@ def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
             adj[s].append(t)
 
     flows: list[FlowRecord] = []
-    for entry in entry_point_ids:
-        flows.extend(_bfs_flows(entry, adj, id_to_file, max_depth))
+    for qn in entry_qnames:
+        entry_id = qname_to_id.get(qn)
+        if entry_id is not None:
+            flows.extend(_bfs_flows(entry_id, adj, id_to_file, max_depth))
     return flows
 
 
