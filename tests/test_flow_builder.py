@@ -3,14 +3,15 @@ from code_review_ai.flow_builder import NodeRow, EdgeRow, build_flows
 
 
 def _nodes():
-    return [NodeRow(id=i, qualified_name=q, file_path="f.py")
-            for i, q in enumerate([Q("m","a"), Q("m","b"), Q("m","c"), Q("m","d")])]
+    kinds = ["function", "function", "function", "function"]
+    return [NodeRow(id=i, qualified_name=q, file_path="f.py", kind=k)
+            for i, (q, k) in enumerate(zip([Q("m","a"), Q("m","b"), Q("m","c"), Q("m","d")], kinds))]
 
 
 def test_linear_chain_one_flow_per_reachable():
     # a -> b -> c
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","c"), "resolved")]
-    flows = build_flows(_nodes(), edges, [Q("m","a")])  # entry = a
+    flows = build_flows(_nodes(), edges, ["a"])  # entry = a
     paths = sorted(f.path for f in flows)
     assert [0, 1] in paths   # a -> b
     assert [0, 1, 2] in paths  # a -> c
@@ -24,14 +25,14 @@ def test_diamond_no_path_explosion():
         EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","d"), "resolved"),
         EdgeRow(Q("m","a"), Q("m","c"), "resolved"), EdgeRow(Q("m","c"), Q("m","d"), "resolved"),
     ]
-    flows = build_flows(_nodes(), edges, [Q("m","a")])
+    flows = build_flows(_nodes(), edges, ["a"])
     to_d = [f for f in flows if f.path[-1] == 3]
     assert len(to_d) == 1  # one shortest path to d, not two
 
 
 def test_cycle_handled():
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","a"), "resolved")]
-    flows = build_flows(_nodes(), edges, [Q("m","a")])
+    flows = build_flows(_nodes(), edges, ["a"])
     # a reaches b; b not re-expanded to a (visited)
     assert any(f.path == [0, 1] for f in flows)
 
@@ -39,5 +40,5 @@ def test_cycle_handled():
 
 def test_unresolved_edges_excluded():
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","c"), "unresolved")]
-    flows = build_flows(_nodes(), edges, [Q("m","a")])
+    flows = build_flows(_nodes(), edges, ["a"])
     assert not any(f.path[-1] == 2 for f in flows)  # c unreachable

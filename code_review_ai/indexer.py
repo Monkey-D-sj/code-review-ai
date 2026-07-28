@@ -1,6 +1,5 @@
 from code_review_ai import qname
 
-import fnmatch
 import json
 import os
 import sqlite3
@@ -23,33 +22,12 @@ class RebuildStats:
     built_at: str
 
 
-def _entry_points(parsed, cfg: Config) -> list[str]:
-    """Return qnames of designated entry-point functions."""
-    out: list[str] = []
-    for pf in parsed:
-        for n in pf.nodes:
-            if n.kind not in ("function", "method"):
-                continue
-            short = qname.short(n.qualified_name)
-
-            if any(fnmatch.fnmatch(short, pat) for pat in cfg.entry_names):
-                out.append(n.qualified_name)
-    return out
-
-
-def _decorator_matches(pf, cfg: Config) -> list[str]:
-    # v1: entry_decorators matching requires decorator extraction in parser;
-    # skipped here (names cover common cases). Implement when parser exposes decorators.
-    return []
-
-
 def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
     repo = config.repo_path
     files = list_python_files(repo)
     parsed = [parse_file(os.path.join(repo, f), repo) for f in files]
     qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
     edges = resolve_calls(parsed, qnames)
-    entry_qnames = _entry_points(parsed, config)
 
     with transaction(conn):
         conn.execute("DELETE FROM flow_memberships")
@@ -81,12 +59,12 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
                 (e.source, e.target, e.kind, e.file_path, e.call_line, e.resolution),
             )
         # Phase B: load rows + build flows
-        nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"])
-                 for r in conn.execute("SELECT id,qualified_name,file_path FROM nodes")]
+        nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"], r["kind"])
+                 for r in conn.execute("SELECT id,qualified_name,file_path,kind FROM nodes")]
         erows = [EdgeRow(r["source"], r["target"], r["resolution"])
                  for r in conn.execute("SELECT source,target,resolution FROM edges")]
         id_to_qname = {n.id: n.qualified_name for n in nodes}
-        flows = build_flows(nodes, erows, entry_qnames)
+        flows = build_flows(nodes, erows, config.entry_names)
         for f in flows:
             name = qname.short(id_to_qname.get(f.entry_point_id, ""))
 
