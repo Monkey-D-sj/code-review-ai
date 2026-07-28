@@ -9,12 +9,12 @@ def _nodes():
 
 
 def test_linear_chain_one_flow_per_reachable():
-    # a -> b -> c; only leaf c produces a flow
+    # a -> b -> c; one flow per reachable node (not just leaves)
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","c"), "resolved")]
     flows = build_flows(_nodes(), edges, ["a"])  # entry = a
-    assert len(flows) == 1
-    assert flows[0].path == [0, 1, 2]
-    assert flows[0].entry_point_id == 0
+    paths = sorted(f.path for f in flows)
+    assert paths == [[0], [0, 1], [0, 1, 2]]
+    assert all(f.entry_point_id == 0 for f in flows)
 
 
 def test_diamond_no_path_explosion():
