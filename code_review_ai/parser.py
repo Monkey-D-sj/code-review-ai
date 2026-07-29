@@ -184,11 +184,6 @@ def list_source_files(repo_path: str, extensions: list[str] | None = None) -> li
     return sorted(files)
 
 
-def list_python_files(repo_path: str) -> list[str]:
-    """Backward-compatible wrapper — only lists *.py."""
-    return list_source_files(repo_path, ["*.py"])
-
-
 def filter_excluded(files: list[str], patterns: list[str]) -> list[str]:
     """Return files that do NOT match any exclude glob pattern.
 

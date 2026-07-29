@@ -9,6 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .idea
+.claude/
 
 # Code Review AI index
 .code-review-ai/
