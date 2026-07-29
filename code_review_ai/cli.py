@@ -44,17 +44,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "rebuild":
         stats = rebuild(cfg, conn)
         print(json.dumps({"nodes": stats.node_count, "edges": stats.edge_count,
-                          "flows": stats.flow_count, "built_at": stats.built_at}))
+                          "flows": stats.flow_count, "built_at": stats.built_at,
+                          "timings_ms": stats.stage_timings}))
     elif args.cmd == "query":
         changed = detect_changed_symbols(cfg, symbols=args.symbols, files=args.files)
         print(json.dumps(get_impact(conn, changed)))
     elif args.cmd == "search":
         import fnmatch
         rows = conn.execute(
-            "SELECT qualified_name,kind,file_path,start_line FROM nodes "
+            "SELECT qualified_name,kind,file_path,start_line,end_line FROM nodes "
             "WHERE kind IN ('function','method','class')").fetchall()
         out = [{"qname": r["qualified_name"], "kind": r["kind"],
-                "file": r["file_path"], "line": r["start_line"]}
+                "file": r["file_path"], "line": r["start_line"], "end_line": r["end_line"]}
                for r in rows if fnmatch.fnmatch(qname.short(r["qualified_name"]), args.query)]
         print(json.dumps(out))
     return 0

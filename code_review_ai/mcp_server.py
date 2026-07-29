@@ -26,7 +26,8 @@ def create_server(config: Config):
         """Rebuild the index from the working tree."""
         stats = rebuild(config, conn)
         return json.dumps({"nodes": stats.node_count, "edges": stats.edge_count,
-                           "flows": stats.flow_count, "built_at": stats.built_at})
+                           "flows": stats.flow_count, "built_at": stats.built_at,
+                           "timings_ms": stats.stage_timings})
 
     @mcp.tool()
     def get_impact(symbols: list[str] | None = None,

@@ -15,4 +15,7 @@ def test_cli_search(tmp_path, capsys):
                  "--db", str(tmp_path / "c.db")])
     assert code == 0
     out = json.loads(capsys.readouterr().out)
-    assert any(d["qname"] == Q("auth","login") for d in out)
+    assert any(d["qname"] == Q("auth", "login") for d in out)
+    # verify end_line is present
+    login = next(d for d in out if d["qname"] == Q("auth", "login"))
+    assert isinstance(login["end_line"], int) and login["end_line"] > login["line"]

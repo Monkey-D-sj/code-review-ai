@@ -14,22 +14,34 @@ from code_review_ai.parser import list_python_files, parse_file
 from code_review_ai.resolver import resolve_calls
 
 
+def _ms(seconds: float) -> float:
+    """Convert perf_counter delta to milliseconds, rounded to 1 decimal."""
+    return round(seconds * 1000, 1)
+
+
 @dataclass
 class RebuildStats:
     node_count: int
     edge_count: int
     flow_count: int
     built_at: str
+    stage_timings: dict[str, float]  # stage name → elapsed ms
 
 
 def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
     """Parse the tree, resolve calls, persist everything in one atomic
     transaction. Orchestration only — writing is delegated to the _write_*."""
+    t_start = time.perf_counter()
     repo = config.repo_path
     files = list_python_files(repo)
+    t_files = time.perf_counter()
+
     parsed = [parse_file(os.path.join(repo, f), repo) for f in files]
+    t_parse = time.perf_counter()
+
     qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
     edges = resolve_calls(parsed, qnames)
+    t_resolve = time.perf_counter()
 
     with transaction(conn):
         _clear_tables(conn)
@@ -37,7 +49,16 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
         _write_edges(conn, edges)
         flow_count = _write_flows(conn, parsed, edges, qname_to_id, config)
         built_at = _stamp_built_at(conn)
-    return RebuildStats(len(qname_to_id), len(edges), flow_count, built_at)
+    t_db = time.perf_counter()
+
+    timings = {
+        "list_files": _ms(t_files - t_start),
+        "parse": _ms(t_parse - t_files),
+        "resolve": _ms(t_resolve - t_parse),
+        "write_db": _ms(t_db - t_resolve),
+        "total": _ms(t_db - t_start),
+    }
+    return RebuildStats(len(qname_to_id), len(edges), flow_count, built_at, timings)
 
 
 def _clear_tables(conn: sqlite3.Connection) -> None:
