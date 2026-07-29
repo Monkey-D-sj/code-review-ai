@@ -2,12 +2,13 @@ from code_review_ai import qname
 
 import fnmatch
 import json
+import threading
 
 from code_review_ai.changes import detect_changed_symbols
 from code_review_ai.config import Config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.impact import get_impact as _get_impact
-from code_review_ai.indexer import rebuild
+from code_review_ai.indexer import ParseCache, rebuild
 
 
 def _conn(config: Config):
@@ -20,11 +21,14 @@ def create_server(config: Config):
     from mcp.server.fastmcp import FastMCP
     mcp = FastMCP("code-review-ai")
     conn = _conn(config)
+    cache = ParseCache()
+    lock = threading.Lock()
 
     @mcp.tool()
     def rebuild_index(force: bool = False) -> str:
         """Rebuild the index from the working tree."""
-        stats = rebuild(config, conn)
+        with lock:  # serialize against the watcher's rebuilds
+            stats = rebuild(config, conn, cache)
         return json.dumps({"nodes": stats.node_count, "edges": stats.edge_count,
                            "flows": stats.flow_count, "built_at": stats.built_at,
                            "timings_ms": stats.stage_timings})
@@ -72,8 +76,10 @@ def create_server(config: Config):
         return json.dumps([{"qname": r["qualified_name"], "name": r["name"],
                             "file": r["file_path"]} for r in rows])
 
-    # attach conn for the watcher to share
+    # attach conn/cache/lock for main() to wire into startup + watcher
     mcp._conn = conn
+    mcp._cache = cache
+    mcp._lock = lock
     return mcp
 
 
@@ -85,8 +91,9 @@ def main():
     logging.basicConfig(level=logging.INFO)
     config = load_config()
     server = create_server(config)
-    startup_rebuild(config, server._conn)
-    t = threading.Thread(target=run_watcher, args=(config, server._conn), daemon=True)
+    startup_rebuild(config, server._conn, server._cache, server._lock)
+    t = threading.Thread(target=run_watcher,
+                         args=(config, server._cache, server._lock), daemon=True)
     t.start()
     server.run()
 

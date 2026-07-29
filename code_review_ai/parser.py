@@ -1,5 +1,6 @@
 
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -9,7 +10,22 @@ import tree_sitter_python as tspython
 from tree_sitter import Language, Parser
 
 PY_LANGUAGE = Language(tspython.language())
-_PARSER = Parser(PY_LANGUAGE)
+_TLS = threading.local()
+
+
+def _parser() -> Parser:
+    """A per-thread Parser.
+
+    tree-sitter's Parser is not thread-safe (it holds mutable parse state),
+    so the watcher rebuild thread and the main thread's diff-parsing
+    (changes.detect_changed_symbols) must not share one. Each thread lazily
+    gets its own.
+    """
+    p = getattr(_TLS, "parser", None)
+    if p is None:
+        p = Parser(PY_LANGUAGE)
+        _TLS.parser = p
+    return p
 
 # Language-specific node-type configuration. Add a new entry per language.
 LANG = {
@@ -130,7 +146,7 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
         lang = LANG["python"]
     module_qname = _module_qname(file_path, repo_root)
     source = Path(file_path).read_bytes()
-    tree = _PARSER.parse(source)
+    tree = _parser().parse(source)
     root = tree.root_node
 
     pf = ParsedFile(file_path=file_path, module_qname=module_qname)

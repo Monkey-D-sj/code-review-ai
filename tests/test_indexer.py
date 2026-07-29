@@ -1,6 +1,6 @@
 from code_review_ai.config import Config, load_config
 from code_review_ai.db import connect, init_schema
-from code_review_ai.indexer import rebuild, is_stale
+from code_review_ai.indexer import ParseCache, rebuild, is_stale
 
 from conftest import FIXTURES as FIX
 
@@ -57,5 +57,42 @@ def test_is_stale_detects_mtime(tmp_path):
     os.utime(p, (fut, fut))
     try:
         assert is_stale(cfg, conn) is True
+    finally:
+        os.utime(p, (orig_mtime, orig_mtime))
+
+
+def test_rebuild_cache_skips_unchanged_files(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    cache = ParseCache()
+    import code_review_ai.indexer as idx
+    calls = {"n": 0}
+    real = idx.parse_file
+
+    def counting(path, repo, lang=None):
+        calls["n"] += 1
+        return real(path, repo, lang)
+
+    monkeypatch.setattr(idx, "parse_file", counting)
+
+    rebuild(cfg, conn, cache)          # prime: parses every file
+    assert calls["n"] > 0
+
+    calls["n"] = 0
+    stats2 = rebuild(cfg, conn, cache)  # nothing changed -> all cache hits
+    assert calls["n"] == 0
+    assert stats2.node_count > 0
+
+    # touch one file's mtime -> only that file re-parses
+    import os, time
+    p = "tests/fixtures/repo/util.py"
+    orig_mtime = os.path.getmtime(p)
+    fut = time.time() + 100
+    os.utime(p, (fut, fut))
+    try:
+        calls["n"] = 0
+        rebuild(cfg, conn, cache)
+        assert calls["n"] == 1
     finally:
         os.utime(p, (orig_mtime, orig_mtime))
