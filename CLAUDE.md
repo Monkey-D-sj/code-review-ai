@@ -69,14 +69,14 @@ MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get
 
 The authoritative design doc (in Chinese) is `docs/superpowers/specs/2026-07-24-code-review-ai-design.md` — read it for intent on data model, resolution semantics, and lifecycle. Note where the code has since diverged (flow model, see above). `.superpowers/sdd/` holds task briefs/reports from the spec-driven build; `progress.md` tracks the 11 completed tasks.
 
-# 代码架构规范（强制）
+## 代码架构规范（强制）
 
-## 核心原则
+### 核心原则
 - **高内聚**：每个函数/类单一职责。函数体 ≤ 50行，类 ≤ 300行。
 - **低耦合**：业务层禁止直接依赖外部库（DB、IO、第三方API），必须通过接口/抽象层隔离。
 - **长逻辑拆分**：任何包含 ≥3个步骤、或嵌套 ≥2层的逻辑，强制拆分为语义清晰的子函数。
 
-## 代码组织
+### 代码组织
 主控函数只做三件事：
 1. 参数准备/校验
 2. 调用子函数（编排顺序）

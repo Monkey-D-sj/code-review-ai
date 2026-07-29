@@ -134,13 +134,16 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     root = tree.root_node
 
     pf = ParsedFile(file_path=file_path, module_qname=module_qname)
+    # 当前文件 module
     pf.nodes.append(ParsedNode(
         qualified_name=module_qname, kind="module", file_path=file_path,
         start_line=1, end_line=root.end_point[0] + 1,
         signature="", parent_qname=None,
     ))
 
+    # handle nodes
     _walk_defs_typed(root, source, module_qname, None, None, lang, pf.nodes)
+    # handle edges
     _walk_calls(root, module_qname, None, lang, pf.raw_calls)
     pf.imports = _extract_imports(root, module_qname, lang)
 
