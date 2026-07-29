@@ -14,6 +14,7 @@ DEFAULTS = dict(
         "app.route", "click.command",
         "router.get", "router.post", "celery.task",
     ],
+    exclude=["*/test*", "*/migrations/*", ".venv/*", "node_modules/*"],
 )
 
 
@@ -25,6 +26,7 @@ class Config:
     watch_debounce_ms: int
     entry_names: list[str]
     entry_decorators: list[str]
+    exclude: list[str]
 
 
 def _load_toml(repo_path: str) -> dict:

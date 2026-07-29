@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`code-review-ai` parses a Python codebase with tree-sitter, persists a call graph + call flows to SQLite, and exposes impact-chain queries over MCP so an AI reviewer can pull only the relevant call chain instead of reading whole files. The core is a plain library; `mcp_server.py` (primary) and `cli.py` (optional/manual) are thin frontends. Python 3.14, managed with `uv`. Single-language (Python) today, but the parser is data-driven for future grammars.
+`code-review-ai` parses a Python codebase with tree-sitter, persists a call graph + call flows to SQLite, and exposes impact-chain queries over MCP so an AI reviewer can pull only the relevant call chain instead of reading whole files. The core is a plain library; `mcp_server.py` (primary) and `cli.py` (optional/manual) are thin frontends. Python 3.14, managed with `uv`. Supports Python, TypeScript, and JavaScript; the parser is data-driven — add a LANG entry + grammar to extend.
 
 ## Commands
 

@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from code_review_ai.config import Config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.indexer import ParseCache, is_stale, rebuild
+from code_review_ai.parser import SOURCE_SUFFIXES
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def run_watcher(config: Config, cache: ParseCache | None,
     debounce = max(config.watch_debounce_ms, 50)
     try:
         for changes in watch(config.repo_path, debounce=debounce,
-                             watch_filter=_py_only, stop_event=stop_event):
+                             watch_filter=_source_file, stop_event=stop_event):
             if stop_event.is_set():
                 break
             log.info("detected %d changes; rebuilding", len(changes))
@@ -53,6 +54,6 @@ def run_watcher(config: Config, cache: ParseCache | None,
         return
 
 
-def _py_only(change, path):
+def _source_file(change, path):
     import os
-    return path.endswith(".py") and os.path.isfile(path)
+    return path.endswith(SOURCE_SUFFIXES) and os.path.isfile(path)

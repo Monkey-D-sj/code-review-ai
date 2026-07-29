@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from code_review_ai.config import Config
 from code_review_ai.db import transaction
 from code_review_ai.flow_builder import NodeRow, EdgeRow, FlowRecord, build_flows
-from code_review_ai.parser import ParsedFile, list_python_files, parse_file
+from code_review_ai.parser import ParsedFile, SOURCE_GLOBS, filter_excluded, list_source_files, parse_file
 from code_review_ai.resolver import resolve_calls
 
 
@@ -91,7 +91,10 @@ def rebuild(config: Config, conn: sqlite3.Connection,
     transaction. Orchestration only — writing is delegated to the _write_*."""
     t_start = time.perf_counter()
     repo = config.repo_path
-    files = list_python_files(repo)
+    files = filter_excluded(
+        list_source_files(repo, SOURCE_GLOBS),
+        config.exclude,
+    )
     t_files = time.perf_counter()
 
     parsed = _parse_files(files, repo, cache)
@@ -133,7 +136,7 @@ def _write_nodes(conn, parsed) -> dict[str, int]:
     conn.executemany(
         "INSERT INTO nodes(qualified_name,kind,language,file_path,"
         "start_line,end_line,signature,parent_id) VALUES(?,?,?,?,?,?,?,NULL)",
-        [(n.qualified_name, n.kind, "python", n.file_path,
+        [(n.qualified_name, n.kind, n.language, n.file_path,
           n.start_line, n.end_line, n.signature)
          for pf in parsed for n in pf.nodes],
     )
@@ -202,7 +205,10 @@ def is_stale(config: Config, conn: sqlite3.Connection) -> bool:
         return True
     dt = datetime.datetime.strptime(row["value"], "%Y-%m-%dT%H:%M:%S.%f")
     built = time.mktime(dt.timetuple())
-    files = list_python_files(config.repo_path)
+    files = filter_excluded(
+        list_source_files(config.repo_path, SOURCE_GLOBS),
+        config.exclude,
+    )
     for f in files:
         try:
             if os.path.getmtime(os.path.join(config.repo_path, f)) > built:
