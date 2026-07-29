@@ -11,7 +11,8 @@ def test_init_schema_creates_tables(tmp_path):
             "SELECT name FROM sqlite_master WHERE type='table'"
         )
     }
-    assert {"nodes", "edges", "flows", "flow_memberships"} <= names
+    assert {"nodes", "edges", "flows", "flow_memberships",
+            "communities", "community_memberships"} <= names
     # WAL enabled
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 

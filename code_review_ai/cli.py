@@ -34,6 +34,9 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("search")
     _add_common(sp)
     sp.add_argument("query")
+    sp = sub.add_parser("communities")
+    _add_common(sp)
+    sp.add_argument("--symbol", default=None)
 
     args = p.parse_args(argv)
     cfg = load_config(args.repo)
@@ -54,10 +57,17 @@ def main(argv: list[str] | None = None) -> int:
         rows = conn.execute(
             "SELECT qualified_name,kind,file_path,start_line,end_line FROM nodes "
             "WHERE kind IN ('function','method','class')").fetchall()
-        out = [{"qname": r["qualified_name"], "kind": r["kind"],
-                "file": r["file_path"], "line": r["start_line"], "end_line": r["end_line"]}
-               for r in rows if fnmatch.fnmatch(qname.short(r["qualified_name"]), args.query)]
-        print(json.dumps(out))
+        matches = [r for r in rows
+                   if fnmatch.fnmatch(qname.short(r["qualified_name"]), args.query)]
+        for r in matches:
+            print(f"{r['qualified_name']}  {r['kind']}  {r['file_path']}:{r['start_line']}-{r['end_line']}")
+    elif args.cmd == "communities":
+        from code_review_ai.community import list_communities, get_community
+        if args.symbol:
+            print(json.dumps(get_community(conn, args.symbol), indent=2, ensure_ascii=False))
+        else:
+            for c in list_communities(conn):
+                print(f"{c['id']}  {c['label']}  nodes={c['node_count']}  modularity={c['modularity']}")
     return 0
 
 

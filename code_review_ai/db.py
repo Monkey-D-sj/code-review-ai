@@ -40,6 +40,17 @@ CREATE TABLE IF NOT EXISTS flow_memberships (
     position INTEGER,
     PRIMARY KEY (flow_id, node_id)
 );
+CREATE TABLE IF NOT EXISTS communities (
+    id INTEGER PRIMARY KEY,
+    label TEXT,
+    node_count INTEGER,
+    modularity REAL
+);
+CREATE TABLE IF NOT EXISTS community_memberships (
+    community_id INTEGER,
+    node_id INTEGER,
+    PRIMARY KEY (community_id, node_id)
+);
 CREATE TABLE IF NOT EXISTS build_meta (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -47,6 +58,7 @@ CREATE TABLE IF NOT EXISTS build_meta (
 CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
 CREATE INDEX IF NOT EXISTS idx_memberships_node ON flow_memberships(node_id);
+CREATE INDEX IF NOT EXISTS idx_community_memberships_node ON community_memberships(node_id);
 """
 
 

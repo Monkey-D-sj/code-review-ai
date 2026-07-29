@@ -45,14 +45,20 @@ def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
             adj[s].append(t)
 
     flows: list[FlowRecord] = []
+    has_incoming = {qname_to_id.get(e.target) for e in edges
+                    if e.resolution == "resolved"}
+    has_incoming.discard(None)
+
     for n in nodes:
         if n.kind not in ("function", "method"):
             continue
         short = qname.short(n.qualified_name)
-        if not any(fnmatch.fnmatch(short, pat) for pat in entry_names):
-            continue
         entry_id = qname_to_id.get(n.qualified_name)
         if entry_id is None:
+            continue
+        name_match = any(fnmatch.fnmatch(short, pat) for pat in entry_names)
+        is_root = entry_id not in has_incoming
+        if not name_match and not is_root:
             continue
 
         # BFS from entry, collect all reachable nodes into one flat path

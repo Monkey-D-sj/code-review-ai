@@ -18,10 +18,12 @@ uv run code-review-ai rebuild --repo . --db .code-review-ai/index.db   # build i
 uv run code-review-ai query   --symbols auth::login        # impact for given symbols
 uv run code-review-ai query   --files path/to/file.py      # impact via git diff of files
 uv run code-review-ai search  "login"                       # glob-match symbol short names
+uv run code-review-ai communities [--symbol auth::login]    # list communities, or one symbol's community
+uv sync --extra community                                    # opt: install leidenalg+igraph for Phase C
 uv run code-review-ai-mcp                                    # run the MCP server (stdio)
 ```
 
-`rebuild`/`query`/`search` also accept no `--repo`/`--db` (defaults: `.` and `.code-review-ai/index.db`). Tests import `from conftest import Q` (where `Q = qname.join`) and `FIXTURES` (path to the synthetic repo in `tests/fixtures/repo`); `tests/` is on `sys.path` via the root conftest.
+`rebuild`/`query`/`search`/`communities` also accept no `--repo`/`--db` (defaults: `.` and `.code-review-ai/index.db`). Tests import `from conftest import Q` (where `Q = qname.join`) and `FIXTURES` (path to the synthetic repo in `tests/fixtures/repo`); `tests/` is on `sys.path` via the root conftest.
 
 ## Architecture: the rebuild pipeline
 
@@ -33,14 +35,16 @@ git ls-files *.py
   → resolver.resolve_calls   (import-aware → Edge with resolution label)
   → _write_nodes / _write_edges          (Phase A: persist graph)
   → flow_builder.build_flows → _write_flows   (Phase B: materialize flows)
+  → community.build_communities → _write_communities   (Phase C: detect communities, opt-in)
 ```
 
 - **Phase A vs B are decoupled.** Phase B builds flows from the in-memory nodes/edges already produced by Phase A — it does **not** re-read the DB. The flow algorithm can change without touching parsing.
+- **Phase C (communities) is opt-in and degrades gracefully.** `community.build_communities` runs only when `config.community_detection` is set; it builds an undirected, call-count-weighted graph from `resolution='resolved'` edges (symmetrized, self-loops dropped) and partitions it via an injectable `partitioner` (default lazy-imports `leidenalg`/`igraph`, `seed=42`). If the libs are missing, `_write_communities` logs and skips — the rest of the index commits normally. Only nodes on a resolved edge get a community; isolates are excluded.
 - `db.transaction()` wraps the whole rebuild; on failure it rolls back and the old WAL-committed index survives. Readers during a rebuild see the previous committed index (atomic switch).
 
 ### Module responsibilities (one each, no cycles)
 
-`parser.py` tree-sitter → nodes/raw-calls/imports · `resolver.py` import-aware call resolution → edges · `flow_builder.py` adjacency + BFS → flows · `indexer.py` rebuild orchestration · `changes.py` git diff / files / symbols → changed qnames · `impact.py` membership slicing + edge fallback → impact · `watcher.py` watchfiles debounce → trigger rebuild · `config.py` layered config · `db.py` SQLite schema/WAL/txn · `mcp_server.py` / `cli.py` frontends.
+`parser.py` tree-sitter → nodes/raw-calls/imports · `resolver.py` import-aware call resolution → edges · `flow_builder.py` adjacency + BFS → flows · `community.py` Leiden community detection over resolved edges (opt-in) → communities · `indexer.py` rebuild orchestration · `changes.py` git diff / files / symbols → changed qnames · `impact.py` membership slicing + edge fallback → impact · `watcher.py` watchfiles debounce → trigger rebuild · `config.py` layered config · `db.py` SQLite schema/WAL/txn · `mcp_server.py` / `cli.py` frontends.
 
 ## Conventions you must follow
 
@@ -57,13 +61,15 @@ dynamic/unresolved edges are kept (so the AI can see resolution gaps) but never 
 
 **Impact query** (`impact.get_impact`): for a changed symbol, look up `flow_memberships WHERE node_id = symbol`; within each flow, `position <` symbol = upstream callers, `position >` = downstream callees, and that flow's `entry_point` = an affected business entry. If the symbol is on no flow, fall back to direct `edges` lookups (`target=` callers, `source=` callees).
 
+**Community detection** (`community.build_communities` / `community.get_community`): communities persist to `communities` + `community_memberships` (mirror of `flows`/`flow_memberships`). `get_community(qname)` returns the symbol's community label, modularity, and co-members — the *horizontal* blast radius, complementing impact's *vertical* caller/callee chains. A symbol on no resolved edge returns `not in any community`.
+
 ## Config
 
-Layered in `config.py`: `DEFAULTS` dict → `[tool.code-review-ai]` in `pyproject.toml` (or a standalone `cr-ai.toml`) → env `CRAI_<UPPER_KEY>` (highest priority). Notable keys: `diff_base` (default `origin/main`), `entry_names` (glob patterns matched against a function's short name to identify entry points), `entry_decorators` (loaded but **not yet consumed** — entry-point matching is name-glob only), `watch_debounce_ms`.
+Layered in `config.py`: `DEFAULTS` dict → `[tool.code-review-ai]` in `pyproject.toml` (or a standalone `cr-ai.toml`) → env `CRAI_<UPPER_KEY>` (highest priority). Notable keys: `diff_base` (default `origin/main`), `entry_names` (glob patterns matched against a function's short name to identify entry points), `entry_decorators` (loaded but **not yet consumed** — entry-point matching is name-glob only), `watch_debounce_ms`, `community_detection` (bool, default `false` — gates Phase C; env `CRAI_COMMUNITY_DETECTION`).
 
 ## Frontends
 
-MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get_impact`, `search_symbol`, `get_symbol_detail`, `list_entry_points`. On startup it runs a catch-up rebuild if the index is stale (`is_stale` compares file mtimes to `build_meta.built_at`), then a daemon thread runs `watchfiles` to debounce-rebuild on `.py` changes. CLI (`code-review-ai`) mirrors `rebuild`/`query`/`search` for manual use.
+MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get_impact`, `search_symbol`, `get_symbol_detail`, `list_entry_points`, `get_communities`, `get_community`. On startup it runs a catch-up rebuild if the index is stale (`is_stale` compares file mtimes to `build_meta.built_at`), then a daemon thread runs `watchfiles` to debounce-rebuild on `.py` changes. CLI (`code-review-ai`) mirrors `rebuild`/`query`/`search`/`communities` for manual use.
 
 ## Design spec & dev history
 

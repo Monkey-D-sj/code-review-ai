@@ -70,6 +70,20 @@ def test_lang_for_path():
     assert _lang_for_path("foo.cjs")[0] == "javascript"
 
 
+def test_parse_vue_sfc():
+    pf = parse_file(os.path.join(FIX, "HelloWorld.vue"), FIX)
+    assert pf.language == "typescript"
+
+    qnames = {n.qualified_name for n in pf.nodes}
+    assert "HelloWorld" in qnames
+    assert Q("HelloWorld", "greet") in qnames
+
+    # should pick up import from script block
+    imps = {i.local_name: i for i in pf.imports}
+    assert "ref" in imps
+    assert imps["ref"].module == "vue"
+
+
 def test_parse_ts_method_in_class():
     """Verify method_definition inside class_declaration gets kind='method'."""
     pf = _parse("auth.ts")

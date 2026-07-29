@@ -1,5 +1,6 @@
 
 import fnmatch
+import re
 import subprocess
 import threading
 from dataclasses import dataclass, field
@@ -96,6 +97,7 @@ _EXT_MAP: dict[str, tuple[str, dict, Language]] = {
     ".mjs": ("javascript", LANG["javascript"], TS_LANGUAGE),
     ".cjs": ("javascript", LANG["javascript"], TS_LANGUAGE),
     ".jsx": ("javascript", LANG["javascript"], TSX_LANGUAGE),
+    ".vue": ("typescript", LANG["typescript"], TS_LANGUAGE),
 }
 
 # Public — derived from _EXT_MAP, single source of truth for file matching.
@@ -225,6 +227,11 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
     for child in node.children:
         t = child.type
         if t in lang["def_nodes"]:
+            # method_definition outside a class is just an object-literal
+            # shorthand — not a real definition
+            if t == "method_definition" and parent_kind != "class":
+                _walk_defs_typed(child, source, module_qname, scope_qname, parent_kind, lang, output)
+                continue
             name_node = child.child_by_field_name("name")
             if name_node is None:
                 continue  # anonymous function/class — skip
@@ -276,14 +283,20 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
         ts_lang = PY_LANGUAGE
     module_qname = _module_qname(file_path, repo_root)
     source = Path(file_path).read_bytes()
+    line_offset = 0
+    original_line_count = 0
+    if file_path.endswith(".vue"):
+        original_line_count = source.count(b"\n") + 1
+        source, line_offset = _extract_vue_script(source)
     tree = _parser(ts_lang).parse(source)
     root = tree.root_node
 
     pf = ParsedFile(file_path=file_path, module_qname=module_qname, language=lang_name)
-    # 当前文件 module
+    # 当前文件 module — use original file range for .vue
+    mod_end = original_line_count or root.end_point[0] + 1
     pf.nodes.append(ParsedNode(
         qualified_name=module_qname, kind="module", file_path=file_path,
-        start_line=1, end_line=root.end_point[0] + 1,
+        start_line=1, end_line=mod_end,
         signature="", parent_qname=None,
     ))
 
@@ -293,12 +306,17 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     _walk_calls(root, module_qname, None, lang, pf.raw_calls)
     pf.imports = _extract_imports(root, module_qname, lang, lang_name)
 
-    # Batch-fill file_path and language — constant across one file
+    # Batch-fill file_path, language, and apply line offset — constant across one file
     for n in pf.nodes:
         n.file_path = file_path
         n.language = lang_name
+        if line_offset and n.kind != "module":
+            n.start_line += line_offset
+            n.end_line += line_offset
     for c in pf.raw_calls:
         c.file_path = file_path
+        if line_offset:
+            c.call_line += line_offset
 
     return pf
 
@@ -461,6 +479,28 @@ def _extract_imports_esm(root, lang) -> list[ImportEntry]:
                             local = alias_node.text.decode("utf-8") if alias_node else name
                             entries.append(ImportEntry(local, source, name, False))
     return entries
+
+
+_VUE_SCRIPT_RE = re.compile(r"<script[^>]*>(.*?)</script>", re.DOTALL)
+
+
+def _extract_vue_script(source: bytes) -> tuple[bytes, int]:
+    """Extract concatenated <script> blocks from a .vue SFC.
+
+    Returns (script_bytes, line_offset) where line_offset is the 0-based
+    line index of the first script block's content, to be added to all
+    line numbers from tree-sitter (which are 0-based).
+    """
+    text = source.decode("utf-8")
+    match = _VUE_SCRIPT_RE.search(text)
+    if match is None:
+        return source, 0
+    # Count newlines before the match end of the opening tag
+    # <script ...>\n  ← content starts here
+    tag_end = match.start(1)  # start of group 1 = start of script content
+    line_offset = text[:tag_end].count("\n")
+    parts = _VUE_SCRIPT_RE.findall(text)
+    return "\n".join(parts).encode("utf-8"), line_offset
 
 
 def _find_child(node, child_type: str):

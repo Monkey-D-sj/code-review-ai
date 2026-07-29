@@ -2,6 +2,7 @@ from code_review_ai.config import Config, load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.indexer import ParseCache, rebuild, is_stale
 
+import pytest
 from conftest import FIXTURES as FIX
 
 
@@ -24,6 +25,22 @@ def test_rebuild_writes_all_tables(tmp_path):
     assert conn.execute(
         "SELECT COUNT(*) FROM flows WHERE name='main'"
     ).fetchone()[0] > 0
+    # community detection is opt-in (default off) -> nothing written
+    assert stats.community_count == 0
+    assert conn.execute("SELECT COUNT(*) FROM communities").fetchone()[0] == 0
+
+
+def test_rebuild_writes_communities_when_enabled(tmp_path):
+    pytest.importorskip("leidenalg")
+    cfg = _cfg(tmp_path)
+    cfg.community_detection = True
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    stats = rebuild(cfg, conn)
+    assert stats.community_count > 0
+    members = conn.execute("SELECT COUNT(*) FROM community_memberships").fetchone()[0]
+    total = conn.execute("SELECT SUM(node_count) FROM communities").fetchone()[0]
+    assert members == total
 
 
 def test_rebuild_atomic_on_failure_preserves_old(tmp_path, monkeypatch):

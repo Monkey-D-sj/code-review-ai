@@ -5,6 +5,8 @@ import json
 import threading
 
 from code_review_ai.changes import detect_changed_symbols
+from code_review_ai.community import get_community as _get_community
+from code_review_ai.community import list_communities as _list_communities
 from code_review_ai.config import Config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.impact import get_impact as _get_impact
@@ -75,6 +77,17 @@ def create_server(config: Config):
         ).fetchall()
         return json.dumps([{"qname": r["qualified_name"], "name": r["name"],
                             "file": r["file_path"]} for r in rows])
+
+    @mcp.tool()
+    def get_communities() -> str:
+        """List all detected communities and their member symbols."""
+        return json.dumps(_list_communities(conn))
+
+    @mcp.tool()
+    def get_community(qualified_name: str) -> str:
+        """Return the community a symbol belongs to, with its co-members
+        (the symbol's structural blast radius)."""
+        return json.dumps(_get_community(conn, qualified_name))
 
     # attach conn/cache/lock for main() to wire into startup + watcher
     mcp._conn = conn

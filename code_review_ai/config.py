@@ -14,7 +14,8 @@ DEFAULTS = dict(
         "app.route", "click.command",
         "router.get", "router.post", "celery.task",
     ],
-    exclude=["*/test*", "*/migrations/*", ".venv/*", "node_modules/*"],
+    exclude=["*/test*", "*/migrations/*", "dist/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
+    community_detection=False,
 )
 
 
@@ -27,6 +28,7 @@ class Config:
     entry_names: list[str]
     entry_decorators: list[str]
     exclude: list[str]
+    community_detection: bool
 
 
 def _load_toml(repo_path: str) -> dict:
@@ -45,7 +47,9 @@ def load_config(repo_path: str = ".") -> Config:
     for key in DEFAULTS:
         env = os.environ.get(f"CRAI_{key.upper()}")
         if env is not None:
-            if isinstance(DEFAULTS[key], int):
+            if isinstance(DEFAULTS[key], bool):
+                raw[key] = env.lower() in ("1", "true", "yes", "on")
+            elif isinstance(DEFAULTS[key], int):
                 raw[key] = int(env)
             elif isinstance(DEFAULTS[key], list):
                 raw[key] = env.split(",")

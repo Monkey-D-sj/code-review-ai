@@ -9,12 +9,14 @@ def _nodes():
 
 
 def test_linear_chain():
-    # a -> b -> c; one entry = one flow, all reachable nodes in BFS order
+    # a -> b -> c; a matches name; d is root (no incoming)
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","c"), "resolved")]
     flows = build_flows(_nodes(), edges, ["a"])
-    assert len(flows) == 1
-    assert flows[0].path == [0, 1, 2]
-    assert flows[0].entry_point_id == 0
+    assert len(flows) == 2  # a (name match) + d (root, no incoming)
+    flow_a = next(f for f in flows if f.entry_point_id == 0)
+    assert flow_a.path == [0, 1, 2]
+    flow_d = next(f for f in flows if f.entry_point_id == 3)
+    assert flow_d.path == [3]
 
 
 def test_diamond_no_path_explosion():
@@ -31,12 +33,19 @@ def test_diamond_no_path_explosion():
 def test_cycle_handled():
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","a"), "resolved")]
     flows = build_flows(_nodes(), edges, ["a"])
-    assert len(flows) == 1
-    assert flows[0].path == [0, 1]  # a → b, no infinite loop
+    # a (name match) + c (root) + d (root) = 3
+    assert len(flows) == 3
+    flow_a = next(f for f in flows if f.entry_point_id == 0)
+    assert flow_a.path == [0, 1]  # a → b, no infinite loop
 
 
 def test_unresolved_edges_excluded():
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","c"), "unresolved")]
     flows = build_flows(_nodes(), edges, ["a"])
-    assert len(flows) == 1
-    assert 2 not in flows[0].path  # c unreachable
+    # a (name match) + c (root — b→c is unresolved, so c has no incoming) + d (root)
+    assert len(flows) == 3
+    flow_a = next(f for f in flows if f.entry_point_id == 0)
+    assert 2 not in flow_a.path  # c unreachable from a (unresolved edge)
+    # c gets its own root flow since unresolved edges don't count as inbound
+    flow_c = next(f for f in flows if f.entry_point_id == 2)
+    assert flow_c.path == [2]

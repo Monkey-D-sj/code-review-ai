@@ -7,6 +7,7 @@ import datetime
 import time
 from dataclasses import dataclass
 
+from code_review_ai.community import build_communities
 from code_review_ai.config import Config
 from code_review_ai.db import transaction
 from code_review_ai.flow_builder import NodeRow, EdgeRow, FlowRecord, build_flows
@@ -58,6 +59,7 @@ class RebuildStats:
     node_count: int
     edge_count: int
     flow_count: int
+    community_count: int
     built_at: str
     stage_timings: dict[str, float]  # stage name → elapsed ms
 
@@ -109,6 +111,9 @@ def rebuild(config: Config, conn: sqlite3.Connection,
         qname_to_id = _write_nodes(conn, parsed)
         _write_edges(conn, edges)
         flow_count = _write_flows(conn, parsed, edges, qname_to_id, config)
+        t_comm_start = time.perf_counter()
+        community_count = _write_communities(conn, parsed, edges, qname_to_id, config)
+        t_communities = _ms(time.perf_counter() - t_comm_start)
         built_at = _stamp_built_at(conn)
     t_db = time.perf_counter()
 
@@ -117,15 +122,19 @@ def rebuild(config: Config, conn: sqlite3.Connection,
         "parse": _ms(t_parse - t_files),
         "resolve": _ms(t_resolve - t_parse),
         "write_db": _ms(t_db - t_resolve),
+        "communities": t_communities,
         "total": _ms(t_db - t_start),
     }
-    return RebuildStats(len(qname_to_id), len(edges), flow_count, built_at, timings)
+    return RebuildStats(len(qname_to_id), len(edges), flow_count,
+                        community_count, built_at, timings)
 
 
 def _clear_tables(conn: sqlite3.Connection) -> None:
     """Delete every table, child-first for FK safety on nodes.parent_id."""
     conn.execute("DELETE FROM flow_memberships")
     conn.execute("DELETE FROM flows")
+    conn.execute("DELETE FROM community_memberships")
+    conn.execute("DELETE FROM communities")
     conn.execute("DELETE FROM edges")
     conn.execute("DELETE FROM nodes")
 
@@ -190,6 +199,40 @@ def _write_flows(conn, parsed, edges, qname_to_id: dict[str, int],
             membership_rows,
         )
     return len(flows)
+
+
+def _write_communities(conn, parsed, edges, qname_to_id: dict[str, int],
+                       config: Config) -> int:
+    """Phase C: detect communities over the resolved call graph and persist.
+    Opt-in via config.community_detection; skipped (return 0) when disabled or
+    when leidenalg/igraph are not installed. Other errors propagate and roll
+    back the rebuild transaction, matching _write_flows semantics."""
+    if not config.community_detection:
+        return 0
+    nodes = [NodeRow(qname_to_id[n.qualified_name], n.qualified_name,
+                     n.file_path, n.kind)
+             for pf in parsed for n in pf.nodes]
+    erows = [EdgeRow(e.source, e.target, e.resolution) for e in edges]
+    try:
+        communities = build_communities(nodes, erows)
+    except ImportError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "leidenalg/igraph not installed; skipping community detection "
+            "(install with: uv sync --extra community)")
+        return 0
+    membership_rows: list[tuple[int, int]] = []
+    for c in communities:
+        cur = conn.execute(
+            "INSERT INTO communities(label,node_count,modularity) VALUES(?,?,?)",
+            (c.label, len(c.members), c.modularity))
+        cid = cur.lastrowid
+        membership_rows.extend((cid, nid) for nid in c.members)
+    if membership_rows:
+        conn.executemany(
+            "INSERT INTO community_memberships(community_id,node_id) VALUES(?,?)",
+            membership_rows)
+    return len(communities)
 
 
 def _stamp_built_at(conn: sqlite3.Connection) -> str:
