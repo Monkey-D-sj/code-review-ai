@@ -306,6 +306,16 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     _walk_calls(root, module_qname, None, lang, pf.raw_calls)
     pf.imports = _extract_imports(root, module_qname, lang, lang_name)
 
+    # Dedup nodes — keep first occurrence of each qualified_name (inner
+    # functions with the same name can appear in nested scopes).
+    seen_qns: set[str] = set()
+    deduped: list[ParsedNode] = []
+    for n in pf.nodes:
+        if n.qualified_name not in seen_qns:
+            seen_qns.add(n.qualified_name)
+            deduped.append(n)
+    pf.nodes = deduped
+
     # Batch-fill file_path, language, and apply line offset — constant across one file
     for n in pf.nodes:
         n.file_path = file_path

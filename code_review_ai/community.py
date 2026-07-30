@@ -9,8 +9,9 @@ callable so this module has no hard dependency on ``leidenalg``/``igraph``.
 The default partitioner lazy-imports them; tests inject a deterministic stub.
 """
 
+import os
 import sqlite3
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass
 
 from code_review_ai import qname
@@ -67,7 +68,7 @@ def _build_undirected_adjacency(edges, qname_to_id):
 def _group_communities(node_to_comm: dict[int, int], quality: float,
                        nodes: list[NodeRow]) -> list[CommunityRecord]:
     """Group partition output (node_id -> community_id) into records, labelled
-    by the most common short name in each community."""
+    by the longest common prefix of member qualified names."""
     by_comm: dict[int, list[int]] = defaultdict(list)
     for nid, c in node_to_comm.items():
         by_comm[c].append(nid)
@@ -80,14 +81,39 @@ def _group_communities(node_to_comm: dict[int, int], quality: float,
             modularity=quality,
             members=members,
         ))
+    # Strip common prefix shared by most communities (ignore outliers).
+    labels = [r.label for r in out]
+    # Use the first label as reference; find its last dot-bounded segment that
+    # appears as a prefix in >80% of all labels.
+    best = ""
+    ref = labels[0] if labels else ""
+    dots = [i for i, ch in enumerate(ref) if ch == "."]
+    for i in dots:
+        prefix = ref[:i + 1]
+        if sum(1 for lb in labels if lb.startswith(prefix)) > len(labels) * 0.8:
+            best = prefix
+    if best:
+        for r in out:
+            if r.label.startswith(best):
+                r.label = r.label[len(best):]
     return out
 
 
 def _pick_label(members: list[int], id_to_qname: dict[int, str]) -> str:
-    shorts = [qname.short(id_to_qname[m]) for m in members if m in id_to_qname]
-    if not shorts:
+    qnames = [id_to_qname[m] for m in members if m in id_to_qname]
+    if not qnames:
         return f"community_{members[0]}"
-    return Counter(shorts).most_common(1)[0][0]
+    prefix = os.path.commonprefix(qnames)
+    # Strip trailing partial segment: keep last complete segment boundary
+    # e.g. "src.components.CURD.in" → "src.components.CURD"
+    prefix = prefix.rstrip(".:")
+    sep = max(prefix.rfind("."), prefix.rfind("::"))
+    if sep > 0:
+        prefix = prefix[:sep]
+    # If prefix ends with "index", strip it (Vue convention)
+    if prefix.endswith(".index") or prefix.endswith("::index"):
+        prefix = prefix[:prefix.rfind("index") - len(".")]
+    return prefix if prefix else qnames[0].split("::")[0]
 
 
 def _default_partitioner(ids: list[int],

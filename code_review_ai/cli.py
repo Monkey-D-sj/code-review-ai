@@ -51,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(gp)
     gp.add_argument("-o", "--out", default="graph.html")
     gp.add_argument("-n", "--max-nodes", type=int, default=200)
+    gp.add_argument("-m", "--mode", default="communities",
+                    choices=["communities", "graph", "flow"])
     ip = sub.add_parser("install")
     ip.add_argument("--platform", default="claude-code")
     ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
@@ -92,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             for c in list_communities(conn):
                 print(f"{c['id']}  {c['label']}  nodes={c['node_count']}  modularity={c['modularity']}")
     elif args.cmd == "graph":
-        export_graph(args.db, args.out, args.max_nodes)
+        export_graph(args.db, args.out, args.max_nodes, args.mode)
     return 0
 
 

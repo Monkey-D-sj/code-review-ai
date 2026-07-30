@@ -51,9 +51,9 @@ def test_build_with_stub_partitioner_groups_clusters():
     assert len(comms) == 2
     assert comms[0].members == [0, 1, 2]
     assert comms[0].modularity == 0.42
-    assert comms[0].label == "a"               # most common short (tie -> first)
+    assert comms[0].label == "m"               # longest common prefix of qnames
     assert comms[1].members == [3, 4]
-    assert comms[1].label == "d"
+    assert comms[1].label == "m"  # same module prefix
 
 
 def test_isolated_nodes_excluded():

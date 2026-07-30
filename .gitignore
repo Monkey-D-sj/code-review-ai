@@ -13,7 +13,9 @@ wheels/
 
 # Code Review AI index
 .code-review-ai/
-hmg-ai-agent-platform-frontend
 
 # Generated exports
 *.html
+
+hmg-ai-agent-platform-frontend
+hmg-ai-agent-platform-backend

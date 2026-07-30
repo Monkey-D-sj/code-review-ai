@@ -14,7 +14,7 @@ DEFAULTS = dict(
         "app.route", "click.command",
         "router.get", "router.post", "celery.task",
     ],
-    exclude=["*/test*", "*/migrations/*", "dist/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
+    exclude=["*/test*", "*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
     community_detection=False,
     external_service_url="http://localhost:3000",
 )
