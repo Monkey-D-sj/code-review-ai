@@ -8,6 +8,7 @@ from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
+from code_review_ai.installer import DEFAULT_SOURCE, install
 
 
 def _conn(db_path):
@@ -20,6 +21,14 @@ def _add_common(sp):
     """Add --repo and --db flags to a subparser."""
     sp.add_argument("--repo", default=".")
     sp.add_argument("--db", default=".code-review-ai/index.db")
+
+
+def _run_install(args) -> int:
+    """Register the MCP server with an AI tool. No repo/db needed."""
+    res = install(platform=args.platform, source=args.source,
+                  scope=args.scope, name=args.name)
+    print(res.message)
+    return 0 if res.success else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,8 +46,17 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("communities")
     _add_common(sp)
     sp.add_argument("--symbol", default=None)
+    ip = sub.add_parser("install")
+    ip.add_argument("--platform", default="claude-code")
+    ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
+    ip.add_argument("--from", dest="source", default=DEFAULT_SOURCE)
+    ip.add_argument("--name", default="code-review-ai")
 
     args = p.parse_args(argv)
+
+    if args.cmd == "install":
+        return _run_install(args)
+
     cfg = load_config(args.repo)
     cfg.repo_path = args.repo
     cfg.db_path = args.db

@@ -1,5 +1,6 @@
 from conftest import FIXTURES as FIX, Q
 
+from code_review_ai import cli
 from code_review_ai.cli import main
 
 
@@ -15,3 +16,31 @@ def test_cli_search(tmp_path, capsys):
     assert code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert any(Q("auth", "login") in line and "function" in line for line in lines)
+
+
+class _Res:
+    def __init__(self, success, message):
+        self.success = success
+        self.message = message
+        self.command = ["claude", "mcp", "add"]
+
+
+def test_cli_install_dispatches_with_defaults(monkeypatch, capsys):
+    captured = {}
+
+    def fake_install(**kwargs):
+        captured.update(kwargs)
+        return _Res(True, "registered ok")
+
+    monkeypatch.setattr(cli, "install", fake_install)
+    code = main(["install", "--platform", "claude-code"])
+    assert code == 0
+    assert captured == {"platform": "claude-code", "scope": "user",
+                        "name": "code-review-ai",
+                        "source": cli.DEFAULT_SOURCE}
+    assert "registered ok" in capsys.readouterr().out
+
+
+def test_cli_install_returns_nonzero_on_failure(monkeypatch):
+    monkeypatch.setattr(cli, "install", lambda **k: _Res(False, "nope"))
+    assert main(["install"]) == 1

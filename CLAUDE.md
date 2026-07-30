@@ -19,6 +19,7 @@ uv run code-review-ai query   --symbols auth::login        # impact for given sy
 uv run code-review-ai query   --files path/to/file.py      # impact via git diff of files
 uv run code-review-ai search  "login"                       # glob-match symbol short names
 uv run code-review-ai communities [--symbol auth::login]    # list communities, or one symbol's community
+uv run code-review-ai install --platform claude-code        # register MCP server with Claude Code (self-install)
 uv sync --extra community                                    # opt: install leidenalg+igraph for Phase C
 uv run code-review-ai-mcp                                    # run the MCP server (stdio)
 ```
@@ -44,7 +45,7 @@ git ls-files *.py
 
 ### Module responsibilities (one each, no cycles)
 
-`parser.py` tree-sitter → nodes/raw-calls/imports · `resolver.py` import-aware call resolution → edges · `flow_builder.py` adjacency + BFS → flows · `community.py` Leiden community detection over resolved edges (opt-in) → communities · `indexer.py` rebuild orchestration · `changes.py` git diff / files / symbols → changed qnames · `impact.py` membership slicing + edge fallback → impact · `watcher.py` watchfiles debounce → trigger rebuild · `config.py` layered config · `db.py` SQLite schema/WAL/txn · `mcp_server.py` / `cli.py` frontends.
+`parser.py` tree-sitter → nodes/raw-calls/imports · `resolver.py` import-aware call resolution → edges · `flow_builder.py` adjacency + BFS → flows · `community.py` Leiden community detection over resolved edges (opt-in) → communities · `indexer.py` rebuild orchestration · `changes.py` git diff / files / symbols → changed qnames · `impact.py` membership slicing + edge fallback → impact · `watcher.py` watchfiles debounce → trigger rebuild · `config.py` layered config · `db.py` SQLite schema/WAL/txn · `installer.py` self-install (register MCP via `claude mcp add`) · `mcp_server.py` / `cli.py` frontends.
 
 ## Conventions you must follow
 
@@ -69,7 +70,7 @@ Layered in `config.py`: `DEFAULTS` dict → `[tool.code-review-ai]` in `pyprojec
 
 ## Frontends
 
-MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get_impact`, `search_symbol`, `get_symbol_detail`, `list_entry_points`, `get_communities`, `get_community`. On startup it runs a catch-up rebuild if the index is stale (`is_stale` compares file mtimes to `build_meta.built_at`), then a daemon thread runs `watchfiles` to debounce-rebuild on `.py` changes. CLI (`code-review-ai`) mirrors `rebuild`/`query`/`search`/`communities` for manual use.
+MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get_impact`, `search_symbol`, `get_symbol_detail`, `list_entry_points`, `get_communities`, `get_community`. On startup it runs a catch-up rebuild if the index is stale (`is_stale` compares file mtimes to `build_meta.built_at`), then a daemon thread runs `watchfiles` to debounce-rebuild on `.py` changes. CLI (`code-review-ai`) mirrors `rebuild`/`query`/`search`/`communities` for manual use, plus `install --platform claude-code` which self-registers the MCP server (shells out to `claude mcp add` with a `uvx --from <git-url> code-review-ai-mcp` launch command; see `installer.py`).
 
 ## Design spec & dev history
 
