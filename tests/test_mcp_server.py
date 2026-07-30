@@ -57,7 +57,8 @@ def test_get_communities_tool(tmp_path):
 def test_get_community_tool(tmp_path):
     pytest.importorskip("leidenalg")
     server, conn, cfg = _server(tmp_path, community=True)
-    out = server._tool_manager._tools["get_community"].fn(qualified_name=Q("auth","login"))
+    out = server._tool_manager._tools["get_community"].fn(qualified_name=Q("auth","UserService"))
     data = json.loads(out)
     assert data["found"] is True
-    assert any(m["qname"] == Q("auth","login") for m in data["members"])
+    # UserService and authenticate are connected via CONTAINS edge
+    assert any(m["qname"] == Q("auth","authenticate","auth::UserService") for m in data["members"])

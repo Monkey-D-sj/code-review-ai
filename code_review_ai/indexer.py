@@ -278,16 +278,21 @@ def _write_flows(conn, parsed, edges, qname_to_id: dict[str, int],
 
 def _write_communities(conn, parsed, edges, qname_to_id: dict[str, int],
                        config: Config) -> int:
-    """Phase C: detect communities over the resolved call graph and persist.
-    Opt-in via config.community_detection; skipped (return 0) when disabled or
-    when leidenalg/igraph are not installed. Other errors propagate and roll
-    back the rebuild transaction, matching _write_flows semantics."""
+    """Phase C: detect communities over structural edges (contains, import,
+    inherits) — not call edges. Opt-in via config.community_detection."""
     if not config.community_detection:
         return 0
     nodes = [NodeRow(qname_to_id[n.qualified_name], n.qualified_name,
                      n.file_path, n.kind)
              for pf in parsed for n in pf.nodes]
-    erows = [EdgeRow(e.source, e.target, e.resolution) for e in edges]
+    # Read structural (non-call) edges from DB
+    erows = [
+        EdgeRow(r["source"], r["target"], "resolved")
+        for r in conn.execute(
+            "SELECT source, target FROM edges"
+            " WHERE kind != 'call' AND resolution = 'resolved'"
+        ).fetchall()
+    ]
     try:
         communities = build_communities(nodes, erows)
     except ImportError:
