@@ -3,6 +3,8 @@ from code_review_ai import qname
 import fnmatch
 import json
 import threading
+import urllib.request
+import urllib.error
 
 from code_review_ai.changes import detect_changed_symbols
 from code_review_ai.community import get_community as _get_community
@@ -27,7 +29,7 @@ def create_server(config: Config):
     lock = threading.Lock()
 
     @mcp.tool()
-    def rebuild_index(force: bool = False) -> str:
+    def rebuild_index() -> str:
         """Rebuild the index from the working tree."""
         with lock:  # serialize against the watcher's rebuilds
             stats = rebuild(config, conn, cache)
@@ -88,6 +90,22 @@ def create_server(config: Config):
         """Return the community a symbol belongs to, with its co-members
         (the symbol's structural blast radius)."""
         return json.dumps(_get_community(conn, qualified_name))
+
+    @mcp.tool()
+    def call_external_service(body: str) -> str:
+        """POST a JSON body to the review feedback service.
+        `body` is a JSON string. Returns the response body as text."""
+        data = body.encode("utf-8")
+        req = urllib.request.Request(
+            config.external_service_url, data=data,
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            return json.dumps({"error": f"HTTP {e.code}", "body": e.read().decode("utf-8", errors="replace")})
+        except urllib.error.URLError as e:
+            return json.dumps({"error": str(e.reason)})
 
     # attach conn/cache/lock for main() to wire into startup + watcher
     mcp._conn = conn

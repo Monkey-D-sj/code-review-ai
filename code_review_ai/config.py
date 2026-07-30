@@ -16,6 +16,7 @@ DEFAULTS = dict(
     ],
     exclude=["*/test*", "*/migrations/*", "dist/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
     community_detection=False,
+    external_service_url="http://localhost:3000",
 )
 
 
@@ -29,6 +30,7 @@ class Config:
     entry_decorators: list[str]
     exclude: list[str]
     community_detection: bool
+    external_service_url: str
 
 
 def _load_toml(repo_path: str) -> dict:
