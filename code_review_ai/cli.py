@@ -6,6 +6,7 @@ import sys
 from code_review_ai.changes import detect_changed_symbols
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
+from code_review_ai.export_graph import export as export_graph
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
 from code_review_ai.installer import DEFAULT_SOURCE, install
@@ -46,6 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("communities")
     _add_common(sp)
     sp.add_argument("--symbol", default=None)
+    gp = sub.add_parser("graph")
+    _add_common(gp)
+    gp.add_argument("-o", "--out", default="graph.html")
+    gp.add_argument("-n", "--max-nodes", type=int, default=200)
     ip = sub.add_parser("install")
     ip.add_argument("--platform", default="claude-code")
     ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
@@ -86,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             for c in list_communities(conn):
                 print(f"{c['id']}  {c['label']}  nodes={c['node_count']}  modularity={c['modularity']}")
+    elif args.cmd == "graph":
+        export_graph(args.db, args.out, args.max_nodes)
     return 0
 
 
