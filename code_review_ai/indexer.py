@@ -109,6 +109,9 @@ def rebuild(config: Config, conn: sqlite3.Connection,
     with transaction(conn):
         _clear_tables(conn)
         qname_to_id = _write_nodes(conn, parsed)
+        _write_contains(conn, qname_to_id)
+        _write_imports(conn, parsed, qname_to_id)
+        _write_inherits(conn, parsed, qname_to_id)
         _write_edges(conn, edges)
         flow_count = _write_flows(conn, parsed, edges, qname_to_id, config)
         t_comm_start = time.perf_counter()
@@ -159,6 +162,78 @@ def _write_nodes(conn, parsed) -> dict[str, int]:
     if parent_updates:
         conn.executemany("UPDATE nodes SET parent_id=? WHERE id=?", parent_updates)
     return qname_to_id
+
+
+def _write_contains(conn, qname_to_id: dict[str, int]) -> None:
+    """Generate CONTAINS edges from parent_id relationships.
+
+    parent_qname → child node: module contains class/function,
+    class contains method, function contains nested function.
+    Reads nodes from DB since parent_id was just backfilled by _write_nodes.
+    """
+    rows = conn.execute(
+        "SELECT qualified_name, parent_id FROM nodes WHERE parent_id IS NOT NULL"
+    ).fetchall()
+    if not rows:
+        return
+    # Build reverse id→qname lookup from what we just wrote
+    id_to_qname = {v: k for k, v in qname_to_id.items()}
+    conn.executemany(
+        "INSERT INTO edges(source, target, kind, file_path, call_line, resolution)"
+        " VALUES(?,?,'contains','',0,'resolved')",
+        [(id_to_qname[pid], r["qualified_name"])
+         for r in rows if (pid := r["parent_id"]) in id_to_qname],
+    )
+
+
+def _write_imports(conn, parsed, qname_to_id: dict[str, int]) -> None:
+    """Generate IMPORT edges from module-level imports.
+
+    source = importing module qname, target = imported module qname.
+    resolution = 'resolved' when target is a known module node in the index.
+    """
+    rows: list[tuple[str, str, str]] = []
+    for pf in parsed:
+        src = pf.module_qname
+        for imp in pf.imports:
+            if imp.is_star:
+                continue
+            tgt = imp.module if imp.module in qname_to_id else None
+            if tgt:
+                rows.append((src, tgt, "resolved"))
+            else:
+                rows.append((src, imp.module, "unresolved"))
+    if rows:
+        conn.executemany(
+            "INSERT INTO edges(source,target,kind,file_path,call_line,resolution)"
+            " VALUES(?,?,'import','',0,?)",
+            rows,
+        )
+
+
+def _write_inherits(conn, parsed, qname_to_id: dict[str, int]) -> None:
+    """Generate INHERITS edges from class extends/implements clauses."""
+    rows: list[tuple[str, str, str, str]] = []
+    for pf in parsed:
+        for ih in pf.inherits:
+            # Try simple name lookup first
+            tgt = ih.base_expr
+            # Check if base_expr is a known qname
+            resolved = tgt in qname_to_id
+            # Also try module-scoped: module::ClassName for unqualified names
+            if not resolved and "::" not in tgt:
+                scoped = qname.join(pf.module_qname, tgt)
+                resolved = scoped in qname_to_id
+                if resolved:
+                    tgt = scoped
+            rows.append((ih.class_qname, tgt, ih.relation,
+                         "resolved" if resolved else "unresolved"))
+    if rows:
+        conn.executemany(
+            "INSERT INTO edges(source,target,kind,file_path,call_line,resolution)"
+            " VALUES(?,?,?,'',0,?)",
+            rows,
+        )
 
 
 def _write_edges(conn, edges) -> None:

@@ -53,6 +53,8 @@ LANG = {
             "import_statement",
             "import_from_statement",
         },
+        "class_def": "class_definition",
+        "class_extends": "superclasses",
     },
     "typescript": {
         "def_nodes": {
@@ -69,6 +71,9 @@ LANG = {
             "export_statement",
         },
         "detect_arrow_in_vars": True,
+        "class_def": "class_declaration",
+        "class_extends": "extends_clause",
+        "class_implements": "implements_clause",
     },
     "javascript": {
         "def_nodes": {
@@ -85,6 +90,9 @@ LANG = {
             "export_statement",
         },
         "detect_arrow_in_vars": True,
+        "class_def": "class_declaration",
+        "class_extends": "extends_clause",
+        "class_implements": "implements_clause",
     },
 }
 
@@ -152,6 +160,15 @@ class RawCall:
 
 
 @dataclass
+@dataclass
+class RawInherit:
+    """A class inheritance relationship extracted from AST."""
+    class_qname: str   # the subclass qname
+    base_expr: str     # raw base class / interface expression
+    relation: str      # "extends" | "implements"
+
+
+@dataclass
 class ImportEntry:
     local_name: str
     module: str
@@ -167,6 +184,7 @@ class ParsedFile:
     nodes: list[ParsedNode] = field(default_factory=list)
     raw_calls: list[RawCall] = field(default_factory=list)
     imports: list[ImportEntry] = field(default_factory=list)
+    inherits: list[RawInherit] = field(default_factory=list)
 
 
 def list_source_files(repo_path: str, extensions: list[str] | None = None) -> list[str]:
@@ -275,6 +293,36 @@ def _maybe_arrow_def(node, source, module_qname, scope_qname, parent_kind, lang,
     _walk_defs_typed(value, source, module_qname, qn, kind, lang, output)
 
 
+def _walk_inherits(node, module_qname, lang, out: list):
+    """Walk AST for class inheritance: extends / implements clauses."""
+    for child in node.children:
+        t = child.type
+        if t == lang.get("class_def"):
+            cls_name_node = child.child_by_field_name("name")
+            if cls_name_node is None:
+                continue
+            cls_qname = qn_join(module_qname, cls_name_node.text.decode("utf-8"))
+            # extends
+            for field in ("class_extends", "class_implements"):
+                ext = lang.get(field)
+                if not ext:
+                    continue
+                rel = "extends" if field == "class_extends" else "implements"
+                clause = child.child_by_field_name(ext)
+                if clause is None:
+                    continue
+                for base in clause.children:
+                    if base.type in ("identifier", "type_identifier",
+                                     "property_identifier", "attribute",
+                                     "member_expression"):
+                        out.append(RawInherit(
+                            class_qname=cls_qname,
+                            base_expr=base.text.decode("utf-8"),
+                            relation=rel,
+                        ))
+        _walk_inherits(child, module_qname, lang, out)
+
+
 def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> ParsedFile:
     if lang is None:
         lang_name, lang, ts_lang = _lang_for_path(file_path)
@@ -305,6 +353,8 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     # handle edges
     _walk_calls(root, module_qname, None, lang, pf.raw_calls)
     pf.imports = _extract_imports(root, module_qname, lang, lang_name)
+    # handle inheritance
+    _walk_inherits(root, module_qname, lang, pf.inherits)
 
     # Dedup nodes — keep first occurrence of each qualified_name (inner
     # functions with the same name can appear in nested scopes).
