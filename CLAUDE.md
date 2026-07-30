@@ -90,3 +90,10 @@ The authoritative design doc (in Chinese) is `docs/superpowers/specs/2026-07-24-
 3. 返回结果
 
 禁止在主控函数中写具体实现细节。
+
+### 代码编写
+- 禁止使用单字母变量名（如 i、j、k、x、y）作为变量，除非它明确表示数学索引。
+- 禁止使用内置函数名作为变量名（如 id、list、dict、str）
+- 循环变量必须使用有意义的英文单词或业界通用缩写（如 user_id、item、student）
+- 示例：❌ `for i in ids` → ✅ `for source in ids`
+

@@ -100,14 +100,14 @@ def _default_partitioner(ids: list[int],
     idx = {nid: i for i, nid in enumerate(ids)}
     edge_list, weights = [], []
     seen: set[tuple[int, int]] = set()
-    for s in ids:
-        for t, w in adj.get(s, {}).items():
-            key = (s, t) if s < t else (t, s)
+    for source in ids:
+        for target, weight in adj.get(source, {}).items():
+            key = (source, target) if source < target else (target, source)
             if key in seen:
                 continue
             seen.add(key)
-            edge_list.append((idx[s], idx[t]))
-            weights.append(w)
+            edge_list.append((idx[source], idx[target]))
+            weights.append(weight)
     g = ig.Graph(n=len(ids), edges=edge_list, directed=False)
     part = leidenalg.find_partition(
         g, leidenalg.ModularityVertexPartition,
