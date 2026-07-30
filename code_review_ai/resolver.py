@@ -90,3 +90,70 @@ def _resolved(base: Edge, target: str, existing: set[str]) -> Edge:
     base.target = target
     base.resolution = "resolved" if _exists(target, existing) else "unresolved"
     return base
+
+
+# ── edge generators: structural relationships ─────────────────────────
+
+
+def _build_contains(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
+    """CONTAINS edges: parent_qname → child (module→function, class→method, etc.)."""
+    edges: list[Edge] = []
+    for pf in parsed:
+        for n in pf.nodes:
+            if n.parent_qname:
+                edges.append(Edge(
+                    source=n.parent_qname, target=n.qualified_name,
+                    kind="contains", file_path=n.file_path, call_line=0,
+                    resolution="resolved" if n.parent_qname in qnames else "unresolved",
+                ))
+    return edges
+
+
+def _build_imports(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
+    """IMPORT edges: module → imported_module."""
+    edges: list[Edge] = []
+    for pf in parsed:
+        for imp in pf.imports:
+            if imp.is_star:
+                continue
+            tgt = imp.module
+            edges.append(Edge(
+                source=pf.module_qname, target=tgt, kind="import",
+                file_path=pf.file_path, call_line=0,
+                resolution="resolved" if tgt in qnames else "unresolved",
+            ))
+    return edges
+
+
+def _build_inherits(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
+    """INHERITS edges: subclass → base class / interface."""
+    edges: list[Edge] = []
+    for pf in parsed:
+        for ih in pf.inherits:
+            tgt = ih.base_expr
+            resolved = tgt in qnames
+            if not resolved and "::" not in tgt:
+                scoped = qname.join(pf.module_qname, tgt)
+                if scoped in qnames:
+                    tgt = scoped
+                    resolved = True
+            edges.append(Edge(
+                source=ih.class_qname, target=tgt, kind=ih.relation,
+                file_path=pf.file_path, call_line=0,
+                resolution="resolved" if resolved else "unresolved",
+            ))
+    return edges
+
+
+def resolve_edges(parsed: list[ParsedFile],
+                  existing_qnames: set[str]) -> list[Edge]:
+    """Resolve all edges — call, contains, import, inherits — from parsed files.
+
+    This is the single entry point for edge generation. Indexer calls this
+    once and gets the complete edge list.
+    """
+    edges = resolve_calls(parsed, existing_qnames)
+    edges.extend(_build_contains(parsed, existing_qnames))
+    edges.extend(_build_imports(parsed, existing_qnames))
+    edges.extend(_build_inherits(parsed, existing_qnames))
+    return edges
