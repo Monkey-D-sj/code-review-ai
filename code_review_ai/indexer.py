@@ -12,7 +12,7 @@ from code_review_ai.config import Config
 from code_review_ai.db import transaction
 from code_review_ai.flow_builder import NodeRow, EdgeRow, FlowRecord, build_flows
 from code_review_ai.parser import ParsedFile, SOURCE_GLOBS, filter_excluded, list_source_files, parse_file
-from code_review_ai.resolver import resolve_calls
+from code_review_ai.resolver import Edge, resolve_calls
 
 
 def _ms(seconds: float) -> float:
@@ -103,19 +103,22 @@ def rebuild(config: Config, conn: sqlite3.Connection,
     t_parse = time.perf_counter()
 
     qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
-    edges = resolve_calls(parsed, qnames)
+    call_edges = resolve_calls(parsed, qnames)
     t_resolve = time.perf_counter()
+
+    # Generate all edge types in memory before the transaction
+    all_edges = list(call_edges)
+    all_edges.extend(_build_contains(parsed, qnames))
+    all_edges.extend(_build_imports(parsed, qnames))
+    all_edges.extend(_build_inherits(parsed, qnames))
 
     with transaction(conn):
         _clear_tables(conn)
         qname_to_id = _write_nodes(conn, parsed)
-        _write_contains(conn, qname_to_id)
-        _write_imports(conn, parsed, qname_to_id)
-        _write_inherits(conn, parsed, qname_to_id)
-        _write_edges(conn, edges)
-        flow_count = _write_flows(conn, parsed, edges, qname_to_id, config)
+        _write_edges(conn, all_edges)
+        flow_count = _write_flows(conn, parsed, call_edges, qname_to_id, config)
         t_comm_start = time.perf_counter()
-        community_count = _write_communities(conn, parsed, edges, qname_to_id, config)
+        community_count = _write_communities(conn, parsed, all_edges, qname_to_id, config)
         t_communities = _ms(time.perf_counter() - t_comm_start)
         built_at = _stamp_built_at(conn)
     t_db = time.perf_counter()
@@ -128,7 +131,7 @@ def rebuild(config: Config, conn: sqlite3.Connection,
         "communities": t_communities,
         "total": _ms(t_db - t_start),
     }
-    return RebuildStats(len(qname_to_id), len(edges), flow_count,
+    return RebuildStats(len(qname_to_id), len(all_edges), flow_count,
                         community_count, built_at, timings)
 
 
@@ -164,76 +167,58 @@ def _write_nodes(conn, parsed) -> dict[str, int]:
     return qname_to_id
 
 
-def _write_contains(conn, qname_to_id: dict[str, int]) -> None:
-    """Generate CONTAINS edges from parent_id relationships.
+def _build_contains(parsed, qnames: set[str]) -> list[Edge]:
+    """Generate CONTAINS edges from parent-child scope relationships.
 
-    parent_qname → child node: module contains class/function,
+    parent_qname → child: module contains class/function,
     class contains method, function contains nested function.
-    Reads nodes from DB since parent_id was just backfilled by _write_nodes.
     """
-    rows = conn.execute(
-        "SELECT qualified_name, parent_id FROM nodes WHERE parent_id IS NOT NULL"
-    ).fetchall()
-    if not rows:
-        return
-    # Build reverse id→qname lookup from what we just wrote
-    id_to_qname = {v: k for k, v in qname_to_id.items()}
-    conn.executemany(
-        "INSERT INTO edges(source, target, kind, file_path, call_line, resolution)"
-        " VALUES(?,?,'contains','',0,'resolved')",
-        [(id_to_qname[pid], r["qualified_name"])
-         for r in rows if (pid := r["parent_id"]) in id_to_qname],
-    )
-
-
-def _write_imports(conn, parsed, qname_to_id: dict[str, int]) -> None:
-    """Generate IMPORT edges from module-level imports.
-
-    source = importing module qname, target = imported module qname.
-    resolution = 'resolved' when target is a known module node in the index.
-    """
-    rows: list[tuple[str, str, str]] = []
+    edges: list[Edge] = []
     for pf in parsed:
-        src = pf.module_qname
+        for n in pf.nodes:
+            if n.parent_qname:
+                edges.append(Edge(
+                    source=n.parent_qname, target=n.qualified_name,
+                    kind="contains", file_path=n.file_path, call_line=0,
+                    resolution="resolved" if n.parent_qname in qnames else "unresolved",
+                ))
+    return edges
+
+
+def _build_imports(parsed, qnames: set[str]) -> list[Edge]:
+    """Generate IMPORT edges from module-level imports."""
+    edges: list[Edge] = []
+    for pf in parsed:
         for imp in pf.imports:
             if imp.is_star:
                 continue
-            tgt = imp.module if imp.module in qname_to_id else None
-            if tgt:
-                rows.append((src, tgt, "resolved"))
-            else:
-                rows.append((src, imp.module, "unresolved"))
-    if rows:
-        conn.executemany(
-            "INSERT INTO edges(source,target,kind,file_path,call_line,resolution)"
-            " VALUES(?,?,'import','',0,?)",
-            rows,
-        )
+            tgt = imp.module
+            res = "resolved" if tgt in qnames else "unresolved"
+            edges.append(Edge(
+                source=pf.module_qname, target=tgt, kind="import",
+                file_path=pf.file_path, call_line=0, resolution=res,
+            ))
+    return edges
 
 
-def _write_inherits(conn, parsed, qname_to_id: dict[str, int]) -> None:
+def _build_inherits(parsed, qnames: set[str]) -> list[Edge]:
     """Generate INHERITS edges from class extends/implements clauses."""
-    rows: list[tuple[str, str, str, str]] = []
+    edges: list[Edge] = []
     for pf in parsed:
         for ih in pf.inherits:
-            # Try simple name lookup first
             tgt = ih.base_expr
-            # Check if base_expr is a known qname
-            resolved = tgt in qname_to_id
-            # Also try module-scoped: module::ClassName for unqualified names
+            resolved = tgt in qnames
             if not resolved and "::" not in tgt:
                 scoped = qname.join(pf.module_qname, tgt)
-                resolved = scoped in qname_to_id
-                if resolved:
+                if scoped in qnames:
                     tgt = scoped
-            rows.append((ih.class_qname, tgt, ih.relation,
-                         "resolved" if resolved else "unresolved"))
-    if rows:
-        conn.executemany(
-            "INSERT INTO edges(source,target,kind,file_path,call_line,resolution)"
-            " VALUES(?,?,?,'',0,?)",
-            rows,
-        )
+                    resolved = True
+            edges.append(Edge(
+                source=ih.class_qname, target=tgt, kind=ih.relation,
+                file_path=pf.file_path, call_line=0,
+                resolution="resolved" if resolved else "unresolved",
+            ))
+    return edges
 
 
 def _write_edges(conn, edges) -> None:
@@ -285,13 +270,11 @@ def _write_communities(conn, parsed, edges, qname_to_id: dict[str, int],
     nodes = [NodeRow(qname_to_id[n.qualified_name], n.qualified_name,
                      n.file_path, n.kind)
              for pf in parsed for n in pf.nodes]
-    # Read structural (non-call) edges from DB
+    # Use structural (non-call) edges only
     erows = [
-        EdgeRow(r["source"], r["target"], "resolved")
-        for r in conn.execute(
-            "SELECT source, target FROM edges"
-            " WHERE kind != 'call' AND resolution = 'resolved'"
-        ).fetchall()
+        EdgeRow(e.source, e.target, "resolved")
+        for e in edges
+        if e.kind != "call" and e.resolution == "resolved"
     ]
     try:
         communities = build_communities(nodes, erows)
