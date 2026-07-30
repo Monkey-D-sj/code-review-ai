@@ -61,6 +61,18 @@ code-review-ai communities [--symbol auth::login]       # list communities / one
 
 `rebuild`/`query`/`search`/`communities` also accept no `--repo`/`--db` (defaults: `.` and `.code-review-ai/index.db`).
 
+### Visualization (`graph`)
+
+Export interactive HTML graphs of the call structure:
+
+```bash
+code-review-ai graph -m communities -o communities.html   # community bubble chart (default)
+code-review-ai graph -m graph       -o callgraph.html     # raw function-level force graph
+code-review-ai graph -m flow        -o flows.html         # flow chart (BFS call chains)
+```
+
+Options: `-n` max items (200), `-m` mode (communities|graph|flow), `-o` output path.
+
 ## Config
 
 Layered: defaults -> `[tool.code-review-ai]` in `pyproject.toml` (or a standalone `cr-ai.toml`) -> env `CRAI_<UPPER_KEY>`. Notable keys: `diff_base` (default `origin/main`), `entry_names`, `community_detection` (bool, default `false`; set `CRAI_COMMUNITY_DETECTION=1` to enable Leiden communities).
