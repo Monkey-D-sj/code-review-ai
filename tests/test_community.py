@@ -156,6 +156,61 @@ def test_degree_damped_keys_off_own_module_dependents():
     assert h2_edge < h1_edge < 1      # more own-module dependents -> less damping
 
 
+def test_hub_pruned_cuts_cross_module_edges_of_hub():
+    """HUB_PRUNED severs the cross-module edges of a cross-cutting sink hub (so
+    it stops bridging communities) but keeps its local edges and leaves ordinary
+    cross-module coupling between non-hubs alone."""
+    nodes = [NodeRow(id=i, qualified_name=q, file_path="f.py", kind="class")
+             for i, q in enumerate([
+                 "core::Base", "core::M1",                       # 0,1  hub + local method
+                 "user::S1", "order::S2", "billing::S3",         # 2,3,4 cross-module subs
+                 "user::C", "order::D",                          # 5,6  non-hub cross pair
+             ])]
+    base = "core::Base"
+    edges = [
+        EdgeRow(base, "core::M1", "resolved"),        # local CONTAINS, kept
+        EdgeRow("user::S1", base, "resolved"),        # cross INHERITS, cut
+        EdgeRow("order::S2", base, "resolved"),       # cut
+        EdgeRow("billing::S3", base, "resolved"),     # cut
+        EdgeRow("user::C", "order::D", "resolved"),   # cross, non-hub, kept
+    ]
+    plain, pruned = {}, {}
+    build_communities(nodes, edges, partitioner=_capture(plain),
+                      weight_mode=WeightMode.PLAIN)
+    build_communities(nodes, edges, partitioner=_capture(pruned),
+                      weight_mode=WeightMode.HUB_PRUNED)
+
+    # plain: Base wired to all 3 cross-module subs + its method
+    assert set(plain["adj"][0]) == {1, 2, 3, 4}
+    # pruned: Base keeps only the local method; the 3 cross subs are orphaned
+    # (their only edge was the cut one) and dropped as isolates
+    assert pruned["adj"][0] == {1: 1}
+    for orphan in (2, 3, 4):
+        assert orphan not in pruned["ids"]
+    # ordinary cross-module coupling between non-hubs survives
+    assert pruned["adj"][5] == {6: 1}
+    assert pruned["adj"][6] == {5: 1}
+
+
+def test_hub_pruned_keeps_small_sink_below_hub_min():
+    """A sink with fewer than _PRUNE_HUB_MIN dependents isn't a hub - its
+    cross-module edges stay (only real hubs get pruned)."""
+    nodes = [NodeRow(id=i, qualified_name=q, file_path="f.py", kind="class")
+             for i, q in enumerate(["core::Small", "user::T1", "order::T2"])]
+    small = "core::Small"
+    edges = [
+        EdgeRow("user::T1", small, "resolved"),
+        EdgeRow("order::T2", small, "resolved"),
+    ]
+    captured = {}
+    build_communities(nodes, edges, partitioner=_capture(captured),
+                      weight_mode=WeightMode.HUB_PRUNED)
+
+    # Small has only 2 dependents (< hub min) -> not pruned, both edges kept
+    assert captured["ids"] == [0, 1, 2]
+    assert captured["adj"][0] == {1: 1, 2: 1}
+
+
 def test_inter_community_edges_counts_crossings_once():
     """inter_community_edges maps each structural edge's endpoints to their
     communities and counts only edges crossing different communities, once per

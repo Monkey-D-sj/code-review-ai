@@ -24,11 +24,17 @@ class WeightMode(StrEnum):
     """Edge weighting strategy for community detection.
 
     PLAIN         - each edge weighs its raw count (the historical behaviour).
-    DEGREE_DAMPED - additionally down-weight edges incident to sink-like hub
-                    nodes; see _damping_factors for the exact rule.
+    DEGREE_DAMPED - down-weight edges incident to cross-cutting sink hubs
+                    (soft: the hub stays in the graph but pulls less). See
+                    _damping_factors.
+    HUB_PRUNED    - hard-cut the cross-module edges of cross-cutting sink hubs,
+                    so the hub stops bridging communities. Its local edges are
+                    kept, so it stays with its home-module community (and its
+                    methods aren't orphaned). See _prune_hub_set.
     """
     PLAIN = "plain"
     DEGREE_DAMPED = "degree_damped"
+    HUB_PRUNED = "hub_pruned"
 
     @classmethod
     def parse(cls, value: str) -> "WeightMode":
@@ -99,6 +105,10 @@ def inter_community_edges(edges, qname_to_id, node_to_comm) -> dict[tuple[int, i
 _DAMP_ALPHA = 0.5   # max fraction of weight removed from a perfect cross-module sink
 _DAMP_FLOOR = 0.1   # never damp an edge below this fraction of its raw weight
 
+# Hub-prune constants for HUB_PRUNED mode.
+_PRUNE_HUB_MIN = 3     # min in-degree for a sink to count as a prunable hub
+_PRUNE_SPREAD_MIN = 0.5  # cross-module dependents must be the majority to prune
+
 
 def _build_undirected_adjacency(edges, qname_to_id,
                                 weight_mode: WeightMode = WeightMode.PLAIN):
@@ -109,7 +119,9 @@ def _build_undirected_adjacency(edges, qname_to_id,
     In PLAIN mode the weight is the raw edge count between a pair. In
     DEGREE_DAMPED mode each endpoint's factor (see _damping_factors) multiplies
     the raw count, so sink hubs spread across modules pull less on their
-    neighbours.
+    neighbours. In HUB_PRUNED mode the cross-module edges of cross-cutting sink
+    hubs (see _prune_hub_set) are dropped entirely; their local edges stay full.
+    Nodes left with no surviving edge are dropped as isolates.
     """
     weights: dict[tuple[int, int], int] = defaultdict(int)
     in_neighbors: dict[int, set[int]] = defaultdict(set)
@@ -128,17 +140,25 @@ def _build_undirected_adjacency(edges, qname_to_id,
         out_neighbors[s].add(t)
         used.add(s)
         used.add(t)
-    ids = sorted(used)
     id_to_qname = {nid: qn for qn, nid in qname_to_id.items() if nid in used}
+    ids = sorted(used)
     factors = _damping_factors(ids, in_neighbors, out_neighbors,
                                id_to_qname, weight_mode)
+    hub_set = _prune_hub_set(ids, in_neighbors, out_neighbors,
+                             id_to_qname, weight_mode)
     adj: dict[int, dict[int, float]] = {i: {} for i in ids}
     for (a, b), w in weights.items():
+        if (hub_set is not None and (a in hub_set or b in hub_set)
+                and qname.module(id_to_qname[a]) != qname.module(id_to_qname[b])):
+            continue  # HUB_PRUNED: sever the cross-module edge of a hub
         weight = w
         if factors is not None:
             weight = w * factors.get(a, 1.0) * factors.get(b, 1.0)
         adj[a][b] = weight
         adj[b][a] = weight
+    # a hub's cross-module neighbours may now have no surviving edge - drop
+    # them as isolates, matching how non-hub isolates are already excluded.
+    ids = sorted(nid for nid, nbrs in adj.items() if nbrs)
     return ids, adj
 
 
@@ -195,6 +215,33 @@ def _cross_module_in_fraction(nid, in_nbrs, id_to_qname) -> float:
     own_in = sum(1 for src in in_nbrs
                  if qname.module(id_to_qname[src]) == own_module)
     return 1 - own_in / in_deg
+
+
+def _prune_hub_set(ids, in_neighbors, out_neighbors, id_to_qname, weight_mode):
+    """Set of cross-cutting sink hubs whose cross-module edges HUB_PRUNED cuts.
+    A node qualifies when it is a sink (sinkness > 0), has at least
+    _PRUNE_HUB_MIN dependents (so a single cross-module inherit isn't enough),
+    and the majority of those dependents live outside its own module
+    (spread > _PRUNE_SPREAD_MIN). Only the cross-module edges of such hubs are
+    severed; local edges stay, so the hub remains anchored to its home
+    community. Returns None for non-HUB_PRUNED modes."""
+    if weight_mode is not WeightMode.HUB_PRUNED:
+        return None
+    hubs: set[int] = set()
+    for nid in ids:
+        in_nbrs = in_neighbors.get(nid, ())
+        out_nbrs = out_neighbors.get(nid, ())
+        in_deg = len(in_nbrs)
+        out_deg = len(out_nbrs)
+        total = in_deg + out_deg
+        if total == 0 or in_deg < _PRUNE_HUB_MIN:
+            continue
+        sinkness = (in_deg - out_deg) / total
+        if sinkness <= 0:
+            continue
+        if _cross_module_in_fraction(nid, in_nbrs, id_to_qname) > _PRUNE_SPREAD_MIN:
+            hubs.add(nid)
+    return hubs
 
 
 def _group_communities(node_to_comm: dict[int, int], quality: float,
