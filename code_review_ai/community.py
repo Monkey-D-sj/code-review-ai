@@ -70,6 +70,31 @@ def build_communities(nodes: list[NodeRow], edges: list[EdgeRow],
     return _group_communities(node_to_comm, quality, nodes)
 
 
+def inter_community_edges(edges, qname_to_id, node_to_comm) -> dict[tuple[int, int], int]:
+    """Count structural edges whose endpoints land in different communities.
+
+    Returns {(comm_a, comm_b): weight} with comm_a < comm_b (undirected,
+    normalized). Non-resolved edges, edges to unknown nodes, and intra-community
+    edges are skipped. ``edges`` must already be the structural (non-call) set -
+    the caller filters ``kind != 'call'``, mirroring community detection itself.
+    """
+    counts: dict[tuple[int, int], int] = defaultdict(int)
+    for edge in edges:
+        if edge.resolution != "resolved":
+            continue
+        s = qname_to_id.get(edge.source)
+        t = qname_to_id.get(edge.target)
+        if s is None or t is None:
+            continue
+        comm_s = node_to_comm.get(s)
+        comm_t = node_to_comm.get(t)
+        if comm_s is None or comm_t is None or comm_s == comm_t:
+            continue
+        a, b = (comm_s, comm_t) if comm_s < comm_t else (comm_t, comm_s)
+        counts[(a, b)] += 1
+    return counts
+
+
 # Damping constants for DEGREE_DAMPED mode.
 _DAMP_ALPHA = 0.5   # max fraction of weight removed from a perfect cross-module sink
 _DAMP_FLOOR = 0.1   # never damp an edge below this fraction of its raw weight

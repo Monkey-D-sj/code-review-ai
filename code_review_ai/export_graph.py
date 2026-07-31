@@ -89,7 +89,6 @@ def _export_communities(db_path: str, out_path: str, max_communities: int) -> No
 
     comm_ids = {c["id"] for c in comms}
     comm_nodes: dict[int, list[dict]] = defaultdict(list)
-    node_to_comm: dict[str, int] = {}
 
     for c in comms:
         members = conn.execute("""
@@ -106,22 +105,15 @@ def _export_communities(db_path: str, out_path: str, max_communities: int) -> No
                 "sig": m["signature"],
                 "kind": m["kind"],
             })
-            node_to_comm[m["qualified_name"]] = c["id"]
 
-    # ── inter-community edges ──
-    # One pass over resolved edges (outside any per-community loop, else each
-    # edge is recounted once per community and the weights inflate ~200x).
-    comm_edges: dict[tuple[int, int], int] = defaultdict(int)
-    rows = conn.execute("""
-        SELECT source, target FROM edges
-        WHERE resolution = 'resolved'
+    # ── inter-community edges: read the graph persisted by build, never
+    #    re-derive it from `edges` (which would drift on kind/resolution
+    #    filters and on per-community recounting).
+    marks = ",".join(str(cid) for cid in sorted(comm_ids))
+    edge_rows = conn.execute(f"""
+        SELECT community_id_a, community_id_b, weight FROM community_edges
+        WHERE community_id_a IN ({marks}) AND community_id_b IN ({marks})
     """).fetchall()
-    for e in rows:
-        s_c = node_to_comm.get(e["source"])
-        t_c = node_to_comm.get(e["target"])
-        if s_c and t_c and s_c in comm_ids and t_c in comm_ids and s_c != t_c:
-            key = (s_c, t_c) if s_c < t_c else (t_c, s_c)
-            comm_edges[key] += 1
 
     conn.close()
 
@@ -135,8 +127,7 @@ def _export_communities(db_path: str, out_path: str, max_communities: int) -> No
         })
 
     edge_json = [{"source": a, "target": b, "weight": w}
-                 for (a, b), w in comm_edges.items()
-                 if w >= 1]
+                 for a, b, w in edge_rows]
 
     nodes_json = {str(c["id"]): comm_nodes[c["id"]] for c in comms}
 

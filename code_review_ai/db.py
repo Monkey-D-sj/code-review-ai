@@ -53,6 +53,12 @@ CREATE TABLE IF NOT EXISTS community_memberships (
     node_id INTEGER,
     PRIMARY KEY (community_id, node_id)
 );
+CREATE TABLE IF NOT EXISTS community_edges (
+    community_id_a INTEGER NOT NULL,
+    community_id_b INTEGER NOT NULL,
+    weight INTEGER NOT NULL,
+    PRIMARY KEY (community_id_a, community_id_b)
+);
 CREATE TABLE IF NOT EXISTS build_meta (
     key TEXT PRIMARY KEY,
     value TEXT

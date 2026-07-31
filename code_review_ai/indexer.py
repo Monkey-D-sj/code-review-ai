@@ -7,7 +7,7 @@ import datetime
 import time
 from dataclasses import dataclass
 
-from code_review_ai.community import build_communities, WeightMode
+from code_review_ai.community import build_communities, inter_community_edges, WeightMode
 from code_review_ai.config import Config
 from code_review_ai.db import transaction
 from code_review_ai.flow_builder import NodeRow, EdgeRow, FlowRecord, build_flows
@@ -136,6 +136,7 @@ def _clear_tables(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM flow_memberships")
     conn.execute("DELETE FROM flows")
     conn.execute("DELETE FROM community_memberships")
+    conn.execute("DELETE FROM community_edges")
     conn.execute("DELETE FROM communities")
     conn.execute("DELETE FROM edges")
     conn.execute("DELETE FROM nodes")
@@ -262,6 +263,16 @@ def _write_communities(conn, parsed, edges, qname_to_id: dict[str, int],
         conn.executemany(
             "INSERT INTO community_memberships(community_id,node_id) VALUES(?,?)",
             membership_rows)
+        # Persist the community graph's inter-community edges from the same
+        # structural edge set community detection used, so the visualization
+        # reads build output instead of re-deriving it.
+        node_to_comm = {nid: cid for cid, nid in membership_rows}
+        comm_edges = inter_community_edges(erows, qname_to_id, node_to_comm)
+        if comm_edges:
+            conn.executemany(
+                "INSERT INTO community_edges(community_id_a,community_id_b,weight)"
+                " VALUES(?,?,?)",
+                [(a, b, w) for (a, b), w in comm_edges.items()])
     return len(communities)
 
 

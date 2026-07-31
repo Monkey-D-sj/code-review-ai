@@ -1,5 +1,5 @@
 from conftest import Q
-from code_review_ai.community import build_communities, WeightMode
+from code_review_ai.community import build_communities, inter_community_edges, WeightMode
 from code_review_ai.flow_builder import NodeRow, EdgeRow
 
 
@@ -154,3 +154,24 @@ def test_degree_damped_keys_off_own_module_dependents():
     assert h1_edge == 0.75
     assert h2_edge == 0.5
     assert h2_edge < h1_edge < 1      # more own-module dependents -> less damping
+
+
+def test_inter_community_edges_counts_crossings_once():
+    """inter_community_edges maps each structural edge's endpoints to their
+    communities and counts only edges crossing different communities, once per
+    underlying edge, normalized to (low, high). Same-pair edges accumulate;
+    unknown nodes and same-community edges are skipped."""
+    qname_to_id = {"m::A": 1, "m::B": 2, "m::C": 3}
+    node_to_comm = {1: 1, 2: 2, 3: 3}
+    edges = [
+        EdgeRow("m::A", "m::B", "resolved"),   # 1 <-> 2
+        EdgeRow("m::A", "m::B", "resolved"),   # same pair -> weight 2
+        EdgeRow("m::B", "m::A", "resolved"),   # reversed -> still (1, 2)
+        EdgeRow("m::A", "m::C", "resolved"),   # 1 <-> 3
+        EdgeRow("m::A", "m::A", "resolved"),   # self-loop -> skipped
+        EdgeRow("m::A", "m::ghost", "resolved"),  # unknown target -> skipped
+        EdgeRow("m::A", "m::B", "unresolved"),    # not resolved -> skipped
+    ]
+    assert inter_community_edges(edges, qname_to_id, node_to_comm) == {
+        (1, 2): 3, (1, 3): 1,
+    }
