@@ -109,19 +109,19 @@ def _export_communities(db_path: str, out_path: str, max_communities: int) -> No
             node_to_comm[m["qualified_name"]] = c["id"]
 
     # ── inter-community edges ──
+    # One pass over resolved edges (outside any per-community loop, else each
+    # edge is recounted once per community and the weights inflate ~200x).
     comm_edges: dict[tuple[int, int], int] = defaultdict(int)
-    for cid in comm_ids:
-        members = {m["qname"] for m in comm_nodes[cid]}
-        rows = conn.execute("""
-            SELECT source, target FROM edges
-            WHERE resolution = 'resolved'
-        """).fetchall()
-        for e in rows:
-            s_c = node_to_comm.get(e["source"])
-            t_c = node_to_comm.get(e["target"])
-            if s_c and t_c and s_c in comm_ids and t_c in comm_ids and s_c != t_c:
-                key = (s_c, t_c) if s_c < t_c else (t_c, s_c)
-                comm_edges[key] += 1
+    rows = conn.execute("""
+        SELECT source, target FROM edges
+        WHERE resolution = 'resolved'
+    """).fetchall()
+    for e in rows:
+        s_c = node_to_comm.get(e["source"])
+        t_c = node_to_comm.get(e["target"])
+        if s_c and t_c and s_c in comm_ids and t_c in comm_ids and s_c != t_c:
+            key = (s_c, t_c) if s_c < t_c else (t_c, s_c)
+            comm_edges[key] += 1
 
     conn.close()
 
