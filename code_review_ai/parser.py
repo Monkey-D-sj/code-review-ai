@@ -208,8 +208,12 @@ def filter_excluded(files: list[str], patterns: list[str]) -> list[str]:
     """Return files that do NOT match any exclude glob pattern.
 
     Patterns are matched against the relative path (e.g. ``tests/test_auth.py``)
-    and also the bare filename. A leading ``*/`` is stripped before matching
-    so users can write ``*/test*`` to match files in any directory.
+    and also the bare filename. A leading ``*/`` matches any leading directory
+    chain, so ``*/test*`` excludes files under any directory and ``*/alembic/*``
+    excludes nested alembic trees (``app/alembic/env.py``). The raw pattern is
+    matched against the full path; a ``*/``-stripped variant is additionally
+    matched against the path and the bare filename so ``*/test*`` still catches
+    a top-level ``test_auth.py``.
     """
     if not patterns:
         return files
@@ -219,7 +223,8 @@ def filter_excluded(files: list[str], patterns: list[str]) -> list[str]:
         excluded = False
         for raw in patterns:
             p = raw.lstrip("*/")
-            if fnmatch.fnmatch(f, p) or fnmatch.fnmatch(basename, p):
+            if (fnmatch.fnmatch(f, raw) or fnmatch.fnmatch(f, p)
+                    or fnmatch.fnmatch(basename, p)):
                 excluded = True
                 break
         if not excluded:

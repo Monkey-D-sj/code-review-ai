@@ -1,4 +1,4 @@
-from code_review_ai.parser import parse_file, CALL_SIMPLE, CALL_ATTRIBUTE, CALL_OTHER
+from code_review_ai.parser import parse_file, filter_excluded, CALL_SIMPLE, CALL_ATTRIBUTE, CALL_OTHER
 
 from conftest import FIXTURES as FIX, Q
 
@@ -28,3 +28,16 @@ def test_parse_extracts_calls_and_imports():
     assert ("obj.run", CALL_ATTRIBUTE) in calls
     assert ("vals[0]", CALL_OTHER) in calls
     assert all(c.source_qname == Q("app","main") for c in pf.raw_calls)
+
+
+def test_filter_excluded_nested_directory_patterns():
+    """A leading ``*/`` must match nested directories: ``*/alembic/*`` excludes
+    ``app/alembic/env.py``, and ``*/test*`` excludes files under any test dir."""
+    files = ["app/alembic/env.py", "app/alembic/versions/x.py",
+             "app/tests/test_auth.py", "test_auth.py", "app/main.py"]
+    assert filter_excluded(files, ["*/alembic/*"]) == ["app/tests/test_auth.py",
+                                                        "test_auth.py", "app/main.py"]
+    assert filter_excluded(files, ["*/test*"]) == ["app/alembic/env.py",
+                                                   "app/alembic/versions/x.py", "app/main.py"]
+    # top-level dist/ still excluded via the bare pattern
+    assert filter_excluded(["dist/b.js", "app/main.py"], ["dist/*"]) == ["app/main.py"]
