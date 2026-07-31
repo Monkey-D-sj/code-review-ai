@@ -18,5 +18,4 @@ wheels/
 *.html
 
 hmg-ai-agent-platform-frontend
-hmg-ai-agent-platform-backend
-hmg-ai-agent-platform-frontend
+#hmg-ai-agent-platform-backend
