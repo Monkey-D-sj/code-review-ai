@@ -13,7 +13,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     start_line INTEGER,
     end_line INTEGER,
     signature TEXT,
-    parent_id INTEGER REFERENCES nodes(id)
+    parent_id INTEGER REFERENCES nodes(id),
+    in_degree INTEGER NOT NULL DEFAULT 0,
+    out_degree INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS edges (
     id INTEGER PRIMARY KEY,
@@ -73,6 +75,20 @@ def connect(db_path: str) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate_nodes(conn)
+
+
+def _migrate_nodes(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the initial schema to pre-existing DBs.
+
+    CREATE TABLE IF NOT EXISTS won't alter an existing table, so an older
+    index.db needs ALTER TABLE to gain in_degree/out_degree.
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(nodes)")}
+    if "in_degree" not in cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN in_degree INTEGER NOT NULL DEFAULT 0")
+    if "out_degree" not in cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN out_degree INTEGER NOT NULL DEFAULT 0")
 
 
 @contextmanager

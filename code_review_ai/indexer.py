@@ -110,6 +110,7 @@ def rebuild(config: Config, conn: sqlite3.Connection,
         _clear_tables(conn)
         qname_to_id = _write_nodes(conn, parsed)
         _write_edges(conn, all_edges)
+        _write_degrees(conn, all_edges, qname_to_id)
         call_edges = [e for e in all_edges if e.kind == "call"]
         flow_count = _write_flows(conn, parsed, call_edges, qname_to_id, config)
         t_comm_start = time.perf_counter()
@@ -169,6 +170,30 @@ def _write_edges(conn, edges) -> None:
         [(e.source, e.target, e.kind, e.file_path, e.call_line, e.resolution)
          for e in edges],
     )
+
+
+def _write_degrees(conn, edges, qname_to_id: dict[str, int]) -> None:
+    """Backfill in_degree/out_degree from resolved call edges.
+
+    Degree counts DISTINCT callers/callees (kind='call', resolution='resolved'),
+    matching the flow-traversable edge set: repeated calls to the same target
+    count once. Zero-degree nodes keep the column DEFAULT 0 set at insert.
+    """
+    callers_of: dict[str, set[str]] = {}
+    callees_of: dict[str, set[str]] = {}
+    for edge in edges:
+        if edge.kind != "call" or edge.resolution != "resolved":
+            continue
+        callers_of.setdefault(edge.target, set()).add(edge.source)
+        callees_of.setdefault(edge.source, set()).add(edge.target)
+    updates = [
+        (len(callers_of.get(qname, ())), len(callees_of.get(qname, ())), node_id)
+        for qname, node_id in qname_to_id.items()
+        if qname in callers_of or qname in callees_of
+    ]
+    if updates:
+        conn.executemany(
+            "UPDATE nodes SET in_degree=?, out_degree=? WHERE id=?", updates)
 
 
 def _write_flows(conn, parsed, edges, qname_to_id: dict[str, int],

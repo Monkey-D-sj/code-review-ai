@@ -68,7 +68,9 @@ def create_server(config: Config):
             "SELECT DISTINCT target FROM edges WHERE source=? AND resolution='resolved'", (qualified_name,))]
         return json.dumps({"qname": r["qualified_name"], "kind": r["kind"],
                            "file": r["file_path"], "line": r["start_line"],
-                           "signature": r["signature"], "callers": callers, "callees": callees})
+                           "signature": r["signature"],
+                           "in_degree": r["in_degree"], "out_degree": r["out_degree"],
+                           "callers": callers, "callees": callees})
 
     @mcp.tool()
     def list_entry_points() -> str:

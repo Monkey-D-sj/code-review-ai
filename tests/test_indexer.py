@@ -3,7 +3,7 @@ from code_review_ai.db import connect, init_schema
 from code_review_ai.indexer import ParseCache, rebuild, is_stale
 
 import pytest
-from conftest import FIXTURES as FIX
+from conftest import FIXTURES as FIX, Q
 
 
 def _cfg(tmp_path):
@@ -113,3 +113,24 @@ def test_rebuild_cache_skips_unchanged_files(tmp_path, monkeypatch):
         assert calls["n"] == 1
     finally:
         os.utime(p, (orig_mtime, orig_mtime))
+
+
+def test_rebuild_writes_node_degrees(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    rebuild(cfg, conn)
+
+    def deg(qname):
+        row = conn.execute(
+            "SELECT in_degree, out_degree FROM nodes WHERE qualified_name=?",
+            (qname,)).fetchone()
+        assert row is not None, qname
+        return row["in_degree"], row["out_degree"]
+
+    # auth::login: called only by app::main -> in 1; calls nothing resolved -> out 0
+    assert deg(Q("auth", "login")) == (1, 0)
+    # app::main: calls auth::login twice (login() + a.login()) -> out 1 (deduped); not called -> in 0
+    assert deg(Q("app", "main")) == (0, 1)
+    # util::hash_pw: isolate, on no resolved call edge -> 0/0
+    assert deg(Q("util", "hash_pw")) == (0, 0)
