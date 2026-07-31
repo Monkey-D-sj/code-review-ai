@@ -64,7 +64,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "install":
         return _run_install(args)
 
-    cfg = load_config(args.repo)
+    # Config comes from the current project (cwd), matching the MCP server;
+    # --repo/--db only select what gets analyzed, not where config is read.
+    cfg = load_config()
     cfg.repo_path = args.repo
     cfg.db_path = args.db
     conn = _conn(args.db)
