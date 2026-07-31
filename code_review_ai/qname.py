@@ -34,3 +34,12 @@ def short(qname: str) -> str:
     # Split on SCOPE_SEP first (inner), then MODULE_SEP.
     # e.g. "auth::UserService.authenticate" → "authenticate"
     return qname.rsplit(SCOPE_SEP, 1)[-1].rsplit(MODULE_SEP, 1)[-1]
+
+
+def module(qname: str) -> str:
+    """Return the module path (everything before the first MODULE_SEP).
+
+    module("auth::UserService.authenticate") -> "auth"
+    module("auth")                            -> "auth"
+    """
+    return qname.split(MODULE_SEP, 1)[0]

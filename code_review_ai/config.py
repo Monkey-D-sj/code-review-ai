@@ -16,6 +16,7 @@ DEFAULTS = dict(
     ],
     exclude=["*/test*", "*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
     community_detection=False,
+    community_weight="plain",
     external_service_url="http://localhost:3000",
 )
 
@@ -30,6 +31,7 @@ class Config:
     entry_decorators: list[str]
     exclude: list[str]
     community_detection: bool
+    community_weight: str
     external_service_url: str
 
 

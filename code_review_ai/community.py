@@ -9,13 +9,38 @@ callable so this module has no hard dependency on ``leidenalg``/``igraph``.
 The default partitioner lazy-imports them; tests inject a deterministic stub.
 """
 
+import logging
 import os
 import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass
+from enum import StrEnum
 
 from code_review_ai import qname
 from code_review_ai.flow_builder import NodeRow, EdgeRow
+
+
+class WeightMode(StrEnum):
+    """Edge weighting strategy for community detection.
+
+    PLAIN         - each edge weighs its raw count (the historical behaviour).
+    DEGREE_DAMPED - additionally down-weight edges incident to sink-like hub
+                    nodes; see _damping_factors for the exact rule.
+    """
+    PLAIN = "plain"
+    DEGREE_DAMPED = "degree_damped"
+
+    @classmethod
+    def parse(cls, value: str) -> "WeightMode":
+        """Parse a config string into a WeightMode. Unknown values log a
+        warning and fall back to PLAIN so a typo can't take down the whole
+        community phase (consistent with Phase C's graceful degradation)."""
+        try:
+            return cls(value)
+        except ValueError:
+            logging.getLogger(__name__).warning(
+                "unknown community_weight=%r; using %s", value, cls.PLAIN.value)
+            return cls.PLAIN
 
 
 @dataclass
@@ -26,12 +51,17 @@ class CommunityRecord:
 
 
 def build_communities(nodes: list[NodeRow], edges: list[EdgeRow],
-                      partitioner=None) -> list[CommunityRecord]:
+                      partitioner=None,
+                      weight_mode: WeightMode = WeightMode.PLAIN) -> list[CommunityRecord]:
     """Build communities from resolved edges. Main control only - delegates
     to adjacency build -> partition -> group. Returns [] when no resolved
-    edges connect any nodes."""
+    edges connect any nodes.
+
+    weight_mode selects the edge weighting; see WeightMode. Defaults to PLAIN
+    (raw count), the historical behaviour.
+    """
     qname_to_id = {n.qualified_name: n.id for n in nodes}
-    ids, adj = _build_undirected_adjacency(edges, qname_to_id)
+    ids, adj = _build_undirected_adjacency(edges, qname_to_id, weight_mode)
     if not ids:
         return []
     if partitioner is None:
@@ -40,11 +70,25 @@ def build_communities(nodes: list[NodeRow], edges: list[EdgeRow],
     return _group_communities(node_to_comm, quality, nodes)
 
 
-def _build_undirected_adjacency(edges, qname_to_id):
-    """Symmetrize resolved edges into an undirected, call-count-weighted
-    adjacency. Self-loops and non-resolved edges are dropped. Returns
-    (sorted node ids, {node_id: {neighbour_id: weight}})."""
+# Damping constants for DEGREE_DAMPED mode.
+_DAMP_ALPHA = 0.5   # max fraction of weight removed from a perfect cross-module sink
+_DAMP_FLOOR = 0.1   # never damp an edge below this fraction of its raw weight
+
+
+def _build_undirected_adjacency(edges, qname_to_id,
+                                weight_mode: WeightMode = WeightMode.PLAIN):
+    """Symmetrize resolved edges into an undirected adjacency. Self-loops and
+    non-resolved edges are dropped. Returns (sorted node ids, {node_id:
+    {neighbour_id: weight}}).
+
+    In PLAIN mode the weight is the raw edge count between a pair. In
+    DEGREE_DAMPED mode each endpoint's factor (see _damping_factors) multiplies
+    the raw count, so sink hubs spread across modules pull less on their
+    neighbours.
+    """
     weights: dict[tuple[int, int], int] = defaultdict(int)
+    in_neighbors: dict[int, set[int]] = defaultdict(set)
+    out_neighbors: dict[int, set[int]] = defaultdict(set)
     used: set[int] = set()
     for e in edges:
         if e.resolution != "resolved":
@@ -55,14 +99,77 @@ def _build_undirected_adjacency(edges, qname_to_id):
             continue
         a, b = (s, t) if s < t else (t, s)
         weights[(a, b)] += 1
+        in_neighbors[t].add(s)
+        out_neighbors[s].add(t)
         used.add(s)
         used.add(t)
     ids = sorted(used)
+    id_to_qname = {nid: qn for qn, nid in qname_to_id.items() if nid in used}
+    factors = _damping_factors(ids, in_neighbors, out_neighbors,
+                               id_to_qname, weight_mode)
     adj: dict[int, dict[int, float]] = {i: {} for i in ids}
     for (a, b), w in weights.items():
-        adj[a][b] = w
-        adj[b][a] = w
+        weight = w
+        if factors is not None:
+            weight = w * factors.get(a, 1.0) * factors.get(b, 1.0)
+        adj[a][b] = weight
+        adj[b][a] = weight
     return ids, adj
+
+
+def _damping_factors(ids, in_neighbors, out_neighbors, id_to_qname, weight_mode):
+    """Per-node multiplier in [_DAMP_FLOOR, 1.0] on incident edge weights.
+
+    Returns None for PLAIN (no damping). For DEGREE_DAMPED:
+
+        sinkness(n) = (in_deg - out_deg) / (in_deg + out_deg)   # in [-1,1]
+        spread(n)   = 1 - own_in / in_deg                       # in [0,1]
+        factor(n)   = 1 - ALPHA * max(sinkness, 0) * spread
+
+    where own_in = in-neighbours that share the node's own module and in_deg =
+    total in-neighbours. spread is the fraction of a node's *dependents* that
+    live OUTSIDE its home module: 0.0 = all dependents co-located with the node
+    (a local core, keep full weight); 1.0 = every dependent is in another module
+    (a cross-cutting hub, damp). Only sinks (sinkness > 0 - high in, low out,
+    e.g. a base class many inherit from, or a util module many import) are
+    damped. spread uses in-edges only (it tracks where dependents sit); sinkness
+    still uses in+out. No global module count - each node is scored on its own
+    neighbours.
+    """
+    if weight_mode is not WeightMode.DEGREE_DAMPED:
+        return None
+    factors: dict[int, float] = {}
+    for nid in ids:
+        in_nbrs = in_neighbors.get(nid, ())
+        out_nbrs = out_neighbors.get(nid, ())
+        in_deg = len(in_nbrs)
+        out_deg = len(out_nbrs)
+        total = in_deg + out_deg
+        if total == 0:
+            factors[nid] = 1.0
+            continue
+        sinkness = (in_deg - out_deg) / total
+        if sinkness <= 0:
+            factors[nid] = 1.0
+            continue
+        spread = _cross_module_in_fraction(nid, in_nbrs, id_to_qname)
+        factors[nid] = max(1.0 - _DAMP_ALPHA * sinkness * spread, _DAMP_FLOOR)
+    return factors
+
+
+def _cross_module_in_fraction(nid, in_nbrs, id_to_qname) -> float:
+    """Fraction of the node's in-neighbours that live OUTSIDE its own module:
+    0.0 = every dependent is co-located with the node (local core), 1.0 = every
+    dependent is in another module (cross-cutting hub). in-edges only - this
+    measures where the node's dependents sit, not what it calls. in_nbrs is
+    non-empty whenever this is called (sinks have in_deg > 0)."""
+    own_module = qname.module(id_to_qname[nid])
+    in_deg = len(in_nbrs)
+    if in_deg == 0:
+        return 0.0
+    own_in = sum(1 for src in in_nbrs
+                 if qname.module(id_to_qname[src]) == own_module)
+    return 1 - own_in / in_deg
 
 
 def _group_communities(node_to_comm: dict[int, int], quality: float,

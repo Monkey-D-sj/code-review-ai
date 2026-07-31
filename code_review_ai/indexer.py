@@ -7,7 +7,7 @@ import datetime
 import time
 from dataclasses import dataclass
 
-from code_review_ai.community import build_communities
+from code_review_ai.community import build_communities, WeightMode
 from code_review_ai.config import Config
 from code_review_ai.db import transaction
 from code_review_ai.flow_builder import NodeRow, EdgeRow, FlowRecord, build_flows
@@ -243,7 +243,8 @@ def _write_communities(conn, parsed, edges, qname_to_id: dict[str, int],
         if e.kind != "call" and e.resolution == "resolved"
     ]
     try:
-        communities = build_communities(nodes, erows)
+        communities = build_communities(
+            nodes, erows, weight_mode=WeightMode.parse(config.community_weight))
     except ImportError:
         import logging
         logging.getLogger(__name__).warning(

@@ -66,7 +66,7 @@ dynamic/unresolved edges are kept (so the AI can see resolution gaps) but never 
 
 ## Config
 
-Layered in `config.py`: `DEFAULTS` dict → `[tool.code-review-ai]` in `pyproject.toml` (or a standalone `cr-ai.toml`) → env `CRAI_<UPPER_KEY>` (highest priority). Notable keys: `diff_base` (default `origin/main`), `entry_names` (glob patterns matched against a function's short name to identify entry points), `entry_decorators` (loaded but **not yet consumed** — entry-point matching is name-glob only), `watch_debounce_ms`, `community_detection` (bool, default `false` — gates Phase C; env `CRAI_COMMUNITY_DETECTION`).
+Layered in `config.py`: `DEFAULTS` dict → `[tool.code-review-ai]` in `pyproject.toml` (or a standalone `cr-ai.toml`) → env `CRAI_<UPPER_KEY>` (highest priority). Notable keys: `diff_base` (default `origin/main`), `entry_names` (glob patterns matched against a function's short name to identify entry points), `entry_decorators` (loaded but **not yet consumed** — entry-point matching is name-glob only), `watch_debounce_ms`, `community_detection` (bool, default `false` — gates Phase C; env `CRAI_COMMUNITY_DETECTION`), `community_weight` (str, default `"plain"` - Phase C edge weighting; `"degree_damped"` opt-in down-weights edges incident to cross-module sink hubs like base classes / util modules; env `CRAI_COMMUNITY_WEIGHT`).
 
 ## Frontends
 
