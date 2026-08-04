@@ -136,13 +136,29 @@ def test_update_nodes_edges_touches_only_changed(tmp_path, monkeypatch):
 
 
 def test_update_nodes_edges_deletes_file_cleans_memberships(tmp_path):
+    pytest.importorskip("leidenalg")
     repo, cfg = _git_repo(tmp_path)
+    cfg.community_detection = True
+    # 让 util.py 符号真正挂到 flow 与 community 上，否则后续清理断言是空转：
+    # - 追加一个根函数 run_util()（无入边 -> 成为 flow 入口）调用 util.helper()
+    # - import util 产生 app -> util 结构边，使 util 模块进入 community
+    app = repo / "app.py"
+    app.write_text(app.read_text(encoding="utf-8")
+                   + "\nimport util\n\n\ndef run_util():\n    util.helper()\n",
+                   encoding="utf-8")
     conn = connect(cfg.db_path)
     _init_and_build(cfg, conn)
     node_ids = [r["id"] for r in conn.execute(
         "SELECT id FROM nodes WHERE file_path LIKE '%util.py'")]
     assert node_ids
     placeholders = ",".join("?" for _ in node_ids)
+    # 前置断言：删除前 util.py 节点确实在 flow/community memberships 中
+    assert conn.execute(
+        f"SELECT COUNT(*) FROM flow_memberships WHERE node_id IN ({placeholders})",
+        node_ids).fetchone()[0] > 0
+    assert conn.execute(
+        f"SELECT COUNT(*) FROM community_memberships WHERE node_id IN ({placeholders})",
+        node_ids).fetchone()[0] > 0
     # 删除 util.py，走 watcher hint 路径
     (repo / "util.py").unlink()
     upd.update_nodes_edges(cfg, conn, ["util.py"])
