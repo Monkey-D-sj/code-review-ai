@@ -13,7 +13,7 @@ from code_review_ai.config import Config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.graph import query_graph as _query_graph
 from code_review_ai.impact import get_impact as _get_impact
-from code_review_ai.indexer import ParseCache, rebuild
+from code_review_ai.update import sync
 
 
 def _conn(config: Config):
@@ -26,20 +26,21 @@ def create_server(config: Config):
     from mcp.server import MCPServer
     mcp = MCPServer("code-review-ai")
     conn = _conn(config)
-    cache = ParseCache()
     lock = threading.Lock()
 
     @mcp.tool()
     def rebuild_index() -> str:
-        """Rebuild the code graph index from the working tree (parse, resolve,
-        flows, communities). Returns a JSON object with node/edge/flow counts
-        and per-stage timings. Normally the watcher keeps the index current;
-        call only when you need fresh data right now."""
-        with lock:  # serialize against the watcher's rebuilds
-            stats = rebuild(config, conn, cache)
-        return json.dumps({"nodes": stats.node_count, "edges": stats.edge_count,
-                           "flows": stats.flow_count, "built_at": stats.built_at,
-                           "timings_ms": stats.stage_timings})
+        """Refresh the code graph index from the working tree (incremental
+        nodes/edges, then flows/communities; full rebuild on config/version
+        change). Returns a JSON object with counts. Normally the watcher keeps
+        nodes/edges current and git hooks keep flows current; call only when
+        you need fresh data right now."""
+        with lock:
+            result = sync(config, conn)
+        return json.dumps({"nodes": result["nodes"], "edges": result["edges"],
+                           "flows": result["flows"],
+                           "communities": result["communities"],
+                           "full_rebuild": result["full_rebuild"]})
 
     @mcp.tool()
     def get_impact(symbols: list[str] | None = None,
@@ -150,9 +151,8 @@ def create_server(config: Config):
         except urllib.error.URLError as e:
             return json.dumps({"error": str(e.reason)})
 
-    # attach conn/cache/lock for main() to wire into startup + watcher
+    # attach conn/lock for main() to wire into startup + watcher
     mcp._conn = conn
-    mcp._cache = cache
     mcp._lock = lock
     return mcp
 
@@ -161,13 +161,12 @@ def main():
     import logging
     import threading
     from code_review_ai.config import load_config
-    from code_review_ai.watcher import run_watcher, startup_rebuild
+    from code_review_ai.watcher import run_watcher, startup_sync
     logging.basicConfig(level=logging.INFO)
     config = load_config()
     server = create_server(config)
-    startup_rebuild(config, server._conn, server._cache, server._lock)
-    t = threading.Thread(target=run_watcher,
-                         args=(config, server._cache, server._lock), daemon=True)
+    startup_sync(config, server._conn, server._lock)
+    t = threading.Thread(target=run_watcher, args=(config, server._lock), daemon=True)
     t.start()
     server.run()
 

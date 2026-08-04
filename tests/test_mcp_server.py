@@ -21,6 +21,20 @@ def _server(tmp_path, community=False):
     return create_server(cfg), conn, cfg
 
 
+def test_rebuild_index_tool_returns_new_shape(tmp_path):
+    # empty DB: rebuild_index -> sync -> full rebuild with the new return shape
+    cfg = load_config(FIX)
+    cfg.db_path = str(tmp_path / "m.db")
+    cfg.repo_path = FIX
+    server = create_server(cfg)
+    tools = server._tool_manager._tools
+    assert "rebuild_index" in tools
+    data = json.loads(tools["rebuild_index"].fn())
+    assert set(data) == {"nodes", "edges", "flows", "communities", "full_rebuild"}
+    assert data["full_rebuild"] is True
+    assert data["nodes"] > 0 and data["edges"] > 0
+
+
 def test_get_impact_tool(tmp_path):
     server, conn, cfg = _server(tmp_path)
     tools = server._tool_manager._tools
