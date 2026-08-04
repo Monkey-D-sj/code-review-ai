@@ -52,6 +52,9 @@ update_nodes_edges(config, conn, changed_paths=None):
 
 - manifest 键 = repo-relative；DB `file_path` = 绝对路径（既有约定），按绝对路径删。
 - 改动文件只删它自己的旧行再插新行；未变文件的 nodes/edges 一行不动。
+- 改动文件重插节点会产生新自增 id，安全：edges 的 source/target 存的是 **qname 字符串**
+  而非 id，build_flows 用 qname→id 映射解析，重插后仍指向新 id；被删符号的 target 在
+  flows 构建时因缺节点被跳过、并由修复 pass 翻回 unresolved。
 - degrees 全量重算（edges 表扫描 + 计数，~19k 行 ≈ 10ms）。
 - 文件发现：`list_source_files` 改为**单次** `git ls-files` 传全部 extension glob
   （当前 7 个子进程 → 1 个，458ms → ~60ms）+ 逐文件 `isfile` 判删除（tracked 但已删的
@@ -126,6 +129,8 @@ update_flows(config, conn):
   build_meta 不一致 → 走 `rebuild` 全量。
 - `is_stale` 由新的两问替代：`needs_nodes_update`（manifest 差集）+ `needs_flows_update`
   （HEAD 差）；`built_at` 保留为信息性（watcher 测试仍依赖它变化）。
+- 仓库无提交时 `git rev-parse HEAD` 无法解析 → `flows_as_of_head` 视为过期（None），
+  首次 `sync` 即构建 flows。
 
 ## ⑥ hook 安装 — `install-hooks`
 
@@ -149,8 +154,8 @@ update_flows(config, conn):
 - **`update.py`（新）**：增量路径编排——`update_nodes_edges`、`_repair_resolutions`、
   `update_flows`、`update_communities`、`sync`、manifest 读写、`needs_*` 检查。复用
   `parser.parse_file`、`resolver.resolve_edges`、`flow_builder.build_flows`、
-  `community.build_communities`、`db.transaction`；不反向依赖 `indexer`（避免环），
-  需要全量兜底时由调用方决定。
+  `community.build_communities`、`db.transaction`。配置/版本变更的兜底由 `sync` 内部
+  检测后**单向**调用 `indexer.rebuild`（indexer 不 import update，无环）。
 - **`indexer.py`**：保留全量 `rebuild` 及 `_write_*`；抽出共享的 `recompute_degrees(conn)`
   供 `update` 复用（避免重复）。
 - **`parser.py`**：`list_source_files` 改为单次 git 调用。
