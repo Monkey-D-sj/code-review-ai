@@ -3,6 +3,10 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+# Bumped whenever the schema or its meaning changes in a way that makes an
+# older index.db incompatible; indexers check this before rebuilding.
+INDEX_VERSION = 2
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (
     id INTEGER PRIMARY KEY,
@@ -63,6 +67,12 @@ CREATE TABLE IF NOT EXISTS build_meta (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS files (
+    path TEXT PRIMARY KEY,
+    mtime REAL,
+    size INTEGER,
+    file_hash TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
 CREATE INDEX IF NOT EXISTS idx_memberships_node ON flow_memberships(node_id);
@@ -78,6 +88,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     # watcher-thread rebuilds legal, not just the 2.0 tool pool.
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
     return conn

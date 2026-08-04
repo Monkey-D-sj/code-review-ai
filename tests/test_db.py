@@ -1,6 +1,6 @@
 from conftest import Q
 import sqlite3
-from code_review_ai.db import connect, init_schema
+from code_review_ai.db import INDEX_VERSION, connect, init_schema
 
 
 def test_init_schema_creates_tables(tmp_path):
@@ -48,3 +48,17 @@ def test_init_schema_migrates_legacy_nodes(tmp_path):
         "SELECT in_degree, out_degree FROM nodes WHERE qualified_name='mod::old'"
     ).fetchone()
     assert row["in_degree"] == 0 and row["out_degree"] == 0
+
+
+def test_files_table_and_busy_timeout(tmp_path):
+    conn = connect(str(tmp_path / "t.db"))
+    init_schema(conn)
+    # files 表存在且可写
+    conn.execute(
+        "INSERT INTO files(path,mtime,size,file_hash) VALUES('a.py', 1.0, 3, 'x')")
+    row = conn.execute("SELECT * FROM files").fetchone()
+    assert row["path"] == "a.py" and row["size"] == 3
+    assert INDEX_VERSION == 2
+    # busy_timeout 生效（PRAGMA 返回毫秒）
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    conn.close()
