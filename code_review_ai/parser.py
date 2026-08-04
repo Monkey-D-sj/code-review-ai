@@ -191,18 +191,16 @@ def list_source_files(repo_path: str, extensions: list[str] | None = None) -> li
     """Return sorted relative paths of source files from git.
 
     extensions: list of git ls-files globs like ["*.py", "*.ts"]. Default: ["*.py"]
+    Single git call with all globs as pathspecs (was one subprocess per glob).
     """
     if extensions is None:
         extensions = ["*.py"]
-    files: set[str] = set()
-    for ext in extensions:
-        out = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard", ext],
-            cwd=repo_path, capture_output=True, text=True, check=True,
-            encoding="utf-8", errors="replace",
-        )
-        files.update(out.stdout.splitlines())
-    return sorted(files)
+    out = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", *extensions],
+        cwd=repo_path, capture_output=True, text=True, check=True,
+        encoding="utf-8", errors="replace",
+    )
+    return sorted(out.stdout.splitlines())
 
 
 def filter_excluded(files: list[str], patterns: list[str]) -> list[str]:

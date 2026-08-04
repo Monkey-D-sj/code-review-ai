@@ -41,3 +41,20 @@ def test_filter_excluded_nested_directory_patterns():
                                                    "app/alembic/versions/x.py", "app/main.py"]
     # top-level dist/ still excluded via the bare pattern
     assert filter_excluded(["dist/b.js", "app/main.py"], ["dist/*"]) == ["app/main.py"]
+
+
+def test_list_source_files_single_git_call(tmp_path, monkeypatch):
+    """list_source_files must collect every extension glob in ONE git call."""
+    import subprocess
+    from code_review_ai import parser
+    calls = {"n": 0}
+    real_run = subprocess.run
+
+    def counting(*args, **kwargs):
+        calls["n"] += 1
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", counting)
+    files = parser.list_source_files(FIX, parser.SOURCE_GLOBS)
+    assert calls["n"] == 1          # 一次调用拿到所有扩展
+    assert "app.py" in files and "ts/app.ts" in files
