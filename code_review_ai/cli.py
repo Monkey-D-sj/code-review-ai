@@ -3,7 +3,7 @@ import argparse
 import json
 import sys
 
-from code_review_ai.changes import detect_changed_symbols
+from code_review_ai.changes import build_change_summary, detect_changed_symbols
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.export_graph import export as export_graph
@@ -38,6 +38,10 @@ def main(argv: list[str] | None = None) -> int:
 
     _add_common(sub.add_parser("rebuild"))
     s = sub.add_parser("query")
+    _add_common(s)
+    s.add_argument("--symbols", nargs="*")
+    s.add_argument("--files", nargs="*")
+    s = sub.add_parser("summary")
     _add_common(s)
     s.add_argument("--symbols", nargs="*")
     s.add_argument("--files", nargs="*")
@@ -83,6 +87,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(get_impact(conn, changed)))
+    elif args.cmd == "summary":
+        try:
+            payload = build_change_summary(cfg, conn,
+                                           symbols=args.symbols, files=args.files)
+        except RuntimeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(payload))
     elif args.cmd == "search":
         import fnmatch
         rows = conn.execute(

@@ -1,3 +1,5 @@
+import json
+
 from conftest import FIXTURES as FIX, Q
 
 from code_review_ai import cli
@@ -16,6 +18,19 @@ def test_cli_search(tmp_path, capsys):
     assert code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert any(Q("auth", "login") in line and "function" in line for line in lines)
+
+
+def test_cli_summary(tmp_path, capsys):
+    code = main(["rebuild", "--repo", FIX, "--db", str(tmp_path / "c.db")])
+    assert code == 0
+    _ = capsys.readouterr()  # discard rebuild output
+    code = main(["summary", "--symbols", Q("auth", "login"),
+                 "--repo", FIX, "--db", str(tmp_path / "c.db")])
+    assert code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert set(data) == {"summary", "changed_functions"}
+    assert data["summary"]["changed_functions"] == 1
+    assert data["changed_functions"][0]["qname"] == Q("auth", "login")
 
 
 class _Res:
