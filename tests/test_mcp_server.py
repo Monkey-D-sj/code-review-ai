@@ -87,3 +87,13 @@ def test_get_change_summary_tool(tmp_path):
     assert record["file"] == "auth.py"
     assert record["start_line"] == 6
     assert record["end_line"] == 7
+
+
+def test_query_graph_tool(tmp_path):
+    server, conn, cfg = _server(tmp_path)
+    tools = server._tool_manager._tools
+    assert "query_graph" in tools
+    out = json.loads(tools["query_graph"].fn(qualified_name=Q("auth", "login")))
+    assert out["qname"] == Q("auth", "login")
+    assert out["edge_kind"] == "call" and out["direction"] == "both"
+    assert [n["qname"] for n in out["in"]] == [Q("app", "main")]

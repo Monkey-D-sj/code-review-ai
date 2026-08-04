@@ -11,6 +11,7 @@ from code_review_ai.community import get_community as _get_community
 from code_review_ai.community import list_communities as _list_communities
 from code_review_ai.config import Config
 from code_review_ai.db import connect, init_schema
+from code_review_ai.graph import query_graph as _query_graph
 from code_review_ai.impact import get_impact as _get_impact
 from code_review_ai.indexer import ParseCache, rebuild
 
@@ -60,6 +61,15 @@ def create_server(config: Config):
         graph instead of the diff. Returns a JSON object."""
         return json.dumps(build_change_summary(config, conn,
                                                symbols=symbols, files=files))
+
+    @mcp.tool()
+    def query_graph(qualified_name: str, edge_kind: str = "call",
+                    direction: str = "both") -> str:
+        """图邻域查询：某符号通过指定边类型（call|contains|import|extends|
+        implements|all，默认 call）的 resolved 边，in=用了它的节点，out=它用的
+        节点。返回 JSON 对象。"""
+        return json.dumps(_query_graph(conn, qualified_name,
+                                       edge_kind=edge_kind, direction=direction))
 
     @mcp.tool()
     def search_symbol(query: str) -> str:
