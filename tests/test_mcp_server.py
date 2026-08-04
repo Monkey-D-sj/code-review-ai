@@ -73,3 +73,17 @@ def test_get_symbol_detail_tool(tmp_path):
     assert data["in_degree"] == 1   # called by app::main only
     assert data["out_degree"] == 0  # calls nothing resolved
     assert data["callers"] == [Q("app", "main")]
+
+
+def test_get_change_summary_tool(tmp_path):
+    server, conn, cfg = _server(tmp_path)
+    tools = server._tool_manager._tools
+    assert "get_change_summary" in tools
+    data = json.loads(tools["get_change_summary"].fn(symbols=[Q("auth", "login")]))
+    assert set(data) == {"summary", "changed_functions"}
+    assert data["summary"]["changed_functions"] == 1
+    record = data["changed_functions"][0]
+    assert record["qname"] == Q("auth", "login")
+    assert record["file"] == "auth.py"
+    assert record["start_line"] == 6
+    assert record["end_line"] == 7

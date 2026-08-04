@@ -6,7 +6,7 @@ import threading
 import urllib.request
 import urllib.error
 
-from code_review_ai.changes import detect_changed_symbols
+from code_review_ai.changes import build_change_summary, detect_changed_symbols
 from code_review_ai.community import get_community as _get_community
 from code_review_ai.community import list_communities as _list_communities
 from code_review_ai.config import Config
@@ -50,6 +50,16 @@ def create_server(config: Config):
         grepping when assessing what a code change breaks."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
         return json.dumps(_get_impact(conn, changed))
+
+    @mcp.tool()
+    def get_change_summary(symbols: list[str] | None = None,
+                           files: list[str] | None = None) -> str:
+        """Change summary: from the git diff (diff_base) compute `summary`
+        (diff stats) + `changed_functions` (changed function/method/class
+        detail). Pass explicit `symbols` to resolve those qnames from the
+        graph instead of the diff. Returns a JSON object."""
+        return json.dumps(build_change_summary(config, conn,
+                                               symbols=symbols, files=files))
 
     @mcp.tool()
     def search_symbol(query: str) -> str:
