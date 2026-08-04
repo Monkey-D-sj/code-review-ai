@@ -4,6 +4,7 @@ import json
 import sys
 
 from code_review_ai.changes import build_change_summary, detect_changed_symbols
+from code_review_ai.benchmark import load_cases, run_benchmark
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.graph import query_graph
@@ -31,6 +32,15 @@ def _run_install(args) -> int:
                   scope=args.scope, name=args.name)
     print(res.message)
     return 0 if res.success else 1
+
+
+def _write_json(payload: dict, output_path: str | None) -> None:
+    rendered = json.dumps(payload, indent=2, ensure_ascii=False)
+    if output_path:
+        from pathlib import Path
+        Path(output_path).write_text(rendered + "\n", encoding="utf-8")
+    else:
+        print(rendered)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -63,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
     gp.add_argument("-n", "--max-nodes", type=int, default=200)
     gp.add_argument("-m", "--mode", default="communities",
                     choices=["communities", "graph", "flow"])
+    bp = sub.add_parser("benchmark")
+    _add_common(bp)
+    bp.add_argument("--cases", required=True)
+    bp.add_argument("--top-k", type=int, default=10)
+    bp.add_argument("-o", "--out")
     ip = sub.add_parser("install")
     ip.add_argument("--platform", default="claude-code")
     ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
@@ -127,6 +142,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{c['id']}  {c['label']}  nodes={c['node_count']}  modularity={c['modularity']}")
     elif args.cmd == "graph":
         export_graph(args.db, args.out, args.max_nodes, args.mode)
+    elif args.cmd == "benchmark":
+        try:
+            payload = run_benchmark(cfg, conn, load_cases(args.cases), args.top_k)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_json(payload, args.out)
     return 0
 
 

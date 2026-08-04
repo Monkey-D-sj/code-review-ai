@@ -61,6 +61,55 @@ code-review-ai communities [--symbol auth::login]       # list communities / one
 
 `rebuild`/`query`/`search`/`communities` also accept no `--repo`/`--db` (defaults: `.` and `.code-review-ai/index.db`).
 
+## Historical-change benchmark
+
+Measure whether impact queries recover the files touched by known historical
+fixes. A manifest is a JSON array; each case identifies the symbols changed by
+the fix and the production/test files from the real patch:
+
+```json
+[
+  {
+    "id": "pallets__flask-5014",
+    "changed_symbols": ["flask.app::Flask.make_response"],
+    "gold_files": ["src/flask/app.py", "tests/test_basic.py"]
+  }
+]
+```
+
+Check out the repository at the historical base commit, then run:
+
+```bash
+code-review-ai benchmark --repo ../flask --cases cases/flask.json \
+  --db .code-review-ai/flask.db --top-k 10 -o results/flask.json
+```
+
+The report includes indexing time and database size, call-edge resolution
+distribution, symbol-found rate, per-case query latency, and historical patch
+file Recall@K/Precision@K. `examples/benchmark-cases.example.json` is a starter manifest.
+Patch files are an observable proxy for impact, not a complete ground truth;
+label the metric **historical patch file recall** when reporting results.
+
+### Reproducible SWE-bench suite
+
+`benchmarks/swe-bench-verified-30.json` contains 30 real, fixed-revision cases:
+Flask (1), Requests (8), pytest (11), and Xarray (10). Production patch ranges
+are the change seeds; files from the official `test_patch` are the retrieval
+targets, avoiding the trivial metric of predicting the seed file itself.
+
+```bash
+uv run python scripts/run_swebench_suite.py \
+  --cases benchmarks/swe-bench-verified-30.json \
+  --cache-dir .benchmark-cache --top-k 10 \
+  --out benchmark-results/swe-bench-verified-30.json
+```
+
+The runner clones each repository once, checks out every case's pinned
+`base_commit`, includes tests in indexing, and creates an isolated SQLite index
+per case. Use `--limit 1` for a smoke test. The committed manifest can be
+regenerated from Hugging Face rows JSON with
+`scripts/generate_swebench_manifest.py`; raw dataset files are not vendored.
+
 ### Visualization (`graph`)
 
 Export interactive HTML graphs of the call structure:

@@ -13,6 +13,8 @@ wheels/
 
 # Code Review AI index
 .code-review-ai/
+.benchmark-cache/
+benchmark-results/
 
 # Generated exports
 *.html
