@@ -84,6 +84,17 @@ def test_detect_changed_symbols_still_excludes_classes(monkeypatch):
     assert Q("auth", "authenticate", Q("auth", "UserService")) in out  # method kept
 
 
+def test_changed_functions_skips_unsupported_files(monkeypatch):
+    cfg = load_config(FIX)
+    import code_review_ai.changes as ch
+
+    def unsupported_extension(file_path, repo_root, lang=None):
+        raise ValueError(f"unsupported file extension: {file_path}")
+
+    monkeypatch.setattr(ch, "parse_file", unsupported_extension)
+    assert ch._changed_functions(cfg, {"README.md": [(1, 5)]}) == []
+
+
 def test_build_change_summary_diff_path(tmp_path, monkeypatch):
     cfg = load_config(FIX)
     import code_review_ai.changes as ch

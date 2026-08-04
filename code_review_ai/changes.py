@@ -75,7 +75,9 @@ def _changed_functions(config: Config, diff_ranges: dict[str, list[tuple[int, in
         path = f"{repo}/{rel}"
         try:
             pf = parse_file(path, repo)
-        except OSError:
+        except (OSError, ValueError):
+            # OSError: file gone from disk. ValueError: unsupported extension
+            # (e.g. *.md in the diff) — not source, nothing to report.
             continue
         for node in pf.nodes:
             if node.kind not in kinds:
@@ -104,9 +106,9 @@ def detect_changed_symbols(config: Config,
 
 def _relative_to_repo(config: Config, file_path: str) -> str:
     try:
-        return str(Path(file_path).resolve().relative_to(Path(config.repo_path).resolve()))
+        return Path(file_path).resolve().relative_to(Path(config.repo_path).resolve()).as_posix()
     except ValueError:
-        return file_path
+        return file_path.replace("\\", "/")
 
 
 def _symbols_summary(config: Config, conn, symbols: list[str]) -> dict:
