@@ -19,6 +19,8 @@ uv run code-review-ai query   --symbols auth::login        # impact for given sy
 uv run code-review-ai query   --files path/to/file.py      # impact via git diff of files
 uv run code-review-ai summary --symbols auth::login   # change summary JSON (summary + changed_functions)
 uv run code-review-ai summary                        # same, computed from the git diff of the whole tree
+uv run code-review-ai query-graph auth::login                # graph neighborhood (in/out via resolved edges)
+uv run code-review-ai query-graph auth::login --edge-kind call --direction both
 uv run code-review-ai search  "login"                       # glob-match symbol short names
 uv run code-review-ai communities [--symbol auth::login]    # list communities, or one symbol's community
 uv run code-review-ai install --platform claude-code        # register MCP server with Claude Code (self-install)
@@ -47,7 +49,7 @@ git ls-files *.py
 
 ### Module responsibilities (one each, no cycles)
 
-`parser.py` tree-sitter → nodes/raw-calls/imports · `resolver.py` import-aware call resolution → edges · `flow_builder.py` adjacency + BFS → flows · `community.py` Leiden community detection over structural edges (opt-in) → communities + `community_edges` · `indexer.py` rebuild orchestration · `export_graph.py` persisted graph/communities/flows → interactive HTML · `changes.py` git diff / files / symbols → changed qnames + change summary · `impact.py` membership slicing + edge fallback → impact · `watcher.py` watchfiles debounce → trigger rebuild · `config.py` layered config · `db.py` SQLite schema/WAL/txn · `installer.py` self-install (register MCP via `claude mcp add`) · `mcp_server.py` / `cli.py` frontends.
+`parser.py` tree-sitter → nodes/raw-calls/imports · `resolver.py` import-aware call resolution → edges · `flow_builder.py` adjacency + BFS → flows · `community.py` Leiden community detection over structural edges (opt-in) → communities + `community_edges` · `indexer.py` rebuild orchestration · `export_graph.py` persisted graph/communities/flows → interactive HTML · `changes.py` git diff / files / symbols → changed qnames + change summary · `graph.py` resolved-edge neighborhood query → in/out neighbors · `impact.py` membership slicing + edge fallback → impact · `watcher.py` watchfiles debounce → trigger rebuild · `config.py` layered config · `db.py` SQLite schema/WAL/txn · `installer.py` self-install (register MCP via `claude mcp add`) · `mcp_server.py` / `cli.py` frontends.
 
 ## Conventions you must follow
 
@@ -72,7 +74,7 @@ Layered in `config.py`: `DEFAULTS` dict → `[tool.code-review-ai]` in `pyprojec
 
 ## Frontends
 
-MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get_impact`, `get_change_summary`, `search_symbol`, `get_symbol_detail`, `list_entry_points`, `get_communities`, `get_community`. On startup it runs a catch-up rebuild if the index is stale (`is_stale` compares file mtimes to `build_meta.built_at`), then a daemon thread runs `watchfiles` to debounce-rebuild on `.py` changes. CLI (`code-review-ai`) mirrors `rebuild`/`query`/`search`/`communities` for manual use, plus `install --platform claude-code` which self-registers the MCP server (shells out to `claude mcp add` with a `uvx --from <git-url> code-review-ai-mcp` launch command; see `installer.py`). `graph` (`export_graph.py`) renders the index as interactive HTML: `-m communities` draws the persisted community graph (bubbles sized by node count, cross-community edges read straight from `community_edges` — never re-derived), `-m graph` the raw function-level call graph, `-m flow` the BFS flow chains.
+MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get_impact`, `get_change_summary`, `query_graph`, `search_symbol`, `get_symbol_detail`, `list_entry_points`, `get_communities`, `get_community`. On startup it runs a catch-up rebuild if the index is stale (`is_stale` compares file mtimes to `build_meta.built_at`), then a daemon thread runs `watchfiles` to debounce-rebuild on `.py` changes. CLI (`code-review-ai`) mirrors `rebuild`/`query`/`search`/`communities` for manual use, plus `install --platform claude-code` which self-registers the MCP server (shells out to `claude mcp add` with a `uvx --from <git-url> code-review-ai-mcp` launch command; see `installer.py`). `graph` (`export_graph.py`) renders the index as interactive HTML: `-m communities` draws the persisted community graph (bubbles sized by node count, cross-community edges read straight from `community_edges` — never re-derived), `-m graph` the raw function-level call graph, `-m flow` the BFS flow chains.
 
 ## Design spec & dev history
 
