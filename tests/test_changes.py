@@ -43,3 +43,14 @@ def test_deleted_symbol_reported(tmp_path, monkeypatch):
     monkeypatch.setattr(ch, "_git_diff", lambda base, files: {"auth.py": [(2, 3)]})
     out = detect_changed_symbols(cfg, files=["auth.py"])
     assert Q("auth","authenticate",Q("auth","UserService")) in out
+
+
+def test_git_numstat_parses_text_and_binary(monkeypatch):
+    import code_review_ai.changes as ch
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "10\t2\tauth.py\n-\t-\tlogo.png\n"
+        stderr = ""
+    monkeypatch.setattr(ch.subprocess, "run", lambda *args, **kwargs: _FakeResult())
+    assert ch._git_numstat("origin/main") == {"auth.py": (10, 2), "logo.png": (0, 0)}

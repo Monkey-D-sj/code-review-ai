@@ -39,6 +39,28 @@ def _overlaps(start: int, end: int, ranges: list[tuple[int, int]]) -> bool:
     return any(not (end < s or start > e) for s, e in ranges)
 
 
+def _git_numstat(base: str, files: list[str] | None = None) -> dict[str, tuple[int, int]]:
+    """{file: (added, removed)} per changed file. Binary files map to (0, 0)
+    but keep their key so files_changed still counts them."""
+    args = ["git", "diff", "--numstat", base]
+    if files:
+        args += ["--"] + files
+    out = subprocess.run(args, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace")
+    if out.returncode != 0:
+        raise RuntimeError(
+            f"git diff failed (exit {out.returncode}): {out.stderr.strip()}"
+        )
+    stats: dict[str, tuple[int, int]] = {}
+    for line in out.stdout.splitlines():
+        added_s, removed_s, path = line.split("\t", 2)
+        if added_s == "-" or removed_s == "-":
+            stats[path] = (0, 0)
+            continue
+        stats[path] = (int(added_s), int(removed_s))
+    return stats
+
+
 def detect_changed_symbols(config: Config,
                            symbols: list[str] | None = None,
                            files: list[str] | None = None) -> list[str]:
