@@ -9,7 +9,11 @@ def _git_diff(base: str, files: list[str] | None) -> dict[str, list[tuple[int, i
     args = ["git", "diff", "--unified=0", base]
     if files:
         args += ["--"] + files
-    out = subprocess.run(args, capture_output=True, text=True)
+    # git diff output is UTF-8; text=True would decode with the locale codepage
+    # (GBK on zh-CN Windows) and crash on non-ASCII content. errors="replace"
+    # keeps the @@ line-range parsing robust to any undecodable bytes.
+    out = subprocess.run(args, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace")
     if out.returncode != 0:
         raise RuntimeError(
             f"git diff failed (exit {out.returncode}): {out.stderr.strip()}"
@@ -38,12 +42,14 @@ def _overlaps(start: int, end: int, ranges: list[tuple[int, int]]) -> bool:
 def detect_changed_symbols(config: Config,
                            symbols: list[str] | None = None,
                            files: list[str] | None = None) -> list[str]:
+    """Changed symbol qnames: explicit `symbols`, or the git diff of `files`
+    (or the whole tree when neither is given) against config.diff_base.
+
+    Raises RuntimeError if the git diff fails (e.g. diff_base doesn't exist) so
+    callers surface the misconfiguration instead of returning an empty list."""
     if symbols is not None:
         return list(symbols)
-    try:
-        diff = _git_diff(config.diff_base, files)
-    except RuntimeError:
-        return []
+    diff = _git_diff(config.diff_base, files)
     repo = config.repo_path
     out: list[str] = []
     for rel, ranges in diff.items():

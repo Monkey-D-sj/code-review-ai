@@ -77,7 +77,11 @@ def main(argv: list[str] | None = None) -> int:
                           "flows": stats.flow_count, "built_at": stats.built_at,
                           "timings_ms": stats.stage_timings}))
     elif args.cmd == "query":
-        changed = detect_changed_symbols(cfg, symbols=args.symbols, files=args.files)
+        try:
+            changed = detect_changed_symbols(cfg, symbols=args.symbols, files=args.files)
+        except RuntimeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         print(json.dumps(get_impact(conn, changed)))
     elif args.cmd == "search":
         import fnmatch

@@ -199,6 +199,7 @@ def list_source_files(repo_path: str, extensions: list[str] | None = None) -> li
         out = subprocess.run(
             ["git", "ls-files", "--cached", "--others", "--exclude-standard", ext],
             cwd=repo_path, capture_output=True, text=True, check=True,
+            encoding="utf-8", errors="replace",
         )
         files.update(out.stdout.splitlines())
     return sorted(files)

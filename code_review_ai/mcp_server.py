@@ -22,15 +22,18 @@ def _conn(config: Config):
 
 
 def create_server(config: Config):
-    from mcp.server.fastmcp import FastMCP
-    mcp = FastMCP("code-review-ai")
+    from mcp.server import MCPServer
+    mcp = MCPServer("code-review-ai")
     conn = _conn(config)
     cache = ParseCache()
     lock = threading.Lock()
 
     @mcp.tool()
     def rebuild_index() -> str:
-        """Rebuild the index from the working tree."""
+        """Rebuild the code graph index from the working tree (parse, resolve,
+        flows, communities). Returns a JSON object with node/edge/flow counts
+        and per-stage timings. Normally the watcher keeps the index current;
+        call only when you need fresh data right now."""
         with lock:  # serialize against the watcher's rebuilds
             stats = rebuild(config, conn, cache)
         return json.dumps({"nodes": stats.node_count, "edges": stats.edge_count,
@@ -40,14 +43,19 @@ def create_server(config: Config):
     @mcp.tool()
     def get_impact(symbols: list[str] | None = None,
                    files: list[str] | None = None) -> str:
-        """Return impact chains for changed symbols. If neither symbols nor files
-        given, derives changed symbols from git diff."""
+        """Impact analysis for changed symbols: the affected business entry
+        points plus upstream callers / downstream callees per flow. Pass
+        explicit `symbols` (e.g. ["auth::login"]) or `files`; if both omitted,
+        changed symbols are derived from git diff (diff_base). Prefer this over
+        grepping when assessing what a code change breaks."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
         return json.dumps(_get_impact(conn, changed))
 
     @mcp.tool()
     def search_symbol(query: str) -> str:
-        """Find symbols by name glob."""
+        """Discover symbols by glob on their short name (e.g. "*login*",
+        "UserService"). Returns a JSON list of {qname, kind, file, line}. Use
+        to find qualified names before get_symbol_detail / get_impact."""
         rows = conn.execute(
             "SELECT qualified_name,kind,file_path,start_line FROM nodes WHERE kind IN ('function','method','class')"
         ).fetchall()
@@ -58,7 +66,10 @@ def create_server(config: Config):
 
     @mcp.tool()
     def get_symbol_detail(qualified_name: str) -> str:
-        """Node detail + direct callees/callers."""
+        """Detail for one fully-qualified symbol, e.g. "auth::UserService.login":
+        kind, file, line, signature, in/out degree, and direct resolved
+        callers/callees as qnames. Returns a JSON object, or
+        {"error": "symbol not found"}."""
         r = conn.execute("SELECT * FROM nodes WHERE qualified_name=?", (qualified_name,)).fetchone()
         if r is None:
             return json.dumps({"error": "symbol not found"})
@@ -74,7 +85,9 @@ def create_server(config: Config):
 
     @mcp.tool()
     def list_entry_points() -> str:
-        """List designated entry points."""
+        """List the designated business entry points (matched by entry_names)
+        that have reachable flows. Returns a JSON list of {qname, name, file}.
+        Useful to see the top-level business flows the index has built."""
         rows = conn.execute(
             "SELECT DISTINCT f.name, n.qualified_name, n.file_path FROM flows f "
             "JOIN nodes n ON n.id=f.entry_point_id"
@@ -84,19 +97,27 @@ def create_server(config: Config):
 
     @mcp.tool()
     def get_communities() -> str:
-        """List all detected communities and their member symbols."""
+        """List all detected communities (Leiden over structural edges) with
+        their members. Returns a JSON list of {id, label, node_count,
+        modularity, members: [qnames]}. Horizontal view of which modules
+        cluster together."""
         return json.dumps(_list_communities(conn))
 
     @mcp.tool()
     def get_community(qualified_name: str) -> str:
-        """Return the community a symbol belongs to, with its co-members
-        (the symbol's structural blast radius)."""
+        """One symbol's community: label, modularity, and co-members (its
+        structural blast radius). Complements get_impact (vertical
+        caller/callee chains) with the horizontal cluster view. Returns a JSON
+        object with "found": false and a reason if the symbol is missing or on
+        no structural edge."""
         return json.dumps(_get_community(conn, qualified_name))
 
     @mcp.tool()
     def call_external_service(body: str) -> str:
-        """POST a JSON body to the review feedback service.
-        `body` is a JSON string. Returns the response body as text."""
+        """POST a JSON string to the external review feedback service
+        (config.external_service_url). Returns the raw response text, or JSON
+        {"error": ...} on HTTP/network failure. Used by the code-review skill
+        to submit review reports."""
         data = body.encode("utf-8")
         req = urllib.request.Request(
             config.external_service_url, data=data,

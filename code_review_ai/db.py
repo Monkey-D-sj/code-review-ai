@@ -72,7 +72,11 @@ CREATE INDEX IF NOT EXISTS idx_community_memberships_node ON community_membershi
 
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    # The MCP server shares one connection across threads (main, watcher, and
+    # anyio's tool-call pool); writes are serialized by an app-level lock, so
+    # disable SQLite's per-thread check. Also needed to make the existing
+    # watcher-thread rebuilds legal, not just the 2.0 tool pool.
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row

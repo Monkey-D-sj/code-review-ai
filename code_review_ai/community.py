@@ -1,8 +1,11 @@
-"""Community detection over the resolved call graph (Leiden).
+"""Community detection over the structural resolved graph (Leiden).
 
 This module holds the *structure* of community detection - building an
-undirected graph from resolved call edges, grouping the partition result back
-into labelled communities, and the read-side queries the frontends use.
+undirected graph from structural resolved edges (contains/import/inherits;
+call edges are filtered out by the caller in indexer._write_communities),
+grouping the partition result back into labelled communities, computing the
+community graph's inter-community edges, and the read-side queries the
+frontends use.
 
 The Leiden algorithm itself is invoked through an injectable ``partitioner``
 callable so this module has no hard dependency on ``leidenalg``/``igraph``.
@@ -142,10 +145,15 @@ def _build_undirected_adjacency(edges, qname_to_id,
         used.add(t)
     id_to_qname = {nid: qn for qn, nid in qname_to_id.items() if nid in used}
     ids = sorted(used)
-    factors = _damping_factors(ids, in_neighbors, out_neighbors,
-                               id_to_qname, weight_mode)
-    hub_set = _prune_hub_set(ids, in_neighbors, out_neighbors,
-                             id_to_qname, weight_mode)
+    # Damping and pruning exclude each other: a pruned hub should keep full
+    # local weight, and damping would also hit those local edges - so they're
+    # alternatives, dispatched here rather than threaded into each function.
+    factors = None
+    hub_set = None
+    if weight_mode is WeightMode.DEGREE_DAMPED:
+        factors = _damping_factors(ids, in_neighbors, out_neighbors, id_to_qname)
+    elif weight_mode is WeightMode.HUB_PRUNED:
+        hub_set = _prune_hub_set(ids, in_neighbors, out_neighbors, id_to_qname)
     adj: dict[int, dict[int, float]] = {i: {} for i in ids}
     for (a, b), w in weights.items():
         if (hub_set is not None and (a in hub_set or b in hub_set)
@@ -162,42 +170,15 @@ def _build_undirected_adjacency(edges, qname_to_id,
     return ids, adj
 
 
-def _damping_factors(ids, in_neighbors, out_neighbors, id_to_qname, weight_mode):
-    """Per-node multiplier in [_DAMP_FLOOR, 1.0] on incident edge weights.
-
-    Returns None for PLAIN (no damping). For DEGREE_DAMPED:
-
-        sinkness(n) = (in_deg - out_deg) / (in_deg + out_deg)   # in [-1,1]
-        spread(n)   = 1 - own_in / in_deg                       # in [0,1]
-        factor(n)   = 1 - ALPHA * max(sinkness, 0) * spread
-
-    where own_in = in-neighbours that share the node's own module and in_deg =
-    total in-neighbours. spread is the fraction of a node's *dependents* that
-    live OUTSIDE its home module: 0.0 = all dependents co-located with the node
-    (a local core, keep full weight); 1.0 = every dependent is in another module
-    (a cross-cutting hub, damp). Only sinks (sinkness > 0 - high in, low out,
-    e.g. a base class many inherit from, or a util module many import) are
-    damped. spread uses in-edges only (it tracks where dependents sit); sinkness
-    still uses in+out. No global module count - each node is scored on its own
-    neighbours.
-    """
-    if weight_mode is not WeightMode.DEGREE_DAMPED:
-        return None
+def _damping_factors(ids, in_neighbors, out_neighbors, id_to_qname):
+    """Per-node multiplier in [_DAMP_FLOOR, 1.0] on incident edge weights, for
+    DEGREE_DAMPED. Only sinks get a factor below 1.0; non-sinks are absent from
+    the dict and default to 1.0 at the call site (factors.get(nid, 1.0)). The
+    per-node sinkness/spread signal is shared with _prune_hub_set via
+    _sink_signals - see that for the formula."""
     factors: dict[int, float] = {}
-    for nid in ids:
-        in_nbrs = in_neighbors.get(nid, ())
-        out_nbrs = out_neighbors.get(nid, ())
-        in_deg = len(in_nbrs)
-        out_deg = len(out_nbrs)
-        total = in_deg + out_deg
-        if total == 0:
-            factors[nid] = 1.0
-            continue
-        sinkness = (in_deg - out_deg) / total
-        if sinkness <= 0:
-            factors[nid] = 1.0
-            continue
-        spread = _cross_module_in_fraction(nid, in_nbrs, id_to_qname)
+    for nid, _in_deg, sinkness, spread in _sink_signals(
+            ids, in_neighbors, out_neighbors, id_to_qname):
         factors[nid] = max(1.0 - _DAMP_ALPHA * sinkness * spread, _DAMP_FLOOR)
     return factors
 
@@ -217,29 +198,46 @@ def _cross_module_in_fraction(nid, in_nbrs, id_to_qname) -> float:
     return 1 - own_in / in_deg
 
 
-def _prune_hub_set(ids, in_neighbors, out_neighbors, id_to_qname, weight_mode):
-    """Set of cross-cutting sink hubs whose cross-module edges HUB_PRUNED cuts.
-    A node qualifies when it is a sink (sinkness > 0), has at least
-    _PRUNE_HUB_MIN dependents (so a single cross-module inherit isn't enough),
-    and the majority of those dependents live outside its own module
-    (spread > _PRUNE_SPREAD_MIN). Only the cross-module edges of such hubs are
-    severed; local edges stay, so the hub remains anchored to its home
-    community. Returns None for non-HUB_PRUNED modes."""
-    if weight_mode is not WeightMode.HUB_PRUNED:
-        return None
-    hubs: set[int] = set()
+def _sink_signals(ids, in_neighbors, out_neighbors, id_to_qname):
+    """Yield (nid, in_deg, sinkness, spread) for each sink node - the shared
+    per-node signal behind DEGREE_DAMPED and HUB_PRUNED. Non-sinks and isolates
+    are skipped (both modes leave them untouched).
+
+        sinkness(n) = (in_deg - out_deg) / (in_deg + out_deg)   # in [-1,1]; >0 = sink
+        spread(n)   = 1 - own_in / in_deg                       # in [0,1]; fraction of
+                                                                #   dependents outside
+                                                                #   the node's own module
+
+    sinkness uses in+out; spread uses in-edges only (where dependents sit). No
+    global module count - each node is scored on its own neighbours.
+    """
     for nid in ids:
         in_nbrs = in_neighbors.get(nid, ())
         out_nbrs = out_neighbors.get(nid, ())
         in_deg = len(in_nbrs)
         out_deg = len(out_nbrs)
         total = in_deg + out_deg
-        if total == 0 or in_deg < _PRUNE_HUB_MIN:
+        if total == 0:
             continue
         sinkness = (in_deg - out_deg) / total
         if sinkness <= 0:
             continue
-        if _cross_module_in_fraction(nid, in_nbrs, id_to_qname) > _PRUNE_SPREAD_MIN:
+        spread = _cross_module_in_fraction(nid, in_nbrs, id_to_qname)
+        yield nid, in_deg, sinkness, spread
+
+
+def _prune_hub_set(ids, in_neighbors, out_neighbors, id_to_qname):
+    """Set of cross-cutting sink hubs whose cross-module edges HUB_PRUNED cuts.
+    A sink qualifies when it has at least _PRUNE_HUB_MIN dependents and the
+    majority live outside its own module (spread > _PRUNE_SPREAD_MIN) - so a
+    single cross-module inherit isn't enough. Only the cross-module edges of
+    such hubs are severed; local edges stay, so the hub remains anchored to its
+    home community. Per-node signal shared with _damping_factors via
+    _sink_signals."""
+    hubs: set[int] = set()
+    for nid, in_deg, _sinkness, spread in _sink_signals(
+            ids, in_neighbors, out_neighbors, id_to_qname):
+        if in_deg >= _PRUNE_HUB_MIN and spread > _PRUNE_SPREAD_MIN:
             hubs.add(nid)
     return hubs
 

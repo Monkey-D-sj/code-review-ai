@@ -5,11 +5,15 @@ The subprocess / external-CLI coupling (``claude mcp add``) is isolated here so
 
 The registered launch command is ``uvx --from <source> <mcp-entry>``: self-contained,
 so an outsider needs only ``uv`` (which also fetches the required Python 3.14) and the
-``claude`` CLI - no separate ``uv tool install`` step.
+``claude`` CLI - no separate ``uv tool install`` step. On success the installer also
+appends a tool-usage section to the user-global CLAUDE.md (marker-guarded, idempotent)
+so the AI in any project knows how to call the registered tools.
 """
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 # Where uvx fetches the package from. Channel A = public git repo.
 DEFAULT_SOURCE = "git+https://github.com/Monkey-D-sj/code-review-ai"
@@ -17,6 +21,30 @@ DEFAULT_MCP_ENTRY = "code-review-ai-mcp"
 DEFAULT_NAME = "code-review-ai"
 
 SUPPORTED_PLATFORMS = {"claude-code"}
+
+# Tool-usage section appended to the user-global CLAUDE.md on install. The block
+# between the markers is replaced in place, so re-installs don't duplicate it.
+MCP_DOC_START = "<!-- CODE_REVIEW_AI_MCP_START -->"
+MCP_DOC_END = "<!-- CODE_REVIEW_AI_MCP_END -->"
+MCP_USAGE_DOC = """\
+<!-- CODE_REVIEW_AI_MCP_START -->
+## code-review-ai MCP tools（user 作用域，任何项目可用）
+
+These MCP tools are registered at user scope and query a tree-sitter + SQLite
+call graph of whatever repo Claude Code is currently in. On first use in a new
+project the server rebuilds that project's index automatically (a few seconds).
+
+- `search_symbol(query)` — 先用它按短名 glob 找到 qname（如 `*login*`），再查细节/影响。
+- `get_impact(symbols|files)` — **评估改动影响的首选**：传 `symbols`（如 `["auth::login"]`）或 `files`；都省略则从 git diff 推导。返回受影响入口 + 上下游调用链。别用 grep 硬猜。
+- `get_symbol_detail(qname)` — 单个符号详情 + 直接 callers/callees。
+- `list_entry_points()` — 看索引到的业务入口有哪些。
+- `get_community(qname)` / `get_communities()` — 横向爆炸半径：符号所属社区及同社区成员，配合 `get_impact` 的纵向调用链互补。
+- `rebuild_index()` — 手动刷新索引（正常由 watcher 自动维护，很少需要手动）。
+- `call_external_service(body)` — 提交审查报告到外部服务（供 code-review skill 使用，一般不用直接调）。
+
+约定：做"改了这个会影响什么"的分析时优先 `get_impact`；做"这些模块和谁耦合"的分析时优先社区工具。
+<!-- CODE_REVIEW_AI_MCP_END -->
+"""
 
 
 @dataclass
@@ -26,30 +54,76 @@ class InstallResult:
     command: list[str]
 
 
+def _claude_executable() -> str | None:
+    """The claude CLI as a full path subprocess can spawn, or None if missing.
+    On Windows npm installs an extensionless shell script plus claude.cmd /
+    claude.ps1 shims; the bare 'claude' name makes CreateProcess pick the
+    extensionless script and fail (WinError 2), so resolve the .cmd shim."""
+    path = shutil.which("claude")
+    if path is None:
+        return None
+    if os.name == "nt":
+        cmd = shutil.which("claude.cmd")
+        if cmd:
+            return cmd
+    return path
+
+
+def _global_claude_md() -> Path:
+    return Path.home() / ".claude" / "CLAUDE.md"
+
+
+def append_usage_docs() -> Path | None:
+    """Append (or refresh) the MCP tool-usage section to the user-global
+    CLAUDE.md, so the AI in any project knows how to call the tools. Idempotent:
+    the block between the markers is replaced in place. Returns the path written,
+    or None if the file couldn't be written (install still succeeds)."""
+    md = _global_claude_md()
+    try:
+        md.parent.mkdir(parents=True, exist_ok=True)
+        content = md.read_text(encoding="utf-8") if md.exists() else ""
+        start = content.find(MCP_DOC_START)
+        end = content.find(MCP_DOC_END)
+        if start != -1 and end != -1 and end > start:
+            content = content[:start] + MCP_USAGE_DOC + content[end + len(MCP_DOC_END):]
+        else:
+            if content and not content.endswith("\n\n"):
+                content = content.rstrip("\n") + "\n\n"
+            content += MCP_USAGE_DOC
+        md.write_text(content, encoding="utf-8")
+        return md
+    except OSError:
+        return None
+
+
 def install(platform: str = "claude-code", source: str = DEFAULT_SOURCE,
             scope: str = "user", name: str = DEFAULT_NAME,
             mcp_entry: str = DEFAULT_MCP_ENTRY) -> InstallResult:
-    """Register the MCP server with the target platform. Returns a result;
-    never raises - callers just print ``message`` and map ``success`` to exit code."""
+    """Register the MCP server with the target platform, then append tool-usage
+    docs to the user-global CLAUDE.md. Returns a result; never raises - callers
+    just print ``message`` and map ``success`` to exit code."""
     if platform not in SUPPORTED_PLATFORMS:
         return InstallResult(False, f"unsupported platform: {platform}", [])
     launch_cmd = _launch_command(source, mcp_entry)
     add_cmd = _claude_add_command(name, scope, launch_cmd)
-    if shutil.which("claude") is None:
+    claude = _claude_executable()
+    if claude is None:
         return InstallResult(
             False,
             "claude CLI not found on PATH. Install Claude Code, then run:\n  "
             + " ".join(add_cmd),
             add_cmd,
         )
-    proc = subprocess.run(add_cmd, capture_output=True, text=True)
+    add_cmd = [claude, *add_cmd[1:]]  # bare shim may not be spawnable on Windows
+    proc = subprocess.run(add_cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
     if proc.returncode == 0:
-        return InstallResult(
-            True,
-            f"Registered '{name}' with Claude Code (scope={scope}). "
-            "Restart Claude Code (or run /mcp) to see the tools.",
-            add_cmd,
-        )
+        doc_path = append_usage_docs()
+        msg = f"Registered '{name}' with Claude Code (scope={scope})."
+        if doc_path is not None:
+            msg += f" Appended tool usage docs to {doc_path}."
+        msg += " Restart Claude Code (or run /mcp) to see the tools."
+        return InstallResult(True, msg, add_cmd)
     detail = (proc.stderr or proc.stdout).strip()
     return InstallResult(
         False,
