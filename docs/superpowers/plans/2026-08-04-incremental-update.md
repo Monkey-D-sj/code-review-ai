@@ -247,9 +247,6 @@ def test_changed_files_detects_modify_add_delete(tmp_path):
 ```
 
 （每次 `_git_repo(tmp_path)` 都是独立拷贝，无需恢复现场。）
-```
-
-（`_stat_tuple` 放测试文件底部；上面 `*_stat_tuple` 展开为 (mtime, size)。）
 
 - [ ] **Step 2: 跑测试确认失败**
 
