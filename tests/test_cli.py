@@ -64,6 +64,21 @@ def test_cli_benchmark_writes_report(tmp_path):
     assert report["aggregate"]["macro_patch_file_recall_at_k"] == 1.0
 
 
+def test_cli_update_and_sync(tmp_path, capsys):
+    from conftest import FIXTURES as FIX
+    from code_review_ai import cli
+    db = str(tmp_path / "cli.db")
+    # sync 空库 -> 全量
+    assert cli.main(["sync", "--repo", FIX, "--db", db]) == 0
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["full_rebuild"] is True and payload["flows"] > 0
+    # update 无变化 -> 0 parse
+    assert cli.main(["update", "--repo", FIX, "--db", db]) == 0
+    out = capsys.readouterr().out
+    assert json.loads(out)["parsed_files"] == 0
+
+
 class _Res:
     def __init__(self, success, message):
         self.success = success

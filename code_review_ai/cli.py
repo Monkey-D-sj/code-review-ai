@@ -12,6 +12,7 @@ from code_review_ai.export_graph import export as export_graph
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
 from code_review_ai.installer import DEFAULT_SOURCE, install
+from code_review_ai.update import sync, update_nodes_edges
 
 
 def _conn(db_path):
@@ -64,6 +65,13 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("search")
     _add_common(sp)
     sp.add_argument("query")
+    up = sub.add_parser("update")
+    _add_common(up)
+    sp = sub.add_parser("sync")
+    _add_common(sp)
+    hp = sub.add_parser("install-hooks")
+    _add_common(hp)
+    hp.add_argument("--launch", default="code-review-ai")
     sp = sub.add_parser("communities")
     _add_common(sp)
     sp.add_argument("--symbol", default=None)
@@ -140,6 +148,14 @@ def main(argv: list[str] | None = None) -> int:
         else:
             for c in list_communities(conn):
                 print(f"{c['id']}  {c['label']}  nodes={c['node_count']}  modularity={c['modularity']}")
+    elif args.cmd == "update":
+        print(json.dumps(update_nodes_edges(cfg, conn)))
+    elif args.cmd == "sync":
+        print(json.dumps(sync(cfg, conn)))
+    elif args.cmd == "install-hooks":
+        from code_review_ai.hooks import install_hooks
+        for path in install_hooks(cfg.repo_path, cfg.db_path, args.launch):
+            print(f"installed {path}")
     elif args.cmd == "graph":
         export_graph(args.db, args.out, args.max_nodes, args.mode)
     elif args.cmd == "benchmark":
