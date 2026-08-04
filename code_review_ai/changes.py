@@ -1,5 +1,7 @@
 import re
 import subprocess
+from pathlib import Path
+
 from code_review_ai.config import Config
 from code_review_ai.parser import parse_file
 
@@ -98,3 +100,49 @@ def detect_changed_symbols(config: Config,
     diff = _git_diff(config.diff_base, files)
     return [record["qname"] for record in _changed_functions(
         config, diff, kinds=("function", "method"))]
+
+
+def _relative_to_repo(config: Config, file_path: str) -> str:
+    try:
+        return str(Path(file_path).resolve().relative_to(Path(config.repo_path).resolve()))
+    except ValueError:
+        return file_path
+
+
+def _symbols_summary(config: Config, conn, symbols: list[str]) -> dict:
+    files: set[str] = set()
+    records: list[dict] = []
+    for symbol in symbols:
+        row = conn.execute(
+            "SELECT kind, file_path, start_line, end_line FROM nodes WHERE qualified_name=?",
+            (symbol,),
+        ).fetchone()
+        if row is None:
+            records.append({"qname": symbol, "kind": None, "file": None,
+                            "start_line": 0, "end_line": 0})
+            continue
+        rel = _relative_to_repo(config, row["file_path"])
+        files.add(rel)
+        records.append({"qname": symbol, "kind": row["kind"], "file": rel,
+                        "start_line": row["start_line"], "end_line": row["end_line"]})
+    return {"summary": {"files_changed": len(files), "lines_added": 0,
+                        "lines_removed": 0, "changed_functions": len(symbols)},
+            "changed_functions": records}
+
+
+def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
+                         files: list[str] | None = None) -> dict:
+    """Change summary + changed functions. With `symbols`, resolve each qname
+    from the graph; otherwise compute from the git diff of `files` (or the whole
+    tree) against config.diff_base. Returns {"summary", "changed_functions"}.
+    Raises RuntimeError if the git diff fails (bad diff_base)."""
+    if symbols is not None:
+        return _symbols_summary(config, conn, symbols)
+    diff = _git_diff(config.diff_base, files)
+    numstat = _git_numstat(config.diff_base, files)
+    functions = _changed_functions(config, diff)
+    return {"summary": {"files_changed": len(numstat),
+                        "lines_added": sum(added for added, _ in numstat.values()),
+                        "lines_removed": sum(removed for _, removed in numstat.values()),
+                        "changed_functions": len(functions)},
+            "changed_functions": functions}

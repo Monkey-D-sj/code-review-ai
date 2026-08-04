@@ -1,9 +1,16 @@
 import pytest
 
 from code_review_ai.config import load_config
-from code_review_ai.changes import detect_changed_symbols
+from code_review_ai.changes import build_change_summary, detect_changed_symbols
 
 from conftest import FIXTURES as FIX, Q
+
+
+def _conn(tmp_path):
+    from code_review_ai.db import connect, init_schema
+    conn = connect(str(tmp_path / "m.db"))
+    init_schema(conn)
+    return conn
 
 
 def test_symbols_mode_passthrough():
@@ -75,3 +82,34 @@ def test_detect_changed_symbols_still_excludes_classes(monkeypatch):
     out = detect_changed_symbols(cfg, files=["auth.py"])
     assert Q("auth", "UserService") not in out               # class excluded
     assert Q("auth", "authenticate", Q("auth", "UserService")) in out  # method kept
+
+
+def test_build_change_summary_diff_path(tmp_path, monkeypatch):
+    cfg = load_config(FIX)
+    import code_review_ai.changes as ch
+    monkeypatch.setattr(ch, "_git_diff", lambda base, files: {"auth.py": [(6, 7)]})
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files: {"auth.py": (10, 2), "logo.png": (0, 0)})
+    out = build_change_summary(cfg, _conn(tmp_path))
+    assert out["summary"] == {"files_changed": 2, "lines_added": 10,
+                              "lines_removed": 2, "changed_functions": 1}
+    assert out["changed_functions"] == [
+        {"qname": Q("auth", "login"), "kind": "function",
+         "file": "auth.py", "start_line": 6, "end_line": 7}]
+
+
+def test_build_change_summary_symbols_path(tmp_path):
+    cfg = load_config(FIX)
+    cfg.repo_path = FIX
+    from code_review_ai.db import connect, init_schema
+    from code_review_ai.indexer import rebuild
+    conn = connect(str(tmp_path / "m.db"))
+    init_schema(conn)
+    rebuild(cfg, conn)
+    out = build_change_summary(cfg, conn, symbols=[Q("auth", "login")])
+    assert out["summary"]["changed_functions"] == 1
+    record = out["changed_functions"][0]
+    assert record["qname"] == Q("auth", "login")
+    assert record["file"] == "auth.py"
+    assert record["start_line"] == 6
+    assert record["end_line"] == 7
