@@ -6,6 +6,7 @@ import sys
 from code_review_ai.changes import build_change_summary, detect_changed_symbols
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
+from code_review_ai.graph import query_graph
 from code_review_ai.export_graph import export as export_graph
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
@@ -45,6 +46,11 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(s)
     s.add_argument("--symbols", nargs="*")
     s.add_argument("--files", nargs="*")
+    s = sub.add_parser("query-graph")
+    _add_common(s)
+    s.add_argument("qualified_name")
+    s.add_argument("--edge-kind", default="call")
+    s.add_argument("--direction", default="both")
     sp = sub.add_parser("search")
     _add_common(sp)
     sp.add_argument("query")
@@ -92,6 +98,14 @@ def main(argv: list[str] | None = None) -> int:
             payload = build_change_summary(cfg, conn,
                                            symbols=args.symbols, files=args.files)
         except RuntimeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(payload))
+    elif args.cmd == "query-graph":
+        try:
+            payload = query_graph(conn, args.qualified_name,
+                                  edge_kind=args.edge_kind, direction=args.direction)
+        except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(payload))

@@ -33,6 +33,18 @@ def test_cli_summary(tmp_path, capsys):
     assert data["changed_functions"][0]["qname"] == Q("auth", "login")
 
 
+def test_cli_query_graph(tmp_path, capsys):
+    code = main(["rebuild", "--repo", FIX, "--db", str(tmp_path / "c.db")])
+    assert code == 0
+    _ = capsys.readouterr()
+    code = main(["query-graph", Q("auth", "login"),
+                 "--repo", FIX, "--db", str(tmp_path / "c.db")])
+    assert code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["edge_kind"] == "call"
+    assert [n["qname"] for n in data["in"]] == [Q("app", "main")]
+
+
 class _Res:
     def __init__(self, success, message):
         self.success = success
