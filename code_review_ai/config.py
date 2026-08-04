@@ -1,4 +1,6 @@
 
+import hashlib
+import json
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -60,3 +62,16 @@ def load_config(repo_path: str = ".") -> Config:
             else:
                 raw[key] = env
     return Config(**raw)
+
+
+_CONFIG_HASH_KEYS = ("diff_base", "entry_names", "entry_decorators", "exclude",
+                     "community_detection", "community_weight")
+
+
+def config_hash(config: Config) -> str:
+    """Stable hash of the config keys that affect index shape. On change the
+    incremental paths fall back to a full rebuild."""
+    payload = {key: getattr(config, key) for key in _CONFIG_HASH_KEYS}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()

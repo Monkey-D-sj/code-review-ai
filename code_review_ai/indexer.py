@@ -8,7 +8,6 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 
-from code_review_ai.changes import current_head
 from code_review_ai.community import build_communities, inter_community_edges, WeightMode
 from code_review_ai.config import Config
 from code_review_ai.db import transaction
@@ -118,10 +117,7 @@ def rebuild(config: Config, conn: sqlite3.Connection,
         t_comm_start = time.perf_counter()
         community_count = _write_communities(conn, parsed, all_edges, qname_to_id, config)
         t_communities = _ms(time.perf_counter() - t_comm_start)
-        built_at = _stamp_built_at(conn)
-        conn.execute(
-            "INSERT OR REPLACE INTO build_meta(key,value) "
-            "VALUES('flows_as_of_head',?)", (current_head(config) or "",))
+        built_at = _stamp_meta(config, conn)
     t_db = time.perf_counter()
 
     timings = {
@@ -280,6 +276,36 @@ def _stamp_built_at(conn: sqlite3.Connection) -> str:
     built_at = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
     conn.execute("INSERT OR REPLACE INTO build_meta(key,value) VALUES('built_at',?)",
                  (built_at,))
+    return built_at
+
+
+def _stamp_meta(config: Config, conn: sqlite3.Connection) -> str:
+    """Stamp build metadata after a full rebuild: built_at (via
+    _stamp_built_at), config_hash, index_version, flows_as_of_head, and the
+    file manifest (so the next incremental update can diff against it)."""
+    from code_review_ai.changes import current_head
+    from code_review_ai.config import config_hash as _config_hash
+    from code_review_ai.db import INDEX_VERSION
+    from code_review_ai import manifest
+    built_at = _stamp_built_at(conn)
+    conn.executemany(
+        "INSERT OR REPLACE INTO build_meta(key,value) VALUES(?,?)",
+        [("config_hash", _config_hash(config)),
+         ("index_version", str(INDEX_VERSION)),
+         ("flows_as_of_head", current_head(config) or "")])
+    # populate file manifest so incremental updates can diff
+    repo = config.repo_path
+    files = filter_excluded(
+        list_source_files(repo, SOURCE_GLOBS), config.exclude)
+    entries = {}
+    for rel in files:
+        abs_path = os.path.join(repo, rel)
+        try:
+            st = os.stat(abs_path)
+        except OSError:
+            continue
+        entries[rel] = (st.st_mtime, st.st_size, manifest.hash_file(abs_path))
+    manifest.update(conn, entries)
     return built_at
 
 

@@ -212,3 +212,32 @@ def test_update_communities_when_enabled(tmp_path):
     total = conn.execute(
         "SELECT SUM(node_count) FROM communities").fetchone()[0]
     assert members == total
+
+
+def test_sync_config_change_triggers_full_rebuild(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    from code_review_ai.db import INDEX_VERSION
+    # 配置变更（entry_names 不同）-> sync 应全量重建
+    cfg.entry_names = ["different_entry"]
+    result = upd.sync(cfg, conn)
+    assert result["full_rebuild"] is True
+    assert result["flows"] > 0
+    # rebuild 已 stamp 新 meta
+    assert conn.execute(
+        "SELECT value FROM build_meta WHERE key='index_version'"
+    ).fetchone()[0] == str(INDEX_VERSION)
+    # manifest 已填充
+    assert conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] > 0
+
+
+def test_sync_nothing_changed_is_noop(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    flows_before = conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
+    result = upd.sync(cfg, conn)
+    assert result["full_rebuild"] is False
+    assert result["flows"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0] == flows_before

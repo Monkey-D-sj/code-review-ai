@@ -11,9 +11,10 @@ from code_review_ai import qname
 from code_review_ai import manifest
 from code_review_ai.changes import current_head
 from code_review_ai.community import WeightMode, build_communities, inter_community_edges
-from code_review_ai.db import transaction
+from code_review_ai.config import config_hash as _config_hash
+from code_review_ai.db import INDEX_VERSION, transaction
 from code_review_ai.flow_builder import EdgeRow, NodeRow, build_flows
-from code_review_ai.indexer import recompute_degrees, _stamp_built_at
+from code_review_ai.indexer import rebuild, recompute_degrees, _stamp_built_at
 from code_review_ai.parser import (SOURCE_GLOBS, filter_excluded,
                                    list_source_files, parse_file)
 from code_review_ai.resolver import resolve_edges
@@ -279,3 +280,31 @@ def update_communities(config, conn) -> int:
                     "weight) VALUES(?,?,?)",
                     [(a, b, w) for (a, b), w in comm_edges.items()])
     return len(communities)
+
+
+def _meta_changed(config, conn) -> bool:
+    expected = {"config_hash": _config_hash(config),
+                "index_version": str(INDEX_VERSION)}
+    for key, value in expected.items():
+        row = conn.execute(
+            "SELECT value FROM build_meta WHERE key=?", (key,)).fetchone()
+        if row is None or row["value"] != value:
+            return True
+    return False
+
+
+def sync(config, conn) -> dict:
+    """Bring the index current: config/version change -> full rebuild;
+    otherwise incremental nodes/edges + flows + communities (each skips
+    internally when up to date)."""
+    if _meta_changed(config, conn):
+        stats = rebuild(config, conn)
+        return {"full_rebuild": True, "nodes": stats.node_count,
+                "edges": stats.edge_count, "flows": stats.flow_count,
+                "communities": stats.community_count}
+    node_stats = update_nodes_edges(config, conn)
+    flows = update_flows(config, conn)
+    communities = update_communities(config, conn)
+    return {"full_rebuild": False, "nodes": node_stats["nodes"],
+            "edges": node_stats["edges"], "flows": flows,
+            "communities": communities}
