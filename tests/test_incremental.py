@@ -205,6 +205,13 @@ def test_update_communities_when_enabled(tmp_path):
     cfg.community_detection = True
     conn = connect(cfg.db_path)
     _init_and_build(cfg, conn)
+    # 默认 fixture 里 auth 模块与 auth::UserService 类之间没有结构边，社区
+    # 划分后不存在跨社区边，community_edges 恒为空。补一条连接这两者的
+    # resolved 结构边，让 update_communities 真正写出 community_edges。
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) "
+        "VALUES('auth','auth::UserService','import','resolved')")
+    conn.commit()
     n = upd.update_communities(cfg, conn)
     assert n > 0
     members = conn.execute(
@@ -212,6 +219,8 @@ def test_update_communities_when_enabled(tmp_path):
     total = conn.execute(
         "SELECT SUM(node_count) FROM communities").fetchone()[0]
     assert members == total
+    assert conn.execute(
+        "SELECT COUNT(*) FROM community_edges").fetchone()[0] > 0
 
 
 def test_sync_config_change_triggers_full_rebuild(tmp_path):

@@ -34,7 +34,8 @@ def changed_files(config, conn) -> tuple[set[str], set[str], set[str]]:
         try:
             st = os.stat(abs_path)
         except OSError:
-            deleted.add(rel)  # listed by git but gone from disk
+            # tracked by git but gone from disk -> deleted
+            deleted.add(rel)
             continue
         entry = manifest_entries.get(rel)
         if entry is None:
@@ -46,7 +47,10 @@ def changed_files(config, conn) -> tuple[set[str], set[str], set[str]]:
         if manifest.hash_file(abs_path) == file_hash:
             continue  # touch-only; content identical
         changed.add(rel)
-    # files no longer listed by git (e.g. committed removal)
+    # Files removed from git tracking entirely (git rm): present in the
+    # manifest but no longer listed by git, so absent from `current`. The
+    # OSError branch above handles tracked-but-gone-from-disk; this union
+    # handles the untracked-from-git case, and the two never overlap.
     deleted |= set(manifest_entries) - current
     return changed, added, deleted
 
@@ -192,17 +196,22 @@ def _sync_manifest(conn, repo, parse_paths: list[str], deleted: set[str]) -> Non
     manifest.remove(conn, sorted(deleted))
 
 
-def needs_flows_update(config, conn) -> bool:
+def needs_flows_update(config, conn, head=None) -> bool:
+    """True when the stored flows_as_of_head differs from the given head
+    (defaults to the current HEAD when head is None)."""
     row = conn.execute(
         "SELECT value FROM build_meta WHERE key='flows_as_of_head'").fetchone()
     stored = row["value"] if row else None
-    return stored != current_head(config)
+    if head is None:
+        head = current_head(config)
+    return stored != head
 
 
 def update_flows(config, conn) -> int:
     """Rebuild flows from the DB's nodes+edges. No-op if HEAD is unchanged
     (flows represent the last committed state)."""
-    if not needs_flows_update(config, conn):
+    head = current_head(config)
+    if not needs_flows_update(config, conn, head):
         return 0
     nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"], r["kind"])
              for r in conn.execute(
@@ -231,7 +240,7 @@ def update_flows(config, conn) -> int:
                 "VALUES(?,?,?)", membership_rows)
         conn.execute(
             "INSERT OR REPLACE INTO build_meta(key,value) "
-            "VALUES('flows_as_of_head',?)", (current_head(config) or "",))
+            "VALUES('flows_as_of_head',?)", (head or "",))
     return len(flows)
 
 
