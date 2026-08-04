@@ -22,40 +22,6 @@ def _ms(seconds: float) -> float:
 
 
 @dataclass
-class _CacheEntry:
-    mtime: float
-    size: int
-    parsed: ParsedFile
-
-
-class ParseCache:
-    """mtime+size keyed cache of parsed files, to skip re-parsing unchanged
-    files on rebuild.
-
-    Thread-safety: access must be serialized by the caller (the rebuild lock
-    in mcp_server/watcher). No internal locking by design - rebuild is the
-    only mutator and it runs under that lock.
-    """
-
-    def __init__(self) -> None:
-        self._entries: dict[str, _CacheEntry] = {}
-
-    def get(self, path: str, mtime: float, size: int) -> ParsedFile | None:
-        e = self._entries.get(path)
-        if e is not None and e.mtime == mtime and e.size == size:
-            return e.parsed
-        return None
-
-    def put(self, path: str, mtime: float, size: int, parsed: ParsedFile) -> None:
-        self._entries[path] = _CacheEntry(mtime, size, parsed)
-
-    def prune(self, current_paths: set[str]) -> None:
-        """Drop entries for files no longer in the repo (deleted/renamed)."""
-        for p in [p for p in self._entries if p not in current_paths]:
-            del self._entries[p]
-
-
-@dataclass
 class RebuildStats:
     node_count: int
     edge_count: int
@@ -65,31 +31,12 @@ class RebuildStats:
     stage_timings: dict[str, float]  # stage name → elapsed ms
 
 
-def _parse_files(files: list[str], repo: str,
-                 cache: ParseCache | None) -> list[ParsedFile]:
-    """Parse every file. With a cache, reuse the ParsedFile when (mtime, size)
-    is unchanged; otherwise parse and store. Without a cache, parse all."""
-    if cache is None:
-        return [parse_file(os.path.join(repo, f), repo) for f in files]
-    parsed: list[ParsedFile] = []
-    current: set[str] = set()
-    for f in files:
-        path = os.path.join(repo, f)
-        current.add(path)
-        st = os.stat(path)
-        hit = cache.get(path, st.st_mtime, st.st_size)
-        if hit is not None:
-            parsed.append(hit)
-        else:
-            pf = parse_file(path, repo)
-            cache.put(path, st.st_mtime, st.st_size, pf)
-            parsed.append(pf)
-    cache.prune(current)
-    return parsed
+def _parse_files(files: list[str], repo: str) -> list[ParsedFile]:
+    """Parse every file in the repo."""
+    return [parse_file(os.path.join(repo, f), repo) for f in files]
 
 
-def rebuild(config: Config, conn: sqlite3.Connection,
-            cache: ParseCache | None = None) -> RebuildStats:
+def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
     """Parse the tree, resolve calls, persist everything in one atomic
     transaction. Orchestration only — writing is delegated to the _write_*."""
     t_start = time.perf_counter()
@@ -100,7 +47,7 @@ def rebuild(config: Config, conn: sqlite3.Connection,
     )
     t_files = time.perf_counter()
 
-    parsed = _parse_files(files, repo, cache)
+    parsed = _parse_files(files, repo)
     t_parse = time.perf_counter()
 
     qnames = {n.qualified_name for pf in parsed for n in pf.nodes}

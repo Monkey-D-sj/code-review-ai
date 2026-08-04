@@ -1,6 +1,6 @@
 from code_review_ai.config import Config, load_config
 from code_review_ai.db import connect, init_schema
-from code_review_ai.indexer import ParseCache, rebuild, is_stale
+from code_review_ai.indexer import rebuild, is_stale
 
 import pytest
 from conftest import FIXTURES as FIX, Q
@@ -78,41 +78,35 @@ def test_is_stale_detects_mtime(tmp_path):
         os.utime(p, (orig_mtime, orig_mtime))
 
 
-def test_rebuild_cache_skips_unchanged_files(tmp_path, monkeypatch):
+def test_rebuild_then_update_parses_only_changed(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     conn = connect(cfg.db_path)
     init_schema(conn)
-    cache = ParseCache()
-    import code_review_ai.indexer as idx
+    from code_review_ai import update as upd
+    rebuild(cfg, conn)                          # 全量，填充 manifest（Task 7）
     calls = {"n": 0}
-    real = idx.parse_file
+    real = upd.parse_file
 
-    def counting(path, repo, lang=None):
+    def counting(*a, **k):
         calls["n"] += 1
-        return real(path, repo, lang)
+        return real(*a, **k)
 
-    monkeypatch.setattr(idx, "parse_file", counting)
-
-    rebuild(cfg, conn, cache)          # prime: parses every file
-    assert calls["n"] > 0
-
-    calls["n"] = 0
-    stats2 = rebuild(cfg, conn, cache)  # nothing changed -> all cache hits
+    monkeypatch.setattr(upd, "parse_file", counting)
+    # 无变化 -> 不 parse 任何文件
+    upd.update_nodes_edges(cfg, conn)
     assert calls["n"] == 0
-    assert stats2.node_count > 0
-
-    # touch one file's mtime -> only that file re-parses
-    import os, time
+    # 只改 util.py -> 只 parse 一个
     p = "tests/fixtures/repo/util.py"
-    orig_mtime = os.path.getmtime(p)
-    fut = time.time() + 100
-    os.utime(p, (fut, fut))
+    orig = open(p, encoding="utf-8").read()
     try:
+        with open(p, "a", encoding="utf-8") as f:
+            f.write("\n# x\n")
         calls["n"] = 0
-        rebuild(cfg, conn, cache)
+        upd.update_nodes_edges(cfg, conn)
         assert calls["n"] == 1
     finally:
-        os.utime(p, (orig_mtime, orig_mtime))
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(orig)
 
 
 def test_rebuild_writes_node_degrees(tmp_path):

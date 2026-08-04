@@ -241,3 +241,90 @@ def test_sync_nothing_changed_is_noop(tmp_path):
     assert result["full_rebuild"] is False
     assert result["flows"] == 0
     assert conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0] == flows_before
+
+
+def _edge_set(conn):
+    return {tuple(r) for r in conn.execute(
+        "SELECT source,target,kind,resolution,file_path,call_line FROM edges")}
+
+
+def _flow_set(conn):
+    out = set()
+    for f in conn.execute("SELECT id,entry_point_id FROM flows").fetchall():
+        entry = conn.execute(
+            "SELECT qualified_name FROM nodes WHERE id=?",
+            (f["entry_point_id"],)).fetchone()
+        path = tuple(r[0] for r in conn.execute(
+            "SELECT n.qualified_name FROM flow_memberships m "
+            "JOIN nodes n ON n.id=m.node_id WHERE m.flow_id=? ORDER BY m.position",
+            (f["id"],)).fetchall())
+        out.add((entry["qualified_name"] if entry else None, path))
+    return out
+
+
+def test_sync_accumulation_equals_full_rebuild(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    from code_review_ai.indexer import rebuild
+
+    # 一连串增量改动 + 提交
+    (repo / "util.py").write_text(
+        (repo / "util.py").read_text(encoding="utf-8") + "\ndef new_helper():\n    pass\n",
+        encoding="utf-8")
+    upd.update_nodes_edges(cfg, conn)          # manifest 扫描路径
+    (repo / "auth.py").write_text(
+        (repo / "auth.py").read_text(encoding="utf-8") + "\ndef logout(u):\n    return u\n",
+        encoding="utf-8")
+    upd.update_nodes_edges(cfg, conn)
+    (repo / "extra.py").write_text("from auth import logout\ndef x():\n    logout('a')\n",
+                                   encoding="utf-8")
+    upd.update_nodes_edges(cfg, conn)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-aqm", "edits"], cwd=repo, check=True)
+    upd.sync(cfg, conn)
+
+    incr_edges = _edge_set(conn)
+    incr_flows = _flow_set(conn)
+
+    rebuild(cfg, conn)
+    full_edges = _edge_set(conn)
+    full_flows = _flow_set(conn)
+
+    assert incr_edges == full_edges
+    assert incr_flows == full_flows
+
+
+def test_repair_new_direction_no_reparse_of_importer(tmp_path, monkeypatch):
+    """F 调 from m import User（当时 unresolved）；m 加 User -> F 边翻 resolved，
+    且 F 不被 re-parse（验证修复 pass 的 importers 场景）。"""
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    # F = app.py 已 import auth.login 且 resolved；构造一个 unresolved importer 场景：
+    # 改 auth.py 加 User，app.py 不 import User —— 用手工边验证不 re-parse F
+    calls = {"n": 0}
+    real = upd.parse_file
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(upd, "parse_file", counting)
+    # 直接注入一条类型一 unresolved 边（模拟 F 曾 import auth::User 而未存在）。
+    # 真实历史里这条边由前一次 update_nodes_edges 提交（transaction() 已 COMMIT）；
+    # 这里手工 INSERT 会留下 sqlite 隐式事务，需 COMMIT 掉，否则下面
+    # update_nodes_edges 的 transaction() 无法 BEGIN。
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) "
+        "VALUES('app::main','auth::User','call','unresolved')")
+    conn.commit()
+    # 改 auth.py 加 User
+    (repo / "auth.py").write_text(
+        (repo / "auth.py").read_text(encoding="utf-8") + "\ndef User():\n    pass\n",
+        encoding="utf-8")
+    upd.update_nodes_edges(cfg, conn)          # manifest 路径：只 re-parse auth.py
+    assert calls["n"] == 1                      # F（app.py）未被 re-parse
+    row = conn.execute(
+        "SELECT resolution FROM edges WHERE target='auth::User'").fetchone()
+    assert row is not None and row["resolution"] == "resolved"
