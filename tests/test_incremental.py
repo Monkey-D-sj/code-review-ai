@@ -61,3 +61,40 @@ def test_changed_files_detects_modify_add_delete(tmp_path):
     changed, added, deleted = upd.changed_files(cfg, conn)
     assert "extra.py" in added
     assert upd.needs_nodes_update(cfg, conn) is True
+
+
+def test_repair_resolutions_flips_by_global_set(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    conn.execute("INSERT INTO nodes(qualified_name,kind) VALUES('m::User','function')")
+    # 类型一 unresolved 边：target 是含 :: 的 qname
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) VALUES('f','m::User','call','unresolved')")
+    # 类型二 unresolved 边：target 无 ::（裸名）即使命中单段 module 也不碰
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) VALUES('g','login','call','unresolved')")
+    # dynamic 边不碰
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) VALUES('h','a.login','call','dynamic')")
+    # 反向：resolved 边 target 已不在全集 -> 翻 unresolved
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) VALUES('i','gone::x','call','resolved')")
+    # import 边：target 命中 module -> resolved
+    conn.execute("INSERT INTO nodes(qualified_name,kind) VALUES('login','module')")
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) VALUES('a','login','import','unresolved')")
+
+    flipped = upd.repair_resolutions(conn)
+
+    def label_of(source):
+        return conn.execute(
+            "SELECT resolution FROM edges WHERE source=?", (source,)
+        ).fetchone()[0]
+
+    assert label_of("f") == "resolved"        # 类型一：新增方向修复
+    assert label_of("g") == "unresolved"      # 类型二裸名（无 ::）不动
+    assert label_of("h") == "dynamic"         # dynamic 不动
+    assert label_of("i") == "unresolved"      # 反向修复（target 已不在全集）
+    assert label_of("a") == "resolved"        # import 边：target 命中 module
+    assert flipped == 3

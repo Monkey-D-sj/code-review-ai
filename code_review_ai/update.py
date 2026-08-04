@@ -45,3 +45,29 @@ def changed_files(config, conn) -> tuple[set[str], set[str], set[str]]:
 def needs_nodes_update(config, conn) -> bool:
     changed, added, deleted = changed_files(config, conn)
     return bool(changed or added or deleted)
+
+
+def repair_resolutions(conn) -> int:
+    """Re-evaluate non-dynamic edge labels against the current node qname set.
+
+    Matches what a full rebuild would resolve: for unchanged files, target is
+    derived from stable imports, so only existence changes. Call edges whose
+    target has no '::' are raw/unresolvable in a full rebuild too — skipped."""
+    qnames = {r["qualified_name"]
+              for r in conn.execute("SELECT qualified_name FROM nodes")}
+    rows = conn.execute(
+        "SELECT id,kind,target,resolution FROM edges").fetchall()
+    updates: list[tuple[str, int]] = []
+    for row in rows:
+        resolution = row["resolution"]
+        if resolution == "dynamic":
+            continue
+        target = row["target"]
+        if row["kind"] == "call" and "::" not in target:
+            continue
+        new_label = "resolved" if target in qnames else "unresolved"
+        if new_label != resolution:
+            updates.append((new_label, row["id"]))
+    if updates:
+        conn.executemany("UPDATE edges SET resolution=? WHERE id=?", updates)
+    return len(updates)
