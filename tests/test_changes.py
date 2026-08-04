@@ -54,3 +54,24 @@ def test_git_numstat_parses_text_and_binary(monkeypatch):
         stderr = ""
     monkeypatch.setattr(ch.subprocess, "run", lambda *args, **kwargs: _FakeResult())
     assert ch._git_numstat("origin/main") == {"auth.py": (10, 2), "logo.png": (0, 0)}
+
+
+def test_changed_functions_includes_class():
+    cfg = load_config(FIX)
+    import code_review_ai.changes as ch
+    records = ch._changed_functions(cfg, {"auth.py": [(1, 1)]})
+    user_service = [r for r in records if r["qname"] == Q("auth", "UserService")]
+    assert len(user_service) == 1
+    assert user_service[0]["kind"] == "class"
+    assert user_service[0]["file"] == "auth.py"
+    assert user_service[0]["start_line"] == 1
+    assert user_service[0]["end_line"] == 3
+
+
+def test_detect_changed_symbols_still_excludes_classes(monkeypatch):
+    cfg = load_config(FIX)
+    import code_review_ai.changes as ch
+    monkeypatch.setattr(ch, "_git_diff", lambda base, files: {"auth.py": [(1, 3)]})
+    out = detect_changed_symbols(cfg, files=["auth.py"])
+    assert Q("auth", "UserService") not in out               # class excluded
+    assert Q("auth", "authenticate", Q("auth", "UserService")) in out  # method kept

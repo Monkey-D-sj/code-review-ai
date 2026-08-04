@@ -61,6 +61,30 @@ def _git_numstat(base: str, files: list[str] | None = None) -> dict[str, tuple[i
     return stats
 
 
+def _changed_functions(config: Config, diff_ranges: dict[str, list[tuple[int, int]]],
+                       kinds: tuple[str, ...] = ("function", "method", "class")) -> list[dict]:
+    """Rich records for nodes overlapping changed line ranges.
+
+    Returns [{qname, kind, file, start_line, end_line}] with repo-relative file.
+    """
+    repo = config.repo_path
+    out: list[dict] = []
+    for rel, ranges in diff_ranges.items():
+        path = f"{repo}/{rel}"
+        try:
+            pf = parse_file(path, repo)
+        except OSError:
+            continue
+        for node in pf.nodes:
+            if node.kind not in kinds:
+                continue
+            if _overlaps(node.start_line, node.end_line, ranges):
+                out.append({"qname": node.qualified_name, "kind": node.kind,
+                            "file": rel, "start_line": node.start_line,
+                            "end_line": node.end_line})
+    return out
+
+
 def detect_changed_symbols(config: Config,
                            symbols: list[str] | None = None,
                            files: list[str] | None = None) -> list[str]:
@@ -72,17 +96,5 @@ def detect_changed_symbols(config: Config,
     if symbols is not None:
         return list(symbols)
     diff = _git_diff(config.diff_base, files)
-    repo = config.repo_path
-    out: list[str] = []
-    for rel, ranges in diff.items():
-        path = f"{repo}/{rel}"
-        try:
-            pf = parse_file(path, repo)
-        except OSError:
-            continue
-        for n in pf.nodes:
-            if n.kind not in ("function", "method"):
-                continue
-            if _overlaps(n.start_line, n.end_line, ranges):
-                out.append(n.qualified_name)
-    return out
+    return [record["qname"] for record in _changed_functions(
+        config, diff, kinds=("function", "method"))]
