@@ -98,3 +98,62 @@ def test_repair_resolutions_flips_by_global_set(tmp_path):
     assert label_of("i") == "unresolved"      # 反向修复（target 已不在全集）
     assert label_of("a") == "resolved"        # import 边：target 命中 module
     assert flipped == 3
+
+
+def _init_and_build(cfg, conn):
+    init_schema(conn)
+    from code_review_ai.indexer import rebuild
+    rebuild(cfg, conn)
+
+
+def test_update_nodes_edges_touches_only_changed(tmp_path, monkeypatch):
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    flows_before = conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
+
+    # 改 util.py 内容，走 watcher hint 路径（changed_paths）-> 只 re-parse util.py
+    calls = {"n": 0}
+    real_parse = upd.parse_file
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return real_parse(*a, **k)
+
+    monkeypatch.setattr(upd, "parse_file", counting)
+    p = repo / "util.py"
+    p.write_text(p.read_text(encoding="utf-8") + "\ndef new_helper():\n    pass\n",
+                 encoding="utf-8")
+    result = upd.update_nodes_edges(cfg, conn, ["util.py"])
+    assert calls["n"] == 1                          # 只 parse 了 util.py
+    assert result["parsed_files"] == 1
+    # flows 表未动（nodes/edges 更新不触碰 flows）
+    assert conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0] == flows_before
+    # 新符号已入库
+    assert conn.execute(
+        "SELECT COUNT(*) FROM nodes WHERE qualified_name='util::new_helper'"
+    ).fetchone()[0] == 1
+
+
+def test_update_nodes_edges_deletes_file_cleans_memberships(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    node_ids = [r["id"] for r in conn.execute(
+        "SELECT id FROM nodes WHERE file_path LIKE '%util.py'")]
+    assert node_ids
+    placeholders = ",".join("?" for _ in node_ids)
+    # 删除 util.py，走 watcher hint 路径
+    (repo / "util.py").unlink()
+    upd.update_nodes_edges(cfg, conn, ["util.py"])
+    # 节点与边已清
+    assert conn.execute(
+        "SELECT COUNT(*) FROM nodes WHERE file_path LIKE '%util.py'"
+    ).fetchone()[0] == 0
+    # flow/community memberships 无悬空
+    assert conn.execute(
+        f"SELECT COUNT(*) FROM flow_memberships WHERE node_id IN ({placeholders})",
+        node_ids).fetchone()[0] == 0
+    assert conn.execute(
+        f"SELECT COUNT(*) FROM community_memberships WHERE node_id IN ({placeholders})",
+        node_ids).fetchone()[0] == 0

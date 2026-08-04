@@ -5,6 +5,7 @@ import os
 import sqlite3
 import datetime
 import time
+from collections import defaultdict
 from dataclasses import dataclass
 
 from code_review_ai.community import build_communities, inter_community_edges, WeightMode
@@ -110,7 +111,7 @@ def rebuild(config: Config, conn: sqlite3.Connection,
         _clear_tables(conn)
         qname_to_id = _write_nodes(conn, parsed)
         _write_edges(conn, all_edges)
-        _write_degrees(conn, all_edges, qname_to_id)
+        recompute_degrees(conn)
         call_edges = [e for e in all_edges if e.kind == "call"]
         flow_count = _write_flows(conn, parsed, call_edges, qname_to_id, config)
         t_comm_start = time.perf_counter()
@@ -173,25 +174,20 @@ def _write_edges(conn, edges) -> None:
     )
 
 
-def _write_degrees(conn, edges, qname_to_id: dict[str, int]) -> None:
-    """Backfill in_degree/out_degree from resolved call edges.
-
-    Degree counts DISTINCT callers/callees (kind='call', resolution='resolved'),
-    matching the flow-traversable edge set: repeated calls to the same target
-    count once. Zero-degree nodes keep the column DEFAULT 0 set at insert.
-    """
-    callers_of: dict[str, set[str]] = {}
-    callees_of: dict[str, set[str]] = {}
-    for edge in edges:
-        if edge.kind != "call" or edge.resolution != "resolved":
-            continue
-        callers_of.setdefault(edge.target, set()).add(edge.source)
-        callees_of.setdefault(edge.source, set()).add(edge.target)
-    updates = [
-        (len(callers_of.get(qname, ())), len(callees_of.get(qname, ())), node_id)
-        for qname, node_id in qname_to_id.items()
-        if qname in callers_of or qname in callees_of
-    ]
+def recompute_degrees(conn: sqlite3.Connection) -> None:
+    """Recompute in_degree/out_degree for every node from the resolved call
+    edges in the DB (DISTINCT callers/callees). Run after edges are written."""
+    callers: dict[str, set[str]] = defaultdict(set)
+    callees: dict[str, set[str]] = defaultdict(set)
+    for r in conn.execute(
+            "SELECT source,target FROM edges "
+            "WHERE kind='call' AND resolution='resolved'"):
+        callers[r["target"]].add(r["source"])
+        callees[r["source"]].add(r["target"])
+    conn.execute("UPDATE nodes SET in_degree=0, out_degree=0")
+    updates = [(len(callers[q]), len(callees[q]), nid)
+               for q, nid in conn.execute("SELECT qualified_name,id FROM nodes")
+               if q in callers or q in callees]
     if updates:
         conn.executemany(
             "UPDATE nodes SET in_degree=?, out_degree=? WHERE id=?", updates)
