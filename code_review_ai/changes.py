@@ -6,6 +6,19 @@ from code_review_ai.config import Config
 from code_review_ai.parser import parse_file
 
 
+def current_head(config: Config) -> str | None:
+    """Current git HEAD sha, or None if unresolvable (no commits / not a repo)."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=config.repo_path,
+                             capture_output=True, text=True, encoding="utf-8",
+                             errors="replace")
+    except OSError:
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip()
+
+
 def _git_diff(base: str, files: list[str] | None) -> dict[str, list[tuple[int, int]]]:
     """Return {file_path: [(start, end), ...]} changed line ranges (added/removed)."""
     args = ["git", "diff", "--unified=0", base]

@@ -6,6 +6,7 @@ import pytest
 
 from conftest import FIXTURES
 from code_review_ai.config import load_config
+from code_review_ai.changes import current_head
 from code_review_ai.db import connect, init_schema
 from code_review_ai import update as upd
 from code_review_ai import manifest as mf
@@ -173,3 +174,41 @@ def test_update_nodes_edges_deletes_file_cleans_memberships(tmp_path):
     assert conn.execute(
         f"SELECT COUNT(*) FROM community_memberships WHERE node_id IN ({placeholders})",
         node_ids).fetchone()[0] == 0
+
+
+def test_update_flows_rebuilds_from_db_and_skips_when_head_unchanged(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)      # rebuild 已 stamp flows_as_of_head=HEAD
+    before = conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
+    assert before > 0
+    # HEAD 未变 -> no-op
+    assert upd.update_flows(cfg, conn) == 0
+    # 改一个文件、commit（HEAD 变）-> 重算，flow 结构应随新符号变化
+    (repo / "util.py").write_text(
+        (repo / "util.py").read_text(encoding="utf-8")
+        + "\ndef new_helper():\n    pass\n",
+        encoding="utf-8")
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-aqm", "add helper"], cwd=repo, check=True)
+    n = upd.update_flows(cfg, conn)
+    assert n > 0
+    assert conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0] == n
+    assert conn.execute(
+        "SELECT value FROM build_meta WHERE key='flows_as_of_head'"
+    ).fetchone()[0] == current_head(cfg)
+
+
+def test_update_communities_when_enabled(tmp_path):
+    pytest.importorskip("leidenalg")
+    repo, cfg = _git_repo(tmp_path)
+    cfg.community_detection = True
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    n = upd.update_communities(cfg, conn)
+    assert n > 0
+    members = conn.execute(
+        "SELECT COUNT(*) FROM community_memberships").fetchone()[0]
+    total = conn.execute(
+        "SELECT SUM(node_count) FROM communities").fetchone()[0]
+    assert members == total

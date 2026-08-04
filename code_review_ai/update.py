@@ -9,7 +9,10 @@ import os
 
 from code_review_ai import qname
 from code_review_ai import manifest
+from code_review_ai.changes import current_head
+from code_review_ai.community import WeightMode, build_communities, inter_community_edges
 from code_review_ai.db import transaction
+from code_review_ai.flow_builder import EdgeRow, NodeRow, build_flows
 from code_review_ai.indexer import recompute_degrees, _stamp_built_at
 from code_review_ai.parser import (SOURCE_GLOBS, filter_excluded,
                                    list_source_files, parse_file)
@@ -186,3 +189,93 @@ def _sync_manifest(conn, repo, parse_paths: list[str], deleted: set[str]) -> Non
         entries[rel] = (st.st_mtime, st.st_size, manifest.hash_file(abs_path))
     manifest.update(conn, entries)
     manifest.remove(conn, sorted(deleted))
+
+
+def needs_flows_update(config, conn) -> bool:
+    row = conn.execute(
+        "SELECT value FROM build_meta WHERE key='flows_as_of_head'").fetchone()
+    stored = row["value"] if row else None
+    return stored != current_head(config)
+
+
+def update_flows(config, conn) -> int:
+    """Rebuild flows from the DB's nodes+edges. No-op if HEAD is unchanged
+    (flows represent the last committed state)."""
+    if not needs_flows_update(config, conn):
+        return 0
+    nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"], r["kind"])
+             for r in conn.execute(
+                 "SELECT id,qualified_name,file_path,kind FROM nodes")]
+    erows = [EdgeRow(r["source"], r["target"], r["resolution"])
+             for r in conn.execute(
+                 "SELECT source,target,resolution FROM edges WHERE kind='call'")]
+    flows = build_flows(nodes, erows, config.entry_names)
+    id_to_qname = {n.id: n.qualified_name for n in nodes}
+    with transaction(conn):
+        conn.execute("DELETE FROM flow_memberships")
+        conn.execute("DELETE FROM flows")
+        membership_rows: list[tuple[int, int, int]] = []
+        for f in flows:
+            name = qname.short(id_to_qname.get(f.entry_point_id, ""))
+            cur = conn.execute(
+                "INSERT INTO flows(name,entry_point_id,depth,node_count,"
+                "file_count,criticality,path_json) VALUES(?,?,?,?,?,?,?)",
+                (name, f.entry_point_id, f.depth, f.node_count, f.file_count,
+                 None, json.dumps(f.path)))
+            fid = cur.lastrowid
+            membership_rows.extend((fid, nid, pos) for pos, nid in enumerate(f.path))
+        if membership_rows:
+            conn.executemany(
+                "INSERT INTO flow_memberships(flow_id,node_id,position) "
+                "VALUES(?,?,?)", membership_rows)
+        conn.execute(
+            "INSERT OR REPLACE INTO build_meta(key,value) "
+            "VALUES('flows_as_of_head',?)", (current_head(config) or "",))
+    return len(flows)
+
+
+def update_communities(config, conn) -> int:
+    """Rebuild communities from the DB's structural (non-call) resolved edges.
+    Opt-in via config.community_detection; degrades gracefully if libs missing."""
+    if not config.community_detection:
+        return 0
+    nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"], r["kind"])
+             for r in conn.execute(
+                 "SELECT id,qualified_name,file_path,kind FROM nodes")]
+    erows = [EdgeRow(r["source"], r["target"], "resolved")
+             for r in conn.execute(
+                 "SELECT source,target FROM edges "
+                 "WHERE kind!='call' AND resolution='resolved'")]
+    try:
+        communities = build_communities(
+            nodes, erows,
+            weight_mode=WeightMode.parse(config.community_weight))
+    except ImportError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "leidenalg/igraph not installed; skipping community detection")
+        return 0
+    qname_to_id = {n.qualified_name: n.id for n in nodes}
+    membership_rows: list[tuple[int, int]] = []
+    with transaction(conn):
+        conn.execute("DELETE FROM community_edges")
+        conn.execute("DELETE FROM community_memberships")
+        conn.execute("DELETE FROM communities")
+        for c in communities:
+            cur = conn.execute(
+                "INSERT INTO communities(label,node_count,modularity) "
+                "VALUES(?,?,?)", (c.label, len(c.members), c.modularity))
+            cid = cur.lastrowid
+            membership_rows.extend((cid, nid) for nid in c.members)
+        if membership_rows:
+            conn.executemany(
+                "INSERT INTO community_memberships(community_id,node_id) "
+                "VALUES(?,?)", membership_rows)
+            node_to_comm = {nid: cid for cid, nid in membership_rows}
+            comm_edges = inter_community_edges(erows, qname_to_id, node_to_comm)
+            if comm_edges:
+                conn.executemany(
+                    "INSERT INTO community_edges(community_id_a,community_id_b,"
+                    "weight) VALUES(?,?,?)",
+                    [(a, b, w) for (a, b), w in comm_edges.items()])
+    return len(communities)

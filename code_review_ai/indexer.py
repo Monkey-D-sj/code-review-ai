@@ -8,6 +8,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 
+from code_review_ai.changes import current_head
 from code_review_ai.community import build_communities, inter_community_edges, WeightMode
 from code_review_ai.config import Config
 from code_review_ai.db import transaction
@@ -118,6 +119,9 @@ def rebuild(config: Config, conn: sqlite3.Connection,
         community_count = _write_communities(conn, parsed, all_edges, qname_to_id, config)
         t_communities = _ms(time.perf_counter() - t_comm_start)
         built_at = _stamp_built_at(conn)
+        conn.execute(
+            "INSERT OR REPLACE INTO build_meta(key,value) "
+            "VALUES('flows_as_of_head',?)", (current_head(config) or "",))
     t_db = time.perf_counter()
 
     timings = {
