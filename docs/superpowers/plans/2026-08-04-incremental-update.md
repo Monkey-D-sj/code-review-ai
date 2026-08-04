@@ -14,7 +14,7 @@
 - 函数体 ≤ 50 行、类 ≤ 300 行；主控函数只做编排；禁止单字母变量名（数学索引除外）、禁止内置名作变量。
 - 每次写入 DB 必须走 `db.transaction()`（原子；失败回滚，旧索引保留）。
 - edges 的 `source`/`target` 存 qname 字符串（不是 id）；`nodes.file_path` / `edges.file_path` 是**绝对路径**；manifest 键是 **repo-relative**。
-- 测试 fixture：`tests/fixtures/repo` 是父仓库内嵌目录，`git ls-files`（cwd=repo_path）返回 cwd-relative 路径；改动性测试必须用 `_git_repo(tmp_path)` 复制出独立临时 git 仓库，禁止改共享 fixture。
+- 测试 fixture：`tests/fixtures/repo` 是父仓库内嵌目录，`git ls-files`（cwd=repo_path）返回 cwd-relative 路径；**新的增量测试**一律用 `_git_repo(tmp_path)` 复制出独立临时 git 仓库，禁止改共享 fixture；沿用既有"共享 fixture + 事后恢复"模式的测试（如 `test_is_stale_detects_mtime`）除外。
 - `repair_resolutions` 规则（见 Task 4）必须保持：`kind='call'` 且 `target` 无 `::` 的边**不碰**；`dynamic` 边**不碰**。
 - 现有 `indexer.is_stale` 及其测试**保持原样**（新路径用 `needs_*`，不删旧函数）。
 - 每个 task 结束必须跑 `uv run pytest` 全量，全部通过才可进入下一个 task。
@@ -345,7 +345,7 @@ def needs_nodes_update(config, conn) -> bool:
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/test_incremental.py -v`
-Expected: PASS（注意 `_stat_tuple` 定义位置；若 mtime 浮点相等性有问题，把 `==` 放宽为 `abs(a-b) < 1e-6`）
+Expected: PASS（若 mtime 浮点相等性有问题，把 `changed_files` 里的 `st.st_mtime == mtime` 放宽为 `abs(st.st_mtime - mtime) < 1e-6`）
 
 - [ ] **Step 5: Commit**
 
@@ -491,15 +491,14 @@ def test_update_nodes_edges_touches_only_changed(tmp_path, monkeypatch):
     flows_before = conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
 
     # 改 util.py 内容，走 watcher hint 路径（changed_paths）-> 只 re-parse util.py
-    import code_review_ai.update as upd2
     calls = {"n": 0}
-    real_parse = upd2.parse_file
+    real_parse = upd.parse_file
 
     def counting(*a, **k):
         calls["n"] += 1
         return real_parse(*a, **k)
 
-    monkeypatch.setattr(upd2, "parse_file", counting)
+    monkeypatch.setattr(upd, "parse_file", counting)
     p = repo / "util.py"
     p.write_text(p.read_text(encoding="utf-8") + "\ndef new_helper():\n    pass\n",
                  encoding="utf-8")
@@ -970,22 +969,21 @@ def config_hash(config: Config) -> str:
 
 （`config.py` 顶部已有 `import os`/`tomllib`；补 `hashlib`/`json`。）
 
-`indexer.py`：把 `rebuild` 里 `built_at = _stamp_built_at(conn)` 替换为 `_stamp_meta(config, conn)`；把 `_stamp_built_at` 改为 `_stamp_meta`（保留 built_at 键，另落三个键 + 填充 files 表）：
+`indexer.py`：**保留** `_stamp_built_at`（`update.update_nodes_edges` 仍 import 它），新增 `_stamp_meta` 并在 `rebuild` 里把 `built_at = _stamp_built_at(conn)` 替换为 `built_at = _stamp_meta(config, conn)`：
 
 ```python
 def _stamp_meta(config: Config, conn: sqlite3.Connection) -> str:
-    """Stamp build metadata after a full rebuild: built_at, config_hash,
-    index_version, flows_as_of_head, and the file manifest (so the next
-    incremental update can diff against it)."""
+    """Stamp build metadata after a full rebuild: built_at (via
+    _stamp_built_at), config_hash, index_version, flows_as_of_head, and the
+    file manifest (so the next incremental update can diff against it)."""
     from code_review_ai.changes import current_head
     from code_review_ai.config import config_hash as _config_hash
     from code_review_ai.db import INDEX_VERSION
     from code_review_ai import manifest
-    built_at = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+    built_at = _stamp_built_at(conn)
     conn.executemany(
         "INSERT OR REPLACE INTO build_meta(key,value) VALUES(?,?)",
-        [("built_at", built_at),
-         ("config_hash", _config_hash(config)),
+        [("config_hash", _config_hash(config)),
          ("index_version", str(INDEX_VERSION)),
          ("flows_as_of_head", current_head(config) or "")])
     # populate file manifest so incremental updates can diff
@@ -1071,21 +1069,32 @@ git commit -m "feat(update): sync orchestration with config/version full-rebuild
 `tests/test_watcher.py` 改写为：
 
 ```python
+import shutil
+import subprocess
 import threading
 import time
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.watcher import startup_sync, run_watcher
 
-from conftest import FIXTURES as FIX
+from conftest import FIXTURES
 
 
-def _cfg(tmp_path):
-    cfg = load_config(FIX)
+def _git_repo(tmp_path):
+    """Copy the shared fixture into an isolated temp git repo."""
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURES, repo)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-q", "-m", "init"],
+        cwd=repo, check=True)
+    cfg = load_config(str(repo))
+    cfg.repo_path = str(repo)
     cfg.db_path = str(tmp_path / "w.db")
-    cfg.repo_path = FIX
     cfg.watch_debounce_ms = 100
-    return cfg
+    return repo, cfg
 
 
 def _built_at(db_path):
@@ -1096,14 +1105,14 @@ def _built_at(db_path):
 
 
 def test_startup_sync_rebuilds_empty_db(tmp_path):
-    cfg = _cfg(tmp_path)
+    _, cfg = _git_repo(tmp_path)
     conn = connect(cfg.db_path)
     init_schema(conn)
     assert startup_sync(cfg, conn) is True     # 空库 -> 全量
 
 
 def test_run_watcher_updates_nodes_edges_on_change(tmp_path):
-    cfg = _cfg(tmp_path)
+    repo, cfg = _git_repo(tmp_path)
     conn = connect(cfg.db_path)
     init_schema(conn)
     lock = threading.Lock()
@@ -1113,11 +1122,10 @@ def test_run_watcher_updates_nodes_edges_on_change(tmp_path):
     stop = threading.Event()
     t = threading.Thread(target=run_watcher, args=(cfg, lock, stop), daemon=True)
     t.start()
-    p = "tests/fixtures/repo/util.py"
-    orig = open(p, encoding="utf-8").read()
     after = before
     try:
-        time.sleep(0.5)
+        time.sleep(0.5)                       # 让 watchfiles 建立基线
+        p = repo / "util.py"
         with open(p, "a", encoding="utf-8") as f:
             f.write("\n# touch\n")
         deadline = time.time() + 8
@@ -1125,15 +1133,13 @@ def test_run_watcher_updates_nodes_edges_on_change(tmp_path):
             time.sleep(0.1)
             after = _built_at(cfg.db_path)
     finally:
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(orig)
-    stop.set()
+        stop.set()
     t.join(timeout=8)
     assert not t.is_alive()
-    assert after != before
+    assert after != before                   # watcher 的 update_nodes_edges 已 stamp built_at
 ```
 
-注意：`test_run_watcher_updates_nodes_edges_on_change` 仍用共享 fixture `tests/fixtures/repo`（只追加注释并恢复，与现状一致）；`run_watcher` 触发 `update_nodes_edges` 会 stamp built_at，故 `after != before` 仍成立。
+注意：watcher 触发 `update_nodes_edges` 会 stamp built_at，故 `after != before` 成立；`_source_file` 过滤 `.git` 内非源文件，watchfiles 在临时仓库上安全。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -1421,9 +1427,11 @@ git commit -m "feat(cli): update/sync/install-hooks subcommands + git hook insta
 **Interfaces:**
 - Consumes: Task 7 全部函数
 
-- [ ] **Step 1: 改写缓存测试**
+- [ ] **Step 1: 移除 indexer 的 ParseCache + 改写缓存测试**
 
-`tests/test_indexer.py::test_rebuild_cache_skips_unchanged_files` 改为（ParseCache 已移除）：
+先删 `indexer.py` 里的 `_CacheEntry`、`ParseCache` 类、`_parse_files` 的 cache 分支，并把签名收敛为 `_parse_files(files, repo)`、`rebuild(config, conn)`；顶部 import 清理。此时 `tests/test_indexer.py` 顶部 `from code_review_ai.indexer import ParseCache, rebuild, is_stale` 需去掉 `ParseCache`（`test_is_stale_detects_mtime` 不受影响）。
+
+`test_rebuild_cache_skips_unchanged_files` 改写为（manifest 驱动）：
 
 ```python
 def test_rebuild_then_update_parses_only_changed(tmp_path, monkeypatch):
@@ -1457,7 +1465,7 @@ def test_rebuild_then_update_parses_only_changed(tmp_path, monkeypatch):
             f.write(orig)
 ```
 
-（注意此测试触碰共享 fixture——与既有测试一致，写完恢复。若担心并行，可用 `_git_repo` 复制；实现者按需二选一，这里保留 fixture 写法。）
+（此测试沿用 `test_is_stale_detects_mtime` 的"共享 fixture + 事后恢复"模式，Global Constraints 已豁免；实现者若想规避共享改动，可复制 `_git_repo` 帮助到 `test_indexer.py`。）
 
 - [ ] **Step 2: 加等价性测试（验收核心）**
 
@@ -1522,17 +1530,16 @@ def test_repair_new_direction_no_reparse_of_importer(tmp_path, monkeypatch):
     repo, cfg = _git_repo(tmp_path)
     conn = connect(cfg.db_path)
     _init_and_build(cfg, conn)
-    from code_review_ai import update as upd2
     # F = app.py 已 import auth.login 且 resolved；构造一个 unresolved importer 场景：
     # 改 auth.py 加 User，app.py 不 import User —— 用手工边验证不 re-parse F
     calls = {"n": 0}
-    real = upd2.parse_file
+    real = upd.parse_file
 
     def counting(*a, **k):
         calls["n"] += 1
         return real(*a, **k)
 
-    monkeypatch.setattr(upd2, "parse_file", counting)
+    monkeypatch.setattr(upd, "parse_file", counting)
     # 直接注入一条类型一 unresolved 边（模拟 F 曾 import auth::User 而未存在）
     conn.execute(
         "INSERT INTO edges(source,target,kind,resolution) "
