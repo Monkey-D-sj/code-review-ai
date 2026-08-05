@@ -1,10 +1,12 @@
 import os
 
+import pytest
+
 from code_review_ai.installer import (
     DEFAULT_MCP_ENTRY, DEFAULT_NAME, DEFAULT_SOURCE,
     MCP_DOC_END, MCP_DOC_START, SKILL_NAMES,
-    _claude_add_command, _claude_executable, _launch_command,
-    append_usage_docs, deploy_skills, install,
+    _claude_add_command, _claude_executable, _global_context_file, _global_skills_dir,
+    _launch_command, append_usage_docs, deploy_skills, install,
 )
 
 
@@ -195,3 +197,21 @@ def test_install_codex_skips_subprocess_and_deploys(monkeypatch, tmp_path):
     assert calls == []  # codex 不执行任何 MCP 注册子进程
     assert "manual" in res.message.lower()
     assert "Deployed 4 review skills" in res.message
+
+
+@pytest.mark.parametrize("platform,suffix", [
+    ("claude-code", ".claude/CLAUDE.md"),
+    ("codex", ".codex/AGENTS.md"),
+])
+def test_global_context_file_mapping(monkeypatch, tmp_path, platform, suffix):
+    monkeypatch.setattr("code_review_ai.installer.Path.home", lambda: tmp_path)
+    assert _global_context_file(platform) == tmp_path / suffix
+
+
+@pytest.mark.parametrize("platform,suffix", [
+    ("claude-code", ".claude/skills"),
+    ("codex", ".codex/skills"),
+])
+def test_global_skills_dir_mapping(monkeypatch, tmp_path, platform, suffix):
+    monkeypatch.setattr("code_review_ai.installer.Path.home", lambda: tmp_path)
+    assert _global_skills_dir(platform) == tmp_path / suffix

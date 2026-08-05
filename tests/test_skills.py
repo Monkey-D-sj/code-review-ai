@@ -48,3 +48,8 @@ def test_language_skills_have_all_required_sections():
         body = _read(name)
         for section in REQUIRED_SECTIONS:
             assert f"## {section}" in body, f"{name} missing '## {section}'"
+        header_count = len(re.findall(r"^## ", body, flags=re.MULTILINE))
+        expected = len(REQUIRED_SECTIONS) + 1
+        assert header_count == expected, (
+            f"{name} has {header_count} '## ' sections, expected {expected} "
+            f"({len(REQUIRED_SECTIONS)} required + '## 审核方式')")

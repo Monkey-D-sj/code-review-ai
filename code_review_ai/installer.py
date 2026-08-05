@@ -1,13 +1,18 @@
-"""Self-installation: register the MCP server with an AI tool's config.
+"""Self-installation: register the MCP server with an AI tool's config and
+deploy the bundled review skills + usage docs.
 
 The subprocess / external-CLI coupling (``claude mcp add``) is isolated here so
 ``cli.py`` stays thin and the install logic is unit-testable without shelling out.
+Codex has no ``mcp add`` CLI, so ``install --platform codex`` deploys skills and
+usage docs only; MCP registration stays manual (see README).
 
 The registered launch command is ``uvx --from <source> <mcp-entry>``: self-contained,
 so an outsider needs only ``uv`` (which also fetches the required Python 3.14) and the
 ``claude`` CLI - no separate ``uv tool install`` step. On success the installer also
-appends a tool-usage section to the user-global CLAUDE.md (marker-guarded, idempotent)
-so the AI in any project knows how to call the registered tools.
+deploys the bundled language-review skills to the platform's user-scope skills dir
+(``~/.claude/skills`` or ``~/.codex/skills``) and marker-injects a tool-usage section
+into the platform's context file (``~/.claude/CLAUDE.md`` or ``~/.codex/AGENTS.md``,
+marker-guarded, idempotent) so the AI in any project knows how to call the tools.
 """
 import importlib.resources
 import os
@@ -30,7 +35,8 @@ SKILL_NAMES = (
     "code-review-javascript",
 )
 
-# Tool-usage section appended to the user-global CLAUDE.md on install. The block
+# Tool-usage section marker-injected into the platform's context file on install
+# (~/.claude/CLAUDE.md for claude-code, ~/.codex/AGENTS.md for codex). The block
 # between the markers is replaced in place, so re-installs don't duplicate it.
 MCP_DOC_START = "<!-- CODE_REVIEW_AI_MCP_START -->"
 MCP_DOC_END = "<!-- CODE_REVIEW_AI_MCP_END -->"

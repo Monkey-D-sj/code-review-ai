@@ -23,7 +23,7 @@ uv run code-review-ai query-graph auth::login                # graph neighborhoo
 uv run code-review-ai query-graph auth::login --edge-kind call --direction both
 uv run code-review-ai search  "login"                       # glob-match symbol short names
 uv run code-review-ai communities [--symbol auth::login]    # list communities, or one symbol's community
-uv run code-review-ai install --platform Codex        # deploy review skills + AGENTS.md docs (MCP registered manually)
+uv run code-review-ai install --platform codex        # deploy review skills + AGENTS.md docs (MCP registered manually)
 uv sync --extra community                                    # opt: install leidenalg+igraph for Phase C
 uv run code-review-ai-mcp                                    # run the MCP server (stdio)
 ```
