@@ -59,3 +59,20 @@ def test_reexport_through_package_init(tmp_path):
     # both `Session()` (from pkg import) and `p.Session()` (import pkg as p)
     # must resolve to the real class through the package __init__ re-export
     assert ("consumer", "pkg.impl::Session", "resolved") in by
+
+
+def test_constructor_links_to_init(tmp_path):
+    mod = tmp_path / "svc.py"
+    mod.write_text(
+        "class Service:\n"
+        "    def __init__(self):\n"
+        "        pass\n"
+        "s = Service()\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(mod), str(tmp_path))
+    qnames = {n.qualified_name for n in pf.nodes}
+    edges = resolve_calls([pf], qnames)
+    by = {(e.source, e.target, e.kind, e.resolution) for e in edges}
+    assert ("svc", "svc::Service", "call", "resolved") in by          # to the class
+    assert ("svc", "svc::Service.__init__", "call", "resolved") in by  # to __init__

@@ -47,12 +47,20 @@ def _exists(qname: str, existing: set[str]) -> bool:
 def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str]) -> list[Edge]:
     mod_syms = _module_symbols(parsed_files)
     all_import_maps = {pf.module_qname: _import_map(pf) for pf in parsed_files}
+    class_qnames = {n.qualified_name for f in parsed_files for n in f.nodes if n.kind == "class"}
     edges: list[Edge] = []
     for pf in parsed_files:
         local = mod_syms.get(pf.module_qname, {})
         imports = _import_map(pf)
         for c in pf.raw_calls:
-            edges.append(_resolve_one(c, local, imports, existing_qnames, all_import_maps))
+            edge = _resolve_one(c, local, imports, existing_qnames, all_import_maps)
+            edges.append(edge)
+            if edge.resolution == "resolved" and edge.target in class_qnames:
+                init_qn = qname.join(qname.module(edge.target), "__init__", edge.target)
+                if init_qn in existing_qnames:
+                    edges.append(Edge(source=edge.source, target=init_qn, kind="call",
+                                      file_path=edge.file_path, call_line=edge.call_line,
+                                      resolution="resolved"))
     return edges
 
 
