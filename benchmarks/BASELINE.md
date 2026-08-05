@@ -1,32 +1,53 @@
-# SWE-bench Verified retrieval baseline
+# Historical change retrieval baseline
 
-Date: 2026-08-04
+Date: 2026-08-05
 
-The committed 30-case suite uses production patch line ranges as change seeds
-and official `test_patch` files as retrieval targets. All repositories are
-indexed at their pinned pre-fix `base_commit`, with test files included.
+The 40-case suite combines two explicitly labelled sources:
 
-| Repository | Cases | Test-file Recall@10 |
-|---|---:|---:|
-| pallets/flask | 1 | 0.0% |
-| psf/requests | 8 | 50.0% |
-| pytest-dev/pytest | 11 | 0.0% |
-| pydata/xarray | 10 | 20.0% |
-| **Overall (macro)** | **30** | **20.0%** |
+- 30 SWE-bench Verified cases from Flask, Requests, pytest, and Xarray;
+- 10 commits mined from the official FastAPI Git history because FastAPI is
+  not part of classic SWE-bench Verified.
 
-Additional first-run results:
+Every repository is indexed at its pinned pre-fix `base_commit`. Production
+patch ranges are change seeds, while test files changed by the real fix are
+retrieval targets. Tests are included in indexing.
 
-- Symbol found rate: 100.0%
-- Macro test-file Precision@10: 7.89%
-- Cases with at least one test-file hit: 6/30
-- Mean impact query latency: 0.72 ms
-- Mean full-index build time per historical snapshot: 3.22 s
-- Mean indexed nodes / source files: 3,735 / 149
-- Mean resolved-call rate: 9.7%
-- Mean SQLite index size: 8.87 MB
+| Repository | Source | Cases | Test Recall@10 | Test Recall@All |
+|---|---|---:|---:|---:|
+| pallets/flask | SWE-bench Verified | 1 | 100.0% | 100.0% |
+| psf/requests | SWE-bench Verified | 8 | 75.0% | 75.0% |
+| pytest-dev/pytest | SWE-bench Verified | 11 | 9.09% | 9.09% |
+| pydata/xarray | SWE-bench Verified | 10 | 20.0% | 90.0% |
+| fastapi/fastapi | Official Git history | 10 | 10.0% | 30.0% |
+| **Overall (macro)** | **Combined** | **40** | **27.5%** | **50.0%** |
 
-This is a baseline, not a claim of production accuracy. The zero-result Flask
-and pytest cases expose known static-analysis gaps around constructor dispatch,
-hooks, fixtures, decorators, and other framework-driven control flow. Re-run
-the suite after resolver changes and compare the generated JSON report rather
-than replacing failures with hand-selected examples.
+Multi-production-file leave-one-out results:
+
+| Repository | Eligible cases | Folds | Production Recall@10 | Production Recall@All |
+|---|---:|---:|---:|---:|
+| pytest-dev/pytest | 2 | 4 | 25.0% | 50.0% |
+| pydata/xarray | 5 | 10 | 50.0% | 100.0% |
+| fastapi/fastapi | 4 | 11 | 21.21% | 51.52% |
+| **Overall (macro-fold)** | **11** | **25** | **33.33%** | **70.67%** |
+
+Unified current-code results:
+
+- Symbol found rate: 97.5%
+- Macro test-file Precision@10 / Precision@All: 3.18% / 2.93%
+- Mean full candidate files per test case: 27.3
+- Cases with at least one Top-10 test-file hit: 11/40
+- Macro related-production-file Precision@10 / Precision@All: 4.8% / 4.29%
+- Mean full candidate files per production fold: 38.72
+- Production folds with at least one Top-10 hit: 10/25
+- Mean impact query latency: 176.43 ms
+- Mean full-index build time per historical snapshot: 4.88 s
+- Mean indexed nodes / source files: 4,464 / 395
+- Mean resolved-call rate: 26.58%
+- Mean SQLite index size: 10.66 MB
+
+This is a baseline, not a claim of production accuracy. Co-changed production
+files are an observable proxy for related impact, not a complete semantic
+ground truth. The weak FastAPI, Xarray, and pytest test-file results still
+expose static-analysis gaps around decorators, dependency injection, dynamic
+dispatch, hooks, and fixtures. Re-run the fixed suite after resolver changes
+instead of replacing failures with hand-selected examples.

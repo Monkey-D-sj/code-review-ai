@@ -96,7 +96,7 @@ def run_benchmark(config: Config, conn: sqlite3.Connection,
     stats = rebuild(config, conn)
     results = [_evaluate_case(config, conn, case, top_k) for case in cases]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "repository": str(Path(config.repo_path).resolve()),
         "top_k": top_k,
         "index": _index_metrics(config, conn, stats),
@@ -111,9 +111,10 @@ def _evaluate_case(config: Config, conn: sqlite3.Connection,
     started = time.perf_counter()
     impacts = get_impact(conn, symbols)
     elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
-    candidates = _candidate_files(config, conn, impacts)[:top_k]
-    gold = set(case.gold_files)
-    hits = [path for path in candidates if path in gold]
+    all_candidates = _candidate_files(config, conn, impacts)
+    candidates = all_candidates[:top_k]
+    test_score = _score_candidates(candidates, case.gold_files)
+    all_test_score = _score_candidates(all_candidates, case.gold_files)
     found_count = sum(1 for impact in impacts if impact["found"])
     return {
         "id": case.case_id,
@@ -122,20 +123,33 @@ def _evaluate_case(config: Config, conn: sqlite3.Connection,
         "changed_symbols": symbols,
         "gold_files": case.gold_files,
         "candidate_files": candidates,
-        "hits": hits,
-        "patch_file_recall_at_k": round(len(set(hits)) / len(gold), 4),
-        "patch_file_precision_at_k": round(len(set(hits)) / len(candidates), 4)
-        if candidates else 0.0,
+        "hits": test_score["hits"],
+        "patch_file_recall_at_k": test_score["recall"],
+        "patch_file_precision_at_k": test_score["precision"],
+        "all_candidate_files_count": len(all_candidates),
+        "all_hits": all_test_score["hits"],
+        "patch_file_recall_all": all_test_score["recall"],
+        "patch_file_precision_all": all_test_score["precision"],
         "symbol_found_rate": round(found_count / len(impacts), 4)
         if impacts else 0.0,
         "query_ms": elapsed_ms,
+        "production_file_folds": _production_folds(
+            config, conn, case.changed_ranges, top_k
+        ),
     }
 
 
 def _case_symbols(config: Config, conn: sqlite3.Connection,
                   case: BenchmarkCase) -> list[str]:
     symbols = list(case.changed_symbols)
-    for file_path, ranges in case.changed_ranges.items():
+    symbols.extend(_symbols_for_ranges(config, conn, case.changed_ranges))
+    return list(dict.fromkeys(symbols))
+
+
+def _symbols_for_ranges(config: Config, conn: sqlite3.Connection,
+                        changed_ranges: dict[str, list[tuple[int, int]]]) -> list[str]:
+    symbols: list[str] = []
+    for file_path, ranges in changed_ranges.items():
         rows = conn.execute(
             "SELECT qualified_name,start_line,end_line FROM nodes "
             "WHERE REPLACE(file_path, CHAR(92), '/') LIKE ? "
@@ -146,6 +160,47 @@ def _case_symbols(config: Config, conn: sqlite3.Connection,
             if _overlaps_any(row["start_line"], row["end_line"], ranges):
                 symbols.append(row["qualified_name"])
     return list(dict.fromkeys(symbols))
+
+
+def _production_folds(config: Config, conn: sqlite3.Connection,
+                      changed_ranges: dict[str, list[tuple[int, int]]],
+                      top_k: int) -> list[dict]:
+    if len(changed_ranges) < 2:
+        return []
+    folds: list[dict] = []
+    all_files = list(changed_ranges)
+    for seed_file, ranges in changed_ranges.items():
+        symbols = _symbols_for_ranges(config, conn, {seed_file: ranges})
+        started = time.perf_counter()
+        impacts = get_impact(conn, symbols)
+        query_ms = round((time.perf_counter() - started) * 1000, 3)
+        all_candidates = [path for path in _candidate_files(config, conn, impacts)
+                          if path != seed_file]
+        candidates = all_candidates[:top_k]
+        gold_files = [path for path in all_files if path != seed_file]
+        score = _score_candidates(candidates, gold_files)
+        all_score = _score_candidates(all_candidates, gold_files)
+        folds.append({"seed_file": seed_file, "changed_symbols": symbols,
+                      "gold_files": gold_files, "candidate_files": candidates,
+                      "hits": score["hits"], "recall_at_k": score["recall"],
+                      "precision_at_k": score["precision"],
+                      "all_candidate_files_count": len(all_candidates),
+                      "all_hits": all_score["hits"],
+                      "recall_all": all_score["recall"],
+                      "precision_all": all_score["precision"],
+                      "query_ms": query_ms})
+    return folds
+
+
+def _score_candidates(candidates: list[str], gold_files: list[str]) -> dict:
+    gold = set(gold_files)
+    hits = [path for path in candidates if path in gold]
+    return {
+        "hits": hits,
+        "recall": round(len(set(hits)) / len(gold), 4) if gold else 0.0,
+        "precision": round(len(set(hits)) / len(candidates), 4)
+        if candidates else 0.0,
+    }
 
 
 def _overlaps_any(start: int, end: int,
@@ -219,6 +274,8 @@ def _database_size(db_path: str) -> int:
 
 def _aggregate(results: list[dict]) -> dict:
     case_count = len(results)
+    production_folds = [fold for result in results
+                        for fold in result["production_file_folds"]]
     return {
         "cases": case_count,
         "macro_patch_file_recall_at_k": round(sum(
@@ -227,8 +284,36 @@ def _aggregate(results: list[dict]) -> dict:
         "macro_patch_file_precision_at_k": round(sum(
             result["patch_file_precision_at_k"] for result in results
         ) / case_count, 4),
+        "macro_patch_file_recall_all": round(sum(
+            result["patch_file_recall_all"] for result in results
+        ) / case_count, 4),
+        "macro_patch_file_precision_all": round(sum(
+            result["patch_file_precision_all"] for result in results
+        ) / case_count, 4),
+        "mean_all_candidate_files": round(sum(
+            result["all_candidate_files_count"] for result in results
+        ) / case_count, 2),
         "symbol_found_rate": round(
             sum(result["symbol_found_rate"] for result in results) / case_count, 4),
         "mean_query_ms": round(
             sum(result["query_ms"] for result in results) / case_count, 3),
+        "production_file_eligible_cases": sum(
+            bool(result["production_file_folds"]) for result in results),
+        "production_file_folds": len(production_folds),
+        "macro_related_production_file_recall_at_k": _fold_mean(
+            production_folds, "recall_at_k"),
+        "macro_related_production_file_precision_at_k": _fold_mean(
+            production_folds, "precision_at_k"),
+        "macro_related_production_file_recall_all": _fold_mean(
+            production_folds, "recall_all"),
+        "macro_related_production_file_precision_all": _fold_mean(
+            production_folds, "precision_all"),
+        "mean_production_all_candidate_files": _fold_mean(
+            production_folds, "all_candidate_files_count"),
     }
+
+
+def _fold_mean(folds: list[dict], key: str) -> float | None:
+    if not folds:
+        return None
+    return round(sum(fold[key] for fold in folds) / len(folds), 4)

@@ -110,6 +110,43 @@ per case. Use `--limit 1` for a smoke test. The committed manifest can be
 regenerated from Hugging Face rows JSON with
 `scripts/generate_swebench_manifest.py`; raw dataset files are not vendored.
 
+### FastAPI historical suite
+
+FastAPI is not part of classic SWE-bench Verified, so its cases are labelled
+separately instead of being presented as Verified samples.
+`benchmarks/fastapi-history-10.json` contains 10 commits from the official
+FastAPI repository that changed both production Python and tests. Cases cover
+routing, applications, SSE, compatibility, encoding, dependencies/OpenAPI,
+headers, and responses. `benchmarks/historical-suite-40.json` combines these
+with the 30 Verified cases.
+
+```bash
+uv run python scripts/run_swebench_suite.py \
+  --cases benchmarks/historical-suite-40.json \
+  --dataset-name "SWE-bench Verified + FastAPI Git history" \
+  --cache-dir .benchmark-cache --top-k 10 \
+  --out benchmark-results/historical-suite-40.json
+```
+
+Regenerate the FastAPI subset from an official local clone with:
+
+```bash
+uv run python scripts/generate_git_history_manifest.py \
+  --repo-path ../fastapi --count 10 \
+  --out benchmarks/fastapi-history-10.json
+```
+
+For commits changing two or more production files, the same run also performs
+leave-one-production-file-out evaluation. Each fold uses one changed file's
+symbols as the only seed, removes that seed file from candidates, and treats
+the commit's other changed production files as hidden targets. Reports expose
+`production_file_eligible_cases`, `production_file_folds`, and macro related-
+production-file Recall@K/Precision@K. Both test and production evaluations also
+report Recall@All, Precision@All, and full candidate counts. Recall@All measures
+graph coverage; Top-K measures whether ordering and context budgets surface the
+answer early. Single-production-file commits are not included in production
+metric denominators.
+
 ### Visualization (`graph`)
 
 Export interactive HTML graphs of the call structure:

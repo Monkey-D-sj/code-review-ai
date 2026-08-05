@@ -59,18 +59,23 @@ def _run_case(cache_dir: Path, case: BenchmarkCase, top_k: int) -> dict:
         conn.close()
 
 
-def _summary(results: list[dict], top_k: int) -> dict:
+def _summary(results: list[dict], top_k: int, dataset_name: str) -> dict:
     count = len(results)
     mean = lambda key: round(sum(result[key] for result in results) / count, 4)
+    folds = [fold for result in results for fold in result["production_file_folds"]]
+    eligible_cases = sum(bool(result["production_file_folds"]) for result in results)
     return {
-        "schema_version": 1,
-        "dataset": "SWE-bench Verified",
-        "metric_target": "gold test-patch files",
+        "schema_version": 2,
+        "dataset": dataset_name,
+        "metric_target": "gold historical test files",
         "top_k": top_k,
         "aggregate": {
             "cases": count,
             "macro_test_file_recall_at_k": mean("patch_file_recall_at_k"),
             "macro_test_file_precision_at_k": mean("patch_file_precision_at_k"),
+            "macro_test_file_recall_all": mean("patch_file_recall_all"),
+            "macro_test_file_precision_all": mean("patch_file_precision_all"),
+            "mean_all_candidate_files": mean("all_candidate_files_count"),
             "symbol_found_rate": mean("symbol_found_rate"),
             "mean_query_ms": mean("query_ms"),
             "mean_index_ms": round(sum(
@@ -82,9 +87,27 @@ def _summary(results: list[dict], top_k: int) -> dict:
             "mean_resolved_call_rate": round(sum(
                 result["index"]["resolved_call_rate"] for result in results
             ) / count, 4),
+            "production_file_eligible_cases": eligible_cases,
+            "production_file_folds": len(folds),
+            "macro_related_production_file_recall_at_k": _fold_mean(
+                folds, "recall_at_k"),
+            "macro_related_production_file_precision_at_k": _fold_mean(
+                folds, "precision_at_k"),
+            "macro_related_production_file_recall_all": _fold_mean(
+                folds, "recall_all"),
+            "macro_related_production_file_precision_all": _fold_mean(
+                folds, "precision_all"),
+            "mean_production_all_candidate_files": _fold_mean(
+                folds, "all_candidate_files_count"),
         },
         "cases": results,
     }
+
+
+def _fold_mean(folds: list[dict], key: str) -> float | None:
+    if not folds:
+        return None
+    return round(sum(fold[key] for fold in folds) / len(folds), 4)
 
 
 def main() -> int:
@@ -92,6 +115,7 @@ def main() -> int:
     parser.add_argument("--cases", required=True)
     parser.add_argument("--cache-dir", default=".benchmark-cache")
     parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--dataset-name", default="Historical change suite")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
@@ -103,7 +127,7 @@ def main() -> int:
     output_path = Path(args.out)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        json.dumps(_summary(results, args.top_k), indent=2) + "\n",
+        json.dumps(_summary(results, args.top_k, args.dataset_name), indent=2) + "\n",
         encoding="utf-8",
     )
     return 0
