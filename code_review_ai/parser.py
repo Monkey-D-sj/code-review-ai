@@ -236,6 +236,8 @@ def _module_qname(file_path: str, repo_root: str) -> str:
     parts = list(rel.with_suffix("").parts)
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
+    if parts and parts[0] == "src":
+        parts = parts[1:]
     return ".".join(parts)
 
 

@@ -58,3 +58,18 @@ def test_list_source_files_single_git_call(tmp_path, monkeypatch):
     files = parser.list_source_files(FIX, parser.SOURCE_GLOBS)
     assert calls["n"] == 1          # 一次调用拿到所有扩展
     assert "app.py" in files and "ts/app.ts" in files
+
+
+def test_module_qname_strips_src_layout(tmp_path):
+    pkg = tmp_path / "src" / "mypkg"
+    pkg.mkdir(parents=True)
+    mod = pkg / "service.py"
+    mod.write_text("def login():\n    return True\n", encoding="utf-8")
+    pf = parse_file(str(mod), str(tmp_path))
+    assert pf.module_qname == "mypkg.service"
+    assert Q("mypkg.service", "login") in {n.qualified_name for n in pf.nodes}
+
+    init = pkg / "__init__.py"
+    init.write_text("", encoding="utf-8")
+    pfi = parse_file(str(init), str(tmp_path))
+    assert pfi.module_qname == "mypkg"
