@@ -35,3 +35,27 @@ def test_resolve_cls_method():
     edges = _resolve()
     other = [e for e in edges if e.target == "vals[0]"]
     assert other and other[0].resolution == "unresolved"
+
+
+def test_reexport_through_package_init(tmp_path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("from .impl import Session\n", encoding="utf-8")
+    (pkg / "impl.py").write_text("class Session:\n    pass\n", encoding="utf-8")
+    consumer = tmp_path / "consumer.py"
+    consumer.write_text(
+        "from pkg import Session\n"
+        "import pkg as p\n"
+        "a = Session()\n"
+        "b = p.Session()\n",
+        encoding="utf-8",
+    )
+    files = [parse_file(str(pkg / "__init__.py"), str(tmp_path)),
+             parse_file(str(pkg / "impl.py"), str(tmp_path)),
+             parse_file(str(consumer), str(tmp_path))]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_calls(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    # both `Session()` (from pkg import) and `p.Session()` (import pkg as p)
+    # must resolve to the real class through the package __init__ re-export
+    assert ("consumer", "pkg.impl::Session", "resolved") in by

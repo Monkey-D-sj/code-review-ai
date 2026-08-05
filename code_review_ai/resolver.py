@@ -46,16 +46,18 @@ def _exists(qname: str, existing: set[str]) -> bool:
 
 def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str]) -> list[Edge]:
     mod_syms = _module_symbols(parsed_files)
+    all_import_maps = {pf.module_qname: _import_map(pf) for pf in parsed_files}
     edges: list[Edge] = []
     for pf in parsed_files:
         local = mod_syms.get(pf.module_qname, {})
         imports = _import_map(pf)
         for c in pf.raw_calls:
-            edges.append(_resolve_one(c, local, imports, existing_qnames))
+            edges.append(_resolve_one(c, local, imports, existing_qnames, all_import_maps))
     return edges
 
 
-def _resolve_one(c: RawCall, local: dict, imports: dict, existing: set[str]) -> Edge:
+def _resolve_one(c: RawCall, local: dict, imports: dict,
+                 existing: set[str], all_import_maps: dict) -> Edge:
     base = Edge(source=c.source_qname, target=c.target_expr, kind="call",
                 file_path=c.file_path, call_line=c.call_line, resolution="unresolved")
     if c.call_form == CALL_SIMPLE:
@@ -66,6 +68,8 @@ def _resolve_one(c: RawCall, local: dict, imports: dict, existing: set[str]) -> 
             mod, imp_name, _star = imports[name]
             if imp_name:  # from m import name
                 tgt = qname.join(mod, imp_name)
+                if tgt not in existing:
+                    tgt = _resolve_reexport(mod, imp_name, all_import_maps, existing) or tgt
                 return _resolved(base, tgt, existing)
             return _resolved(base, mod, existing)  # imported module itself
         return base  # unresolved
@@ -76,6 +80,8 @@ def _resolve_one(c: RawCall, local: dict, imports: dict, existing: set[str]) -> 
             mod, imp_name, _ = imports[head]
             if imp_name is None:  # import m / import m as head -> m.rest
                 tgt = qname.join(mod, rest)
+                if tgt not in existing:
+                    tgt = _resolve_reexport(mod, rest, all_import_maps, existing) or tgt
                 return _resolved(base, tgt, existing)
         if head in local and local[head] in existing:
             cls_qn = local[head]
@@ -84,6 +90,26 @@ def _resolve_one(c: RawCall, local: dict, imports: dict, existing: set[str]) -> 
         base.resolution = "dynamic"
         return base
     return base  # other -> unresolved
+
+
+def _resolve_reexport(current: str, name: str, all_import_maps: dict,
+                      existing: set[str], seen: set[str] | None = None) -> str | None:
+    """Follow a module's own import bindings to where `name` is re-exported from.
+
+    binding is (module, imported_name, is_star); imported_name is the EXPORTED
+    name (aliases like `from .m import X as Y` make it differ from the local
+    name), so recursion carries binding[1], not `name`.
+    """
+    tgt = qname.join(current, name)
+    if tgt in existing:
+        return tgt
+    if current in (seen or set()):
+        return None  # import cycle
+    binding = (all_import_maps.get(current) or {}).get(name)
+    if not binding or not binding[1]:
+        return None  # no binding / module import / star import
+    return _resolve_reexport(binding[0], binding[1], all_import_maps,
+                             existing, (seen or set()) | {current})
 
 
 def _resolved(base: Edge, target: str, existing: set[str]) -> Edge:
