@@ -63,6 +63,6 @@ def test_impact_puts_direct_callers_first(tmp_path):
     # _edges_fallback's DISTINCT query has no ORDER BY between them.)
     res = get_impact(conn, ["c::target"])[0]
     assert res["found"] and res["upstream"]
-    qnames = [n["qname"] for n in res["upstream"]]
+    qnames = [node["qname"] for node in res["upstream"]]
     assert qnames.index("d::direct") < qnames.index("a::entry")
     assert qnames.index("b::helper") < qnames.index("a::entry")

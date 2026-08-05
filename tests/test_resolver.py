@@ -59,6 +59,12 @@ def test_reexport_through_package_init(tmp_path):
     # both `Session()` (from pkg import) and `p.Session()` (import pkg as p)
     # must resolve to the real class through the package __init__ re-export
     assert ("consumer", "pkg.impl::Session", "resolved") in by
+    # There are exactly TWO such call sites (a = Session(); b = p.Session()).
+    # A set-membership assert would pass if one path regressed, so pin the count.
+    resolved_to_session = [edge for edge in edges
+                           if edge.target == "pkg.impl::Session"
+                           and edge.resolution == "resolved"]
+    assert len(resolved_to_session) == 2
 
 
 def test_constructor_links_to_init(tmp_path):
@@ -94,8 +100,8 @@ def test_src_layout_test_reaches_changed_symbol(tmp_path):
     files = [parse_file(str(pkg / "__init__.py"), str(tmp_path)),
              parse_file(str(pkg / "service.py"), str(tmp_path)),
              parse_file(str(tests / "test_app.py"), str(tmp_path))]
-    qnames = {n.qualified_name for f in files for n in f.nodes}
+    qnames = {node.qualified_name for file in files for node in file.nodes}
     edges = resolve_calls(files, qnames)
-    by = {(e.source, e.target, e.resolution) for e in edges}
+    by = {(edge.source, edge.target, edge.resolution) for edge in edges}
     # test function is a resolved caller of the real symbol behind `from app import login`
     assert ("tests.test_app::test_login", "app.service::login", "resolved") in by
