@@ -58,6 +58,7 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
         ).fetchall()
         up_all, down_all, entries = [], [], set()
         if flows:
+            direct_up, direct_down = _edges_fallback(conn, qname, max_nodes_per_direction)
             for f in flows:
                 up, down = _slice_flow(conn, f["flow_id"], nid, max_nodes_per_direction)
                 up_all.extend(up)
@@ -68,6 +69,8 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
                     " WHERE f.id=?", (f["flow_id"],)).fetchone()
                 if entry:
                     entries.add(entry["qualified_name"])
+            up_all = direct_up + up_all
+            down_all = direct_down + down_all
         else:
             up_all, down_all = _edges_fallback(conn, qname, max_nodes_per_direction)
         # dedup by qname preserving order
