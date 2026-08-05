@@ -33,14 +33,14 @@ Multi-production-file leave-one-out results:
 Unified current-code results:
 
 - Symbol found rate: 97.5%
-- Macro test-file Precision@10 / Precision@All: 3.18% / 2.93%
-- Mean full candidate files per test case: 27.3
+- Macro test-file Precision@10 / Precision@All: 3.18% / 2.91%
+- Mean full candidate files per test case: 38.48
 - Cases with at least one Top-10 test-file hit: 11/40
-- Macro related-production-file Precision@10 / Precision@All: 4.8% / 4.29%
-- Mean full candidate files per production fold: 38.72
+- Macro related-production-file Precision@10 / Precision@All: 4.8% / 4.24%
+- Mean full candidate files per production fold: 57.68
 - Production folds with at least one Top-10 hit: 10/25
-- Mean impact query latency: 176.43 ms
-- Mean full-index build time per historical snapshot: 4.88 s
+- Mean impact query latency: 174.80 ms
+- Mean full-index build time per historical snapshot: 4.43 s
 - Mean indexed nodes / source files: 4,464 / 395
 - Mean resolved-call rate: 26.58%
 - Mean SQLite index size: 10.66 MB

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "dataset": "SWE-bench Verified",
   "metric_target": "gold historical test files",
   "top_k": 10,
@@ -7,15 +7,21 @@
     "cases": 30,
     "macro_test_file_recall_at_k": 0.3333,
     "macro_test_file_precision_at_k": 0.0391,
+    "macro_test_file_recall_all": 0.5667,
+    "macro_test_file_precision_all": 0.0358,
+    "mean_all_candidate_files": 28.1333,
     "symbol_found_rate": 1.0,
-    "mean_query_ms": 162.5945,
-    "mean_index_ms": 2469.6,
+    "mean_query_ms": 151.0031,
+    "mean_index_ms": 2331.4,
     "mean_nodes": 3735.0,
     "mean_resolved_call_rate": 0.2744,
     "production_file_eligible_cases": 7,
     "production_file_folds": 14,
     "macro_related_production_file_recall_at_k": 0.4286,
-    "macro_related_production_file_precision_at_k": 0.05
+    "macro_related_production_file_precision_at_k": 0.05,
+    "macro_related_production_file_recall_all": 0.8571,
+    "macro_related_production_file_precision_all": 0.033,
+    "mean_production_all_candidate_files": 53.3571
   },
   "cases": [
     {
@@ -46,8 +52,14 @@
       ],
       "patch_file_recall_at_k": 1.0,
       "patch_file_precision_at_k": 0.1,
+      "all_candidate_files_count": 17,
+      "all_hits": [
+        "tests/test_blueprints.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0588,
       "symbol_found_rate": 1.0,
-      "query_ms": 3.893,
+      "query_ms": 3.639,
       "production_file_folds": [],
       "index": {
         "source_files": 80,
@@ -56,12 +68,12 @@
         "flows": 1312,
         "communities": 0,
         "timings_ms": {
-          "list_files": 40.6,
-          "parse": 191.8,
-          "resolve": 5.0,
-          "write_db": 197.1,
+          "list_files": 44.2,
+          "parse": 220.4,
+          "resolve": 5.2,
+          "write_db": 210.7,
           "communities": 0.0,
-          "total": 434.5
+          "total": 480.6
         },
         "database_bytes": 2437120,
         "call_resolutions": {
@@ -94,8 +106,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 4,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.428,
+      "query_ms": 0.683,
       "production_file_folds": [],
       "index": {
         "source_files": 70,
@@ -104,12 +120,12 @@
         "flows": 326,
         "communities": 0,
         "timings_ms": {
-          "list_files": 37.9,
-          "parse": 361.8,
-          "resolve": 1.9,
-          "write_db": 174.7,
+          "list_files": 45.1,
+          "parse": 383.9,
+          "resolve": 2.0,
+          "write_db": 188.4,
           "communities": 0.0,
-          "total": 576.2
+          "total": 619.3
         },
         "database_bytes": 1089536,
         "call_resolutions": {
@@ -148,8 +164,14 @@
       ],
       "patch_file_recall_at_k": 1.0,
       "patch_file_precision_at_k": 0.1,
+      "all_candidate_files_count": 10,
+      "all_hits": [
+        "test_requests.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.1,
       "symbol_found_rate": 1.0,
-      "query_ms": 3.103,
+      "query_ms": 3.095,
       "production_file_folds": [],
       "index": {
         "source_files": 75,
@@ -158,12 +180,12 @@
         "flows": 446,
         "communities": 0,
         "timings_ms": {
-          "list_files": 51.7,
-          "parse": 389.2,
-          "resolve": 2.5,
-          "write_db": 150.7,
+          "list_files": 91.0,
+          "parse": 451.9,
+          "resolve": 3.1,
+          "write_db": 181.1,
           "communities": 0.0,
-          "total": 594.0
+          "total": 727.1
         },
         "database_bytes": 1454080,
         "call_resolutions": {
@@ -201,8 +223,14 @@
       ],
       "patch_file_recall_at_k": 1.0,
       "patch_file_precision_at_k": 0.1111,
+      "all_candidate_files_count": 9,
+      "all_hits": [
+        "test_requests.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.1111,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.709,
+      "query_ms": 0.833,
       "production_file_folds": [],
       "index": {
         "source_files": 76,
@@ -211,12 +239,12 @@
         "flows": 455,
         "communities": 0,
         "timings_ms": {
-          "list_files": 45.9,
-          "parse": 396.5,
-          "resolve": 3.5,
-          "write_db": 156.5,
+          "list_files": 55.4,
+          "parse": 451.3,
+          "resolve": 2.9,
+          "write_db": 169.1,
           "communities": 0.0,
-          "total": 602.4
+          "total": 678.7
         },
         "database_bytes": 1454080,
         "call_resolutions": {
@@ -247,8 +275,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 5,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.513,
+      "query_ms": 0.913,
       "production_file_folds": [],
       "index": {
         "source_files": 76,
@@ -257,12 +289,12 @@
         "flows": 493,
         "communities": 0,
         "timings_ms": {
-          "list_files": 51.1,
-          "parse": 638.7,
-          "resolve": 5.5,
-          "write_db": 419.1,
+          "list_files": 67.0,
+          "parse": 525.3,
+          "resolve": 4.9,
+          "write_db": 214.0,
           "communities": 0.0,
-          "total": 1114.4
+          "total": 811.2
         },
         "database_bytes": 1589248,
         "call_resolutions": {
@@ -301,8 +333,14 @@
       ],
       "patch_file_recall_at_k": 1.0,
       "patch_file_precision_at_k": 0.1,
+      "all_candidate_files_count": 10,
+      "all_hits": [
+        "test_requests.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.1,
       "symbol_found_rate": 1.0,
-      "query_ms": 5.325,
+      "query_ms": 4.123,
       "production_file_folds": [],
       "index": {
         "source_files": 83,
@@ -311,12 +349,12 @@
         "flows": 550,
         "communities": 0,
         "timings_ms": {
-          "list_files": 62.4,
-          "parse": 620.0,
-          "resolve": 3.8,
-          "write_db": 232.7,
+          "list_files": 64.0,
+          "parse": 499.2,
+          "resolve": 4.0,
+          "write_db": 255.9,
           "communities": 0.0,
-          "total": 919.0
+          "total": 823.1
         },
         "database_bytes": 1724416,
         "call_resolutions": {
@@ -347,8 +385,8 @@
         "test_requests.py",
         "requests/cookies.py",
         "requests/hooks.py",
-        "requests/packages/urllib3/util/url.py",
         "requests/exceptions.py",
+        "requests/packages/urllib3/util/url.py",
         "requests/packages/urllib3/exceptions.py"
       ],
       "hits": [
@@ -356,8 +394,14 @@
       ],
       "patch_file_recall_at_k": 1.0,
       "patch_file_precision_at_k": 0.1111,
+      "all_candidate_files_count": 9,
+      "all_hits": [
+        "test_requests.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.1111,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.908,
+      "query_ms": 0.877,
       "production_file_folds": [],
       "index": {
         "source_files": 84,
@@ -366,12 +410,12 @@
         "flows": 623,
         "communities": 0,
         "timings_ms": {
-          "list_files": 81.0,
-          "parse": 603.6,
-          "resolve": 4.3,
-          "write_db": 153.3,
+          "list_files": 74.2,
+          "parse": 520.8,
+          "resolve": 4.2,
+          "write_db": 257.7,
           "communities": 0.0,
-          "total": 842.3
+          "total": 856.9
         },
         "database_bytes": 1974272,
         "call_resolutions": {
@@ -403,15 +447,21 @@
         "tests/utils.py",
         "requests/adapters.py",
         "requests/structures.py",
-        "requests/exceptions.py"
+        "requests/_internal_utils.py"
       ],
       "hits": [
         "tests/test_requests.py"
       ],
       "patch_file_recall_at_k": 1.0,
       "patch_file_precision_at_k": 0.1,
+      "all_candidate_files_count": 11,
+      "all_hits": [
+        "tests/test_requests.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0909,
       "symbol_found_rate": 1.0,
-      "query_ms": 1.47,
+      "query_ms": 1.015,
       "production_file_folds": [],
       "index": {
         "source_files": 35,
@@ -420,12 +470,12 @@
         "flows": 539,
         "communities": 0,
         "timings_ms": {
-          "list_files": 47.0,
-          "parse": 149.0,
-          "resolve": 4.0,
-          "write_db": 161.6,
+          "list_files": 59.7,
+          "parse": 175.8,
+          "resolve": 4.9,
+          "write_db": 196.4,
           "communities": 0.0,
-          "total": 361.7
+          "total": 436.8
         },
         "database_bytes": 1597440,
         "call_resolutions": {
@@ -457,8 +507,14 @@
       ],
       "patch_file_recall_at_k": 1.0,
       "patch_file_precision_at_k": 0.25,
+      "all_candidate_files_count": 4,
+      "all_hits": [
+        "tests/test_utils.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.25,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.329,
+      "query_ms": 0.268,
       "production_file_folds": [],
       "index": {
         "source_files": 35,
@@ -467,12 +523,12 @@
         "flows": 539,
         "communities": 0,
         "timings_ms": {
-          "list_files": 47.4,
-          "parse": 151.5,
-          "resolve": 3.4,
-          "write_db": 272.8,
+          "list_files": 60.9,
+          "parse": 172.2,
+          "resolve": 4.2,
+          "write_db": 249.3,
           "communities": 0.0,
-          "total": 475.1
+          "total": 486.7
         },
         "database_bytes": 1601536,
         "call_resolutions": {
@@ -516,8 +572,14 @@
       ],
       "patch_file_recall_at_k": 1.0,
       "patch_file_precision_at_k": 0.1,
+      "all_candidate_files_count": 15,
+      "all_hits": [
+        "testing/test_conftest.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0667,
       "symbol_found_rate": 1.0,
-      "query_ms": 3.158,
+      "query_ms": 3.698,
       "production_file_folds": [
         {
           "seed_file": "src/_pytest/config/__init__.py",
@@ -546,7 +608,13 @@
           "hits": [],
           "recall_at_k": 0.0,
           "precision_at_k": 0.0,
-          "query_ms": 2.31
+          "all_candidate_files_count": 13,
+          "all_hits": [
+            "src/_pytest/pathlib.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.0769,
+          "query_ms": 2.638
         },
         {
           "seed_file": "src/_pytest/pathlib.py",
@@ -569,7 +637,13 @@
           ],
           "recall_at_k": 1.0,
           "precision_at_k": 0.2,
-          "query_ms": 0.414
+          "all_candidate_files_count": 5,
+          "all_hits": [
+            "src/_pytest/config/__init__.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.2,
+          "query_ms": 0.583
         }
       ],
       "index": {
@@ -579,12 +653,12 @@
         "flows": 3485,
         "communities": 0,
         "timings_ms": {
-          "list_files": 83.1,
-          "parse": 833.9,
-          "resolve": 25.1,
-          "write_db": 994.5,
+          "list_files": 113.4,
+          "parse": 931.2,
+          "resolve": 24.9,
+          "write_db": 1010.5,
           "communities": 0.0,
-          "total": 1936.5
+          "total": 2079.9
         },
         "database_bytes": 8974336,
         "call_resolutions": {
@@ -626,8 +700,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 4,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 2.48,
+      "query_ms": 1.807,
       "production_file_folds": [
         {
           "seed_file": "src/_pytest/python.py",
@@ -652,7 +730,11 @@
           "hits": [],
           "recall_at_k": 0.0,
           "precision_at_k": 0.0,
-          "query_ms": 0.68
+          "all_candidate_files_count": 1,
+          "all_hits": [],
+          "recall_all": 0.0,
+          "precision_all": 0.0,
+          "query_ms": 0.683
         },
         {
           "seed_file": "src/_pytest/unittest.py",
@@ -669,7 +751,11 @@
           "hits": [],
           "recall_at_k": 0.0,
           "precision_at_k": 0.0,
-          "query_ms": 0.266
+          "all_candidate_files_count": 1,
+          "all_hits": [],
+          "recall_all": 0.0,
+          "precision_all": 0.0,
+          "query_ms": 0.227
         }
       ],
       "index": {
@@ -679,12 +765,12 @@
         "flows": 4088,
         "communities": 0,
         "timings_ms": {
-          "list_files": 88.1,
-          "parse": 1194.9,
-          "resolve": 27.1,
-          "write_db": 1525.4,
+          "list_files": 104.5,
+          "parse": 1282.9,
+          "resolve": 26.0,
+          "write_db": 1539.1,
           "communities": 0.0,
-          "total": 2835.6
+          "total": 2952.5
         },
         "database_bytes": 10776576,
         "call_resolutions": {
@@ -718,8 +804,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 3,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.702,
+      "query_ms": 0.961,
       "production_file_folds": [],
       "index": {
         "source_files": 245,
@@ -728,14 +818,14 @@
         "flows": 4240,
         "communities": 0,
         "timings_ms": {
-          "list_files": 54.0,
-          "parse": 1487.6,
-          "resolve": 28.5,
-          "write_db": 1530.3,
+          "list_files": 52.8,
+          "parse": 1326.5,
+          "resolve": 36.0,
+          "write_db": 1589.6,
           "communities": 0.0,
-          "total": 3100.3
+          "total": 3004.8
         },
-        "database_bytes": 11182080,
+        "database_bytes": 11186176,
         "call_resolutions": {
           "dynamic": 11246,
           "resolved": 3311,
@@ -762,8 +852,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 2,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.426,
+      "query_ms": 0.453,
       "production_file_folds": [],
       "index": {
         "source_files": 245,
@@ -772,14 +866,14 @@
         "flows": 4240,
         "communities": 0,
         "timings_ms": {
-          "list_files": 56.4,
-          "parse": 1574.5,
-          "resolve": 46.9,
-          "write_db": 1595.2,
+          "list_files": 70.7,
+          "parse": 1073.1,
+          "resolve": 24.7,
+          "write_db": 1313.5,
           "communities": 0.0,
-          "total": 3272.9
+          "total": 2482.0
         },
-        "database_bytes": 11186176,
+        "database_bytes": 11190272,
         "call_resolutions": {
           "dynamic": 11247,
           "resolved": 3311,
@@ -811,8 +905,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 5,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 1.111,
+      "query_ms": 0.983,
       "production_file_folds": [],
       "index": {
         "source_files": 244,
@@ -821,12 +919,12 @@
         "flows": 4259,
         "communities": 0,
         "timings_ms": {
-          "list_files": 53.2,
-          "parse": 1298.6,
-          "resolve": 29.7,
-          "write_db": 1550.3,
+          "list_files": 61.8,
+          "parse": 1275.0,
+          "resolve": 36.7,
+          "write_db": 1651.1,
           "communities": 0.0,
-          "total": 2931.8
+          "total": 3024.5
         },
         "database_bytes": 11235328,
         "call_resolutions": {
@@ -856,8 +954,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 2,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 1.143,
+      "query_ms": 0.502,
       "production_file_folds": [],
       "index": {
         "source_files": 198,
@@ -866,12 +968,12 @@
         "flows": 3404,
         "communities": 0,
         "timings_ms": {
-          "list_files": 56.4,
-          "parse": 1050.6,
-          "resolve": 20.6,
-          "write_db": 1231.3,
+          "list_files": 70.7,
+          "parse": 1106.3,
+          "resolve": 19.8,
+          "write_db": 1075.2,
           "communities": 0.0,
-          "total": 2358.8
+          "total": 2272.0
         },
         "database_bytes": 8896512,
         "call_resolutions": {
@@ -902,8 +1004,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 4,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.759,
+      "query_ms": 1.027,
       "production_file_folds": [],
       "index": {
         "source_files": 201,
@@ -912,12 +1018,12 @@
         "flows": 3451,
         "communities": 0,
         "timings_ms": {
-          "list_files": 97.6,
-          "parse": 1016.5,
-          "resolve": 19.3,
-          "write_db": 998.2,
+          "list_files": 133.4,
+          "parse": 1118.2,
+          "resolve": 28.0,
+          "write_db": 1124.1,
           "communities": 0.0,
-          "total": 2131.6
+          "total": 2403.7
         },
         "database_bytes": 8851456,
         "call_resolutions": {
@@ -953,8 +1059,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 2,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 1.6,
+      "query_ms": 0.959,
       "production_file_folds": [],
       "index": {
         "source_files": 202,
@@ -963,12 +1073,12 @@
         "flows": 3480,
         "communities": 0,
         "timings_ms": {
-          "list_files": 76.5,
-          "parse": 1111.1,
-          "resolve": 30.4,
-          "write_db": 1171.4,
+          "list_files": 101.7,
+          "parse": 1089.3,
+          "resolve": 33.3,
+          "write_db": 1124.2,
           "communities": 0.0,
-          "total": 2389.4
+          "total": 2348.5
         },
         "database_bytes": 8945664,
         "call_resolutions": {
@@ -995,8 +1105,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 1,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.367,
+      "query_ms": 0.328,
       "production_file_folds": [],
       "index": {
         "source_files": 199,
@@ -1005,12 +1119,12 @@
         "flows": 3449,
         "communities": 0,
         "timings_ms": {
-          "list_files": 106.3,
-          "parse": 1197.8,
-          "resolve": 33.1,
-          "write_db": 1251.7,
+          "list_files": 72.9,
+          "parse": 1008.3,
+          "resolve": 27.4,
+          "write_db": 1058.1,
           "communities": 0.0,
-          "total": 2588.9
+          "total": 2166.7
         },
         "database_bytes": 9003008,
         "call_resolutions": {
@@ -1049,8 +1163,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 3,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 1.579,
+      "query_ms": 1.29,
       "production_file_folds": [],
       "index": {
         "source_files": 203,
@@ -1059,12 +1177,12 @@
         "flows": 3512,
         "communities": 0,
         "timings_ms": {
-          "list_files": 121.0,
-          "parse": 1110.4,
-          "resolve": 21.4,
-          "write_db": 1097.7,
+          "list_files": 104.8,
+          "parse": 1120.4,
+          "resolve": 30.7,
+          "write_db": 1149.9,
           "communities": 0.0,
-          "total": 2350.4
+          "total": 2405.7
         },
         "database_bytes": 9052160,
         "call_resolutions": {
@@ -1095,8 +1213,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 3,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.394,
+      "query_ms": 0.524,
       "production_file_folds": [],
       "index": {
         "source_files": 203,
@@ -1105,12 +1227,12 @@
         "flows": 3512,
         "communities": 0,
         "timings_ms": {
-          "list_files": 112.1,
-          "parse": 1045.7,
-          "resolve": 19.5,
-          "write_db": 1090.5,
+          "list_files": 92.0,
+          "parse": 1113.6,
+          "resolve": 24.3,
+          "write_db": 1105.2,
           "communities": 0.0,
-          "total": 2267.8
+          "total": 2335.2
         },
         "database_bytes": 9056256,
         "call_resolutions": {
@@ -1155,8 +1277,14 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 83,
+      "all_hits": [
+        "xarray/tests/test_variable.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.012,
       "symbol_found_rate": 1.0,
-      "query_ms": 277.895,
+      "query_ms": 349.883,
       "production_file_folds": [
         {
           "seed_file": "xarray/core/indexing.py",
@@ -1190,7 +1318,13 @@
           ],
           "recall_at_k": 1.0,
           "precision_at_k": 0.1,
-          "query_ms": 359.058
+          "all_candidate_files_count": 82,
+          "all_hits": [
+            "xarray/core/variable.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.0122,
+          "query_ms": 307.249
         },
         {
           "seed_file": "xarray/core/variable.py",
@@ -1218,7 +1352,13 @@
           ],
           "recall_at_k": 1.0,
           "precision_at_k": 0.1,
-          "query_ms": 6.419
+          "all_candidate_files_count": 15,
+          "all_hits": [
+            "xarray/core/indexing.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.0667,
+          "query_ms": 5.539
         }
       ],
       "index": {
@@ -1228,12 +1368,12 @@
         "flows": 3047,
         "communities": 0,
         "timings_ms": {
-          "list_files": 92.4,
-          "parse": 1533.1,
-          "resolve": 48.7,
-          "write_db": 1152.2,
+          "list_files": 109.9,
+          "parse": 1547.4,
+          "resolve": 51.0,
+          "write_db": 1187.7,
           "communities": 0.0,
-          "total": 2826.4
+          "total": 2896.0
         },
         "database_bytes": 15351808,
         "call_resolutions": {
@@ -1274,8 +1414,14 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 89,
+      "all_hits": [
+        "xarray/tests/test_dataarray.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0112,
       "symbol_found_rate": 1.0,
-      "query_ms": 261.296,
+      "query_ms": 251.999,
       "production_file_folds": [
         {
           "seed_file": "xarray/core/dataset.py",
@@ -1301,7 +1447,13 @@
           "hits": [],
           "recall_at_k": 0.0,
           "precision_at_k": 0.0,
-          "query_ms": 77.981
+          "all_candidate_files_count": 51,
+          "all_hits": [
+            "xarray/core/variable.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.0196,
+          "query_ms": 81.214
         },
         {
           "seed_file": "xarray/core/variable.py",
@@ -1329,7 +1481,13 @@
           "hits": [],
           "recall_at_k": 0.0,
           "precision_at_k": 0.0,
-          "query_ms": 146.362
+          "all_candidate_files_count": 84,
+          "all_hits": [
+            "xarray/core/dataset.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.0119,
+          "query_ms": 171.631
         }
       ],
       "index": {
@@ -1339,12 +1497,12 @@
         "flows": 3171,
         "communities": 0,
         "timings_ms": {
-          "list_files": 43.6,
-          "parse": 1576.2,
-          "resolve": 58.9,
-          "write_db": 1122.1,
+          "list_files": 66.6,
+          "parse": 1493.0,
+          "resolve": 49.8,
+          "write_db": 1187.3,
           "communities": 0.0,
-          "total": 2800.8
+          "total": 2796.7
         },
         "database_bytes": 14639104,
         "call_resolutions": {
@@ -1387,8 +1545,15 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 84,
+      "all_hits": [
+        "xarray/tests/test_dataset.py",
+        "xarray/tests/test_units.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0238,
       "symbol_found_rate": 1.0,
-      "query_ms": 1096.939,
+      "query_ms": 584.031,
       "production_file_folds": [
         {
           "seed_file": "xarray/core/dataarray.py",
@@ -1418,7 +1583,13 @@
           ],
           "recall_at_k": 1.0,
           "precision_at_k": 0.1,
-          "query_ms": 210.732
+          "all_candidate_files_count": 75,
+          "all_hits": [
+            "xarray/core/dataset.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.0133,
+          "query_ms": 210.794
         },
         {
           "seed_file": "xarray/core/dataset.py",
@@ -1447,7 +1618,13 @@
           ],
           "recall_at_k": 1.0,
           "precision_at_k": 0.1,
-          "query_ms": 308.05
+          "all_candidate_files_count": 65,
+          "all_hits": [
+            "xarray/core/dataarray.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.0154,
+          "query_ms": 328.333
         }
       ],
       "index": {
@@ -1457,12 +1634,12 @@
         "flows": 3791,
         "communities": 0,
         "timings_ms": {
-          "list_files": 48.2,
-          "parse": 2518.7,
-          "resolve": 58.6,
-          "write_db": 4234.0,
+          "list_files": 95.8,
+          "parse": 2034.9,
+          "resolve": 58.9,
+          "write_db": 1938.5,
           "communities": 0.0,
-          "total": 6859.4
+          "total": 4128.1
         },
         "database_bytes": 19734528,
         "call_resolutions": {
@@ -1511,8 +1688,14 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 110,
+      "all_hits": [
+        "xarray/tests/test_variable.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0091,
       "symbol_found_rate": 1.0,
-      "query_ms": 1183.999,
+      "query_ms": 1206.32,
       "production_file_folds": [
         {
           "seed_file": "xarray/core/dataset.py",
@@ -1538,7 +1721,13 @@
           "hits": [],
           "recall_at_k": 0.0,
           "precision_at_k": 0.0,
-          "query_ms": 634.672
+          "all_candidate_files_count": 73,
+          "all_hits": [
+            "xarray/core/variable.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.0137,
+          "query_ms": 468.366
         },
         {
           "seed_file": "xarray/core/variable.py",
@@ -1574,7 +1763,13 @@
           "hits": [],
           "recall_at_k": 0.0,
           "precision_at_k": 0.0,
-          "query_ms": 1301.303
+          "all_candidate_files_count": 109,
+          "all_hits": [
+            "xarray/core/dataset.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.0092,
+          "query_ms": 646.403
         }
       ],
       "index": {
@@ -1584,12 +1779,12 @@
         "flows": 4790,
         "communities": 0,
         "timings_ms": {
-          "list_files": 55.0,
-          "parse": 2591.1,
-          "resolve": 61.3,
-          "write_db": 2321.5,
+          "list_files": 55.7,
+          "parse": 2500.5,
+          "resolve": 65.4,
+          "write_db": 2378.8,
           "communities": 0.0,
-          "total": 5029.0
+          "total": 5000.5
         },
         "database_bytes": 24801280,
         "call_resolutions": {
@@ -1633,8 +1828,16 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 101,
+      "all_hits": [
+        "xarray/tests/test_dataset.py",
+        "xarray/tests/test_dataarray.py",
+        "xarray/tests/test_groupby.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0297,
       "symbol_found_rate": 1.0,
-      "query_ms": 1108.8,
+      "query_ms": 1202.418,
       "production_file_folds": [
         {
           "seed_file": "xarray/core/dataset.py",
@@ -1662,7 +1865,13 @@
           "hits": [],
           "recall_at_k": 0.0,
           "precision_at_k": 0.0,
-          "query_ms": 426.137
+          "all_candidate_files_count": 73,
+          "all_hits": [
+            "xarray/core/indexes.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.0137,
+          "query_ms": 493.394
         },
         {
           "seed_file": "xarray/core/indexes.py",
@@ -1691,7 +1900,13 @@
           ],
           "recall_at_k": 1.0,
           "precision_at_k": 0.1,
-          "query_ms": 596.762
+          "all_candidate_files_count": 100,
+          "all_hits": [
+            "xarray/core/dataset.py"
+          ],
+          "recall_all": 1.0,
+          "precision_all": 0.01,
+          "query_ms": 633.469
         }
       ],
       "index": {
@@ -1701,12 +1916,12 @@
         "flows": 4810,
         "communities": 0,
         "timings_ms": {
-          "list_files": 73.5,
-          "parse": 2523.8,
-          "resolve": 63.3,
-          "write_db": 2034.3,
+          "list_files": 48.5,
+          "parse": 2357.9,
+          "resolve": 82.8,
+          "write_db": 2505.1,
           "communities": 0.0,
-          "total": 4694.9
+          "total": 4994.3
         },
         "database_bytes": 24862720,
         "call_resolutions": {
@@ -1744,8 +1959,14 @@
       ],
       "patch_file_recall_at_k": 1.0,
       "patch_file_precision_at_k": 0.1,
+      "all_candidate_files_count": 99,
+      "all_hits": [
+        "xarray/tests/test_variable.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0101,
       "symbol_found_rate": 1.0,
-      "query_ms": 454.751,
+      "query_ms": 444.224,
       "production_file_folds": [],
       "index": {
         "source_files": 152,
@@ -1754,12 +1975,12 @@
         "flows": 3819,
         "communities": 0,
         "timings_ms": {
-          "list_files": 44.7,
-          "parse": 2508.9,
-          "resolve": 65.2,
-          "write_db": 1759.0,
+          "list_files": 43.9,
+          "parse": 1892.9,
+          "resolve": 65.7,
+          "write_db": 1645.6,
           "communities": 0.0,
-          "total": 4377.7
+          "total": 3648.1
         },
         "database_bytes": 19968000,
         "call_resolutions": {
@@ -1797,8 +2018,14 @@
       ],
       "patch_file_recall_at_k": 1.0,
       "patch_file_precision_at_k": 0.1,
+      "all_candidate_files_count": 17,
+      "all_hits": [
+        "xarray/tests/test_combine.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0588,
       "symbol_found_rate": 1.0,
-      "query_ms": 18.161,
+      "query_ms": 18.567,
       "production_file_folds": [],
       "index": {
         "source_files": 135,
@@ -1807,12 +2034,12 @@
         "flows": 3044,
         "communities": 0,
         "timings_ms": {
-          "list_files": 43.9,
-          "parse": 1456.3,
-          "resolve": 47.0,
-          "write_db": 1031.9,
+          "list_files": 66.7,
+          "parse": 1450.2,
+          "resolve": 44.3,
+          "write_db": 1156.8,
           "communities": 0.0,
-          "total": 2579.1
+          "total": 2718.1
         },
         "database_bytes": 14004224,
         "call_resolutions": {
@@ -1849,8 +2076,14 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 61,
+      "all_hits": [
+        "xarray/tests/test_merge.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0164,
       "symbol_found_rate": 1.0,
-      "query_ms": 251.205,
+      "query_ms": 247.436,
       "production_file_folds": [],
       "index": {
         "source_files": 144,
@@ -1859,12 +2092,12 @@
         "flows": 3399,
         "communities": 0,
         "timings_ms": {
-          "list_files": 50.1,
-          "parse": 1784.9,
-          "resolve": 60.6,
-          "write_db": 1359.5,
+          "list_files": 63.3,
+          "parse": 1725.9,
+          "resolve": 62.2,
+          "write_db": 1388.7,
           "communities": 0.0,
-          "total": 3255.2
+          "total": 3240.0
         },
         "database_bytes": 17215488,
         "call_resolutions": {
@@ -1892,8 +2125,12 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 1,
+      "all_hits": [],
+      "patch_file_recall_all": 0.0,
+      "patch_file_precision_all": 0.0,
       "symbol_found_rate": 1.0,
-      "query_ms": 0.455,
+      "query_ms": 0.533,
       "production_file_folds": [],
       "index": {
         "source_files": 143,
@@ -1902,12 +2139,12 @@
         "flows": 3582,
         "communities": 0,
         "timings_ms": {
-          "list_files": 60.4,
-          "parse": 1886.5,
-          "resolve": 63.6,
-          "write_db": 1950.6,
+          "list_files": 69.7,
+          "parse": 1765.3,
+          "resolve": 56.2,
+          "write_db": 1486.3,
           "communities": 0.0,
-          "total": 3961.0
+          "total": 3377.5
         },
         "database_bytes": 18542592,
         "call_resolutions": {
@@ -1944,8 +2181,14 @@
       "hits": [],
       "patch_file_recall_at_k": 0.0,
       "patch_file_precision_at_k": 0.0,
+      "all_candidate_files_count": 76,
+      "all_hits": [
+        "xarray/tests/test_dataset.py"
+      ],
+      "patch_file_recall_all": 1.0,
+      "patch_file_precision_all": 0.0132,
       "symbol_found_rate": 1.0,
-      "query_ms": 193.936,
+      "query_ms": 196.704,
       "production_file_folds": [],
       "index": {
         "source_files": 144,
@@ -1954,12 +2197,12 @@
         "flows": 3611,
         "communities": 0,
         "timings_ms": {
-          "list_files": 50.5,
-          "parse": 1985.0,
-          "resolve": 53.0,
-          "write_db": 1533.7,
+          "list_files": 75.7,
+          "parse": 1918.7,
+          "resolve": 85.8,
+          "write_db": 1667.8,
           "communities": 0.0,
-          "total": 3622.2
+          "total": 3748.1
         },
         "database_bytes": 18583552,
         "call_resolutions": {

@@ -109,7 +109,7 @@ def _evaluate_case(config: Config, conn: sqlite3.Connection,
                    case: BenchmarkCase, top_k: int) -> dict:
     symbols = _case_symbols(config, conn, case)
     started = time.perf_counter()
-    impacts = get_impact(conn, symbols)
+    impacts = _all_impacts(conn, symbols)
     elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
     all_candidates = _candidate_files(config, conn, impacts)
     candidates = all_candidates[:top_k]
@@ -172,7 +172,7 @@ def _production_folds(config: Config, conn: sqlite3.Connection,
     for seed_file, ranges in changed_ranges.items():
         symbols = _symbols_for_ranges(config, conn, {seed_file: ranges})
         started = time.perf_counter()
-        impacts = get_impact(conn, symbols)
+        impacts = _all_impacts(conn, symbols)
         query_ms = round((time.perf_counter() - started) * 1000, 3)
         all_candidates = [path for path in _candidate_files(config, conn, impacts)
                           if path != seed_file]
@@ -201,6 +201,11 @@ def _score_candidates(candidates: list[str], gold_files: list[str]) -> dict:
         "precision": round(len(set(hits)) / len(candidates), 4)
         if candidates else 0.0,
     }
+
+
+def _all_impacts(conn: sqlite3.Connection, symbols: list[str]) -> list[dict]:
+    node_count = conn.execute("SELECT COUNT(*) AS count FROM nodes").fetchone()["count"]
+    return get_impact(conn, symbols, max_nodes_per_direction=max(node_count, 1))
 
 
 def _overlaps_any(start: int, end: int,
