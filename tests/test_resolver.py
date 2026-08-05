@@ -76,3 +76,26 @@ def test_constructor_links_to_init(tmp_path):
     by = {(e.source, e.target, e.kind, e.resolution) for e in edges}
     assert ("svc", "svc::Service", "call", "resolved") in by          # to the class
     assert ("svc", "svc::Service.__init__", "call", "resolved") in by  # to __init__
+
+
+def test_src_layout_test_reaches_changed_symbol(tmp_path):
+    pkg = tmp_path / "src" / "app"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("from .service import login\n", encoding="utf-8")
+    (pkg / "service.py").write_text("def login(user, pw):\n    return True\n", encoding="utf-8")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_app.py").write_text(
+        "from app import login\n"
+        "def test_login():\n"
+        "    assert login('u', 'p')\n",
+        encoding="utf-8",
+    )
+    files = [parse_file(str(pkg / "__init__.py"), str(tmp_path)),
+             parse_file(str(pkg / "service.py"), str(tmp_path)),
+             parse_file(str(tests / "test_app.py"), str(tmp_path))]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_calls(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    # test function is a resolved caller of the real symbol behind `from app import login`
+    assert ("tests.test_app::test_login", "app.service::login", "resolved") in by
