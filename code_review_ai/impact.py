@@ -29,9 +29,11 @@ def _slice_flow(conn: sqlite3.Connection, flow_id: int, symbol_node_id: int,
 
 def _edges_fallback(conn: sqlite3.Connection, qname: str, max_per_dir: int):
     callers = [_edge_brief(conn, e["source"]) for e in conn.execute(
-        "SELECT DISTINCT source FROM edges WHERE target=? AND resolution='resolved'", (qname,))][:max_per_dir]
+        "SELECT DISTINCT source FROM edges WHERE target=? AND resolution='resolved' "
+        "ORDER BY source", (qname,))][:max_per_dir]
     callees = [_edge_brief(conn, e["target"]) for e in conn.execute(
-        "SELECT DISTINCT target FROM edges WHERE source=? AND resolution='resolved'", (qname,))][:max_per_dir]
+        "SELECT DISTINCT target FROM edges WHERE source=? AND resolution='resolved' "
+        "ORDER BY target", (qname,))][:max_per_dir]
     return callers, callees
 
 
@@ -54,7 +56,7 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
             continue
         nid = node["id"]
         flows = conn.execute(
-            "SELECT flow_id FROM flow_memberships WHERE node_id=?", (nid,),
+            "SELECT flow_id FROM flow_memberships WHERE node_id=? ORDER BY flow_id", (nid,),
         ).fetchall()
         up_all, down_all, entries = [], [], set()
         if flows:
