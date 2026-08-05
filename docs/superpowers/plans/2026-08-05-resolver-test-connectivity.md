@@ -522,6 +522,129 @@ macro_test_file_precision_at_k: <OLD> -> <NEW>
 
 ---
 
+### Task 7: Put direct callers/callees first in `get_impact` output
+
+**Files:**
+- Modify: `code_review_ai/impact.py:46-79` (`get_impact`)
+- Test: `tests/test_impact.py`
+
+**Interfaces:**
+- Consumes: Tasks 1-6. Fixes the benchmark regression found in Task 6: a symbol on many flows aggregates thousands of upstream nodes, burying its DIRECT resolved callers below top-10 (confirmed for `xarray.core.variable::as_compatible_data` — 1617 flows, only 3 direct-caller files incl. the gold test).
+- Produces: `get_impact` returns `upstream`/`downstream` with **direct resolved callers/callees first**, then flow-derived transitive nodes. Signature unchanged. `_dedup` keeps the direct occurrence so ordering survives.
+- Result for the benchmark: the changed symbol's own file (first in `_candidate_files`), then its direct-caller files (incl. tests), then transitive — gold tests surface within top-10.
+
+- [ ] **Step 1: Write the failing test** (append to `tests/test_impact.py`; builds a tmp git repo so `list_source_files` works)
+
+```python
+import subprocess
+
+from code_review_ai.indexer import rebuild
+
+
+def _tmp_idx(tmp_path):
+    (tmp_path / "a.py").write_text("def entry():\n    helper()\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("def helper():\n    target()\n", encoding="utf-8")
+    (tmp_path / "c.py").write_text("def target():\n    pass\n", encoding="utf-8")
+    (tmp_path / "d.py").write_text("def direct():\n    target()\n", encoding="utf-8")
+    for cmd in (["git", "init"], ["git", "add", "-A"],
+                ["git", "commit", "-m", "fixture"]):
+        subprocess.run(cmd, cwd=tmp_path, check=True, capture_output=True)
+    cfg = load_config(str(tmp_path))
+    cfg.db_path = str(tmp_path / "i.db")
+    cfg.repo_path = str(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    rebuild(cfg, conn)
+    return conn
+
+
+def test_impact_puts_direct_callers_first(tmp_path):
+    conn = _tmp_idx(tmp_path)
+    # target has a direct caller d::direct AND transitive callers a::entry -> b::helper.
+    # The direct caller must rank first in upstream.
+    res = get_impact(conn, ["c::target"])[0]
+    assert res["found"] and res["upstream"]
+    assert res["upstream"][0]["qname"] == "d::direct"
+    assert "a::entry" in [n["qname"] for n in res["upstream"]]
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/test_impact.py::test_impact_puts_direct_callers_first -v`
+Expected: FAIL — `res["upstream"][0]["qname"]` is not `d::direct` (aggregation order is flow-query order, direct caller buried).
+
+- [ ] **Step 3: Write minimal implementation**
+
+In `get_impact` (`code_review_ai/impact.py`), when the symbol is on flows, prepend the direct resolved callers/callees (from the existing `_edges_fallback`) before the flow-derived lists:
+
+```python
+        if flows:
+            direct_up, direct_down = _edges_fallback(conn, qname, max_nodes_per_direction)
+            for f in flows:
+                up, down = _slice_flow(conn, f["flow_id"], nid, max_nodes_per_direction)
+                up_all.extend(up)
+                down_all.extend(down)
+                entry = conn.execute(
+                    "SELECT n.qualified_name FROM flows f"
+                    " JOIN nodes n ON f.entry_point_id=n.id"
+                    " WHERE f.id=?", (f["flow_id"],)).fetchone()
+                if entry:
+                    entries.add(entry["qualified_name"])
+            up_all = direct_up + up_all
+            down_all = direct_down + down_all
+        else:
+            up_all, down_all = _edges_fallback(conn, qname, max_nodes_per_direction)
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `uv run pytest tests/test_impact.py -v`
+Expected: all PASS, including pre-existing `test_impact_slices_prefix_suffix` (membership-based, order-independent) and `test_impact_off_flow_fallback_to_edges`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add tests/test_impact.py code_review_ai/impact.py
+git commit -m "feat(impact): rank direct callers/callees before transitive in impact output"
+```
+
+---
+
+### Task 8: Re-run the 30-case benchmark and re-check acceptance
+
+**Files:**
+- Modify: `benchmark-results/swe-bench-verified-30.json` (regenerated; keep it tracked per decision)
+
+**Interfaces:**
+- Consumes: Task 7. Repos still cached; suite still accepts `--dataset-name`.
+- Produces: updated results file + verdict. Expected: recall rises above 0.267, the xarray-2905/6938 regressions recover (their gold tests are direct resolved callers).
+
+- [ ] **Step 1: Rerun the suite**
+
+Run: `uv run python scripts/run_swebench_suite.py --cases benchmarks/swe-bench-verified-30.json --dataset-name "SWE-bench Verified" --out benchmark-results/swe-bench-verified-30.json`
+Expected: completes (~2-4 min), overwrites the results file.
+
+- [ ] **Step 2: Check the aggregates and which cases hit**
+
+Run:
+```
+uv run python -c "import json; d=json.load(open('benchmark-results/swe-bench-verified-30.json')); a=d['aggregate']; print('recall@10:', a['macro_test_file_recall_at_k']); print('precision@10:', a['macro_test_file_precision_at_k']); print('hits:', [c['id'] for c in d['cases'] if c['patch_file_recall_at_k']==1.0])"
+```
+Verdict: regression recovered (xarray-2905 and xarray-6938 back to recall 1.0) and recall > 0.267 is the success bar for this task. If not met, report DONE_WITH_CONCERNS with the numbers — do not diagnose alone; the controller adjudicates.
+
+- [ ] **Step 3: Commit the updated results**
+
+```bash
+git add benchmark-results/swe-bench-verified-30.json
+git commit -m "bench: SWE-bench recall after direct-caller-first ranking
+
+macro_test_file_recall_at_k: <old> -> <new>
+macro_test_file_precision_at_k: <old> -> <new>
+"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:** All four spec fixes map to tasks: src-strip → Task 1, relative imports → Task 2, re-export chain → Task 3, constructor `__init__` edge → Task 4. Integration/regression → Task 5. Benchmark rerun + acceptance (recall ≥ 0.5, precision watch) → Task 6. Explicitly-scoped-out dynamic instance-call tracking is left untouched. Benchmark harness/manifest untouched per spec.
