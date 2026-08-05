@@ -358,7 +358,7 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     _walk_defs_typed(root, source, module_qname, None, None, lang, pf.nodes)
     # handle edges
     _walk_calls(root, module_qname, None, lang, pf.raw_calls)
-    pf.imports = _extract_imports(root, module_qname, lang, lang_name)
+    pf.imports = _extract_imports(root, module_qname, lang, lang_name, file_path)
     # handle inheritance
     _walk_inherits(root, module_qname, lang, pf.inherits)
 
@@ -447,16 +447,19 @@ def _dotted(node) -> str:
     return node.text.decode("utf-8") if node is not None else ""
 
 
-def _extract_imports(root, module_qname, lang, lang_name: str) -> list[ImportEntry]:
+def _extract_imports(root, module_qname, lang, lang_name: str,
+                     file_path: str) -> list[ImportEntry]:
     if lang_name == "python":
-        return _extract_imports_python(root, module_qname, lang)
+        return _extract_imports_python(root, module_qname, lang, file_path)
     return _extract_imports_esm(root, lang)
 
 
-def _extract_imports_python(root, module_qname, lang) -> list[ImportEntry]:
+def _extract_imports_python(root, module_qname, lang,
+                            file_path: str) -> list[ImportEntry]:
     entries: list[ImportEntry] = []
     parts = module_qname.split(".") if module_qname else []
-    pkg = parts[:-1] if parts else []
+    is_init = Path(file_path).name == "__init__.py"
+    pkg = parts if is_init else (parts[:-1] if parts else [])
     for node in root.children:
         if node.type not in lang["import_nodes"]:
             continue
@@ -471,16 +474,18 @@ def _extract_imports_python(root, module_qname, lang) -> list[ImportEntry]:
                     alias = child.child_by_field_name("alias").text.decode("utf-8")
                     entries.append(ImportEntry(alias, name, None, False))
         elif node.type == "import_from_statement":
-            # count leading dots (relative) and find module dotted_name
-            dots = sum(1 for c in node.children if c.type == ".")
             mod_node = node.child_by_field_name("module_name")
             sub = _dotted(mod_node)
-            if dots:
-                up = dots - 1
+            if mod_node is not None and mod_node.type == "relative_import":
+                # tree-sitter nests the leading dots in relative_import; module_name
+                # text is like ".sessions" / "..m" / "."
+                leading = len(sub) - len(sub.lstrip("."))
+                rest = sub[leading:]
+                up = leading - 1
                 base = pkg[: len(pkg) - up] if up <= len(pkg) else []
-                module = ".".join(base + ([sub] if sub else []))
+                module = ".".join(base + ([rest] if rest else []))
             else:
-                module = sub
+                module = sub  # absolute import
             for c in node.children:
                 if c.type == "dotted_name" and (mod_node is None or c.start_byte != mod_node.start_byte):
                     name = c.text.decode("utf-8")

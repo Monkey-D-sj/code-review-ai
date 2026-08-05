@@ -73,3 +73,22 @@ def test_module_qname_strips_src_layout(tmp_path):
     init.write_text("", encoding="utf-8")
     pfi = parse_file(str(init), str(tmp_path))
     assert pfi.module_qname == "mypkg"
+
+
+def test_relative_import_resolves_absolute_module(tmp_path):
+    mod = tmp_path / "a" / "b" / "c.py"
+    mod.parent.mkdir(parents=True)
+    mod.write_text("from .m import y\n", encoding="utf-8")
+    pf = parse_file(str(mod), str(tmp_path))
+    imp = {i.local_name: i for i in pf.imports}
+    assert imp["y"].module == "a.b.m"
+
+
+def test_relative_import_in_init_uses_package_base(tmp_path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    init = pkg / "__init__.py"
+    init.write_text("from .sub import Thing\n", encoding="utf-8")
+    pf = parse_file(str(init), str(tmp_path))
+    imp = {i.local_name: i for i in pf.imports}
+    assert imp["Thing"].module == "pkg.sub"
