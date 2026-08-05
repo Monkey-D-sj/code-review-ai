@@ -560,12 +560,15 @@ def _tmp_idx(tmp_path):
 
 def test_impact_puts_direct_callers_first(tmp_path):
     conn = _tmp_idx(tmp_path)
-    # target has a direct caller d::direct AND transitive callers a::entry -> b::helper.
-    # The direct caller must rank first in upstream.
+    # target has direct callers d::direct and b::helper, plus a purely-transitive
+    # caller a::entry -> b::helper -> target. The direct callers must rank before
+    # the transitive-only one. (Both direct callers are asserted because
+    # _edges_fallback's DISTINCT query has no ORDER BY between them.)
     res = get_impact(conn, ["c::target"])[0]
     assert res["found"] and res["upstream"]
-    assert res["upstream"][0]["qname"] == "d::direct"
-    assert "a::entry" in [n["qname"] for n in res["upstream"]]
+    qnames = [n["qname"] for n in res["upstream"]]
+    assert qnames.index("d::direct") < qnames.index("a::entry")
+    assert qnames.index("b::helper") < qnames.index("a::entry")
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
