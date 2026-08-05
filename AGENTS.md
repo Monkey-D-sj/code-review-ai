@@ -23,7 +23,7 @@ uv run code-review-ai query-graph auth::login                # graph neighborhoo
 uv run code-review-ai query-graph auth::login --edge-kind call --direction both
 uv run code-review-ai search  "login"                       # glob-match symbol short names
 uv run code-review-ai communities [--symbol auth::login]    # list communities, or one symbol's community
-uv run code-review-ai install --platform Codex        # register MCP server with Codex (self-install)
+uv run code-review-ai install --platform Codex        # deploy review skills + AGENTS.md docs (MCP registered manually)
 uv sync --extra community                                    # opt: install leidenalg+igraph for Phase C
 uv run code-review-ai-mcp                                    # run the MCP server (stdio)
 ```
@@ -74,7 +74,7 @@ Layered in `config.py`: `DEFAULTS` dict → `[tool.code-review-ai]` in `pyprojec
 
 ## Frontends
 
-MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get_impact`, `get_change_summary`, `query_graph`, `search_symbol`, `get_symbol_detail`, `list_entry_points`, `get_communities`, `get_community`. On startup it runs a catch-up rebuild if the index is stale (`is_stale` compares file mtimes to `build_meta.built_at`), then a daemon thread runs `watchfiles` to debounce-rebuild on `.py` changes. CLI (`code-review-ai`) mirrors `rebuild`/`query`/`search`/`communities` for manual use, plus `install --platform Codex` which self-registers the MCP server (shells out to `Codex mcp add` with a `uvx --from <git-url> code-review-ai-mcp` launch command; see `installer.py`). `graph` (`export_graph.py`) renders the index as interactive HTML: `-m communities` draws the persisted community graph (bubbles sized by node count, cross-community edges read straight from `community_edges` — never re-derived), `-m graph` the raw function-level call graph, `-m flow` the BFS flow chains.
+MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get_impact`, `get_change_summary`, `query_graph`, `search_symbol`, `get_symbol_detail`, `list_entry_points`, `get_communities`, `get_community`. On startup it runs a catch-up rebuild if the index is stale (`is_stale` compares file mtimes to `build_meta.built_at`), then a daemon thread runs `watchfiles` to debounce-rebuild on `.py` changes. CLI (`code-review-ai`) mirrors `rebuild`/`query`/`search`/`communities` for manual use, plus `install --platform claude-code|codex` which registers MCP with Claude Code and deploys the bundled language-review skills + usage docs (Codex MCP registration is manual via `~/.codex/config.toml`; see `installer.py`). `graph` (`export_graph.py`) renders the index as interactive HTML: `-m communities` draws the persisted community graph (bubbles sized by node count, cross-community edges read straight from `community_edges` — never re-derived), `-m graph` the raw function-level call graph, `-m flow` the BFS flow chains.
 
 ## Design spec & dev history
 

@@ -40,6 +40,30 @@ Options: `--scope user|project|local`, `--name <server-name>`, `--from <source>`
 claude mcp add code-review-ai -s user -- uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai-mcp
 ```
 
+### Register with Codex
+
+```bash
+code-review-ai install --platform codex
+```
+
+This deploys the four review skills to `~/.codex/skills/` and appends the MCP
+tool-usage docs to `~/.codex/AGENTS.md` (marker-guarded, idempotent). Codex
+has no `codex mcp add` CLI, so MCP registration is manual — add a block to
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.code-review-ai]
+command = "uvx"
+args = ["--from", "git+https://github.com/Monkey-D-sj/code-review-ai", "code-review-ai-mcp"]
+type = "stdio"
+```
+
+Both installs also deploy four user-scope code-review skills:
+`code-review-langs` (entry/router) plus `code-review-python`,
+`code-review-typescript`, and `code-review-javascript`, each carrying the
+static review rules for its language. They coexist with any existing
+`code-review` skill and never call the MCP graph tools.
+
 ## MCP tools
 
 - `rebuild_index` - build/rebuild the index from the working tree
@@ -143,9 +167,10 @@ the commit's other changed production files as hidden targets. Reports expose
 `production_file_eligible_cases`, `production_file_folds`, and macro related-
 production-file Recall@K/Precision@K. Both test and production evaluations also
 report Recall@All, Precision@All, and full candidate counts. Recall@All measures
-graph coverage; Top-K measures whether ordering and context budgets surface the
-answer early. Single-production-file commits are not included in production
-metric denominators.
+graph coverage using a benchmark query limit equal to the full indexed node
+count; Top-K measures whether ordering and context budgets surface the answer
+early. Single-production-file commits are not included in production metric
+denominators.
 
 ### Visualization (`graph`)
 
