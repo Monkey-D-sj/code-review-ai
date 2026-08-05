@@ -1,0 +1,1970 @@
+{
+  "schema_version": 1,
+  "dataset": "SWE-bench Verified",
+  "metric_target": "gold historical test files",
+  "top_k": 10,
+  "aggregate": {
+    "cases": 30,
+    "macro_test_file_recall_at_k": 0.2667,
+    "macro_test_file_precision_at_k": 0.0324,
+    "symbol_found_rate": 1.0,
+    "mean_query_ms": 221.4521,
+    "mean_index_ms": 3178.1,
+    "mean_nodes": 3745.7,
+    "mean_resolved_call_rate": 0.2744,
+    "production_file_eligible_cases": 7,
+    "production_file_folds": 14,
+    "macro_related_production_file_recall_at_k": 0.4286,
+    "macro_related_production_file_precision_at_k": 0.05
+  },
+  "cases": [
+    {
+      "id": "pallets__flask-5014",
+      "repo": "pallets/flask",
+      "base_commit": "7ee9ceb71e868944a46e1ff00b506772a53a4f1d",
+      "changed_symbols": [
+        "flask.blueprints::Blueprint",
+        "flask.blueprints::Blueprint.__init__"
+      ],
+      "gold_files": [
+        "tests/test_blueprints.py"
+      ],
+      "candidate_files": [
+        "src/flask/blueprints.py",
+        "tests/test_async.py",
+        "src/flask/app.py",
+        "tests/test_basic.py",
+        "tests/test_blueprints.py",
+        "tests/test_cli.py",
+        "tests/test_testing.py",
+        "tests/test_user_error_handler.py",
+        "src/flask/config.py",
+        "src/flask/sessions.py"
+      ],
+      "hits": [
+        "tests/test_blueprints.py"
+      ],
+      "patch_file_recall_at_k": 1.0,
+      "patch_file_precision_at_k": 0.1,
+      "symbol_found_rate": 1.0,
+      "query_ms": 6.889,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 80,
+        "nodes": 1629,
+        "edges": 5757,
+        "flows": 1312,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 87.5,
+          "parse": 362.2,
+          "resolve": 9.1,
+          "write_db": 386.9,
+          "communities": 0.0,
+          "total": 845.7
+        },
+        "database_bytes": 2437120,
+        "call_resolutions": {
+          "dynamic": 2063,
+          "resolved": 819,
+          "unresolved": 1274
+        },
+        "resolved_call_rate": 0.1971
+      }
+    },
+    {
+      "id": "psf__requests-1142",
+      "repo": "psf/requests",
+      "base_commit": "22623bd8c265b78b161542663ee980738441c307",
+      "changed_symbols": [
+        "requests.models::PreparedRequest",
+        "requests.models::PreparedRequest.prepare_body",
+        "requests.models::PreparedRequest.prepare_content_length",
+        "requests.models::PreparedRequest.prepare_auth"
+      ],
+      "gold_files": [
+        "test_requests.py"
+      ],
+      "candidate_files": [
+        "requests/models.py",
+        "requests/hooks.py",
+        "requests/utils.py",
+        "requests/auth.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 0.556,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 70,
+        "nodes": 588,
+        "edges": 2325,
+        "flows": 326,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 71.7,
+          "parse": 581.1,
+          "resolve": 3.7,
+          "write_db": 289.1,
+          "communities": 0.0,
+          "total": 945.6
+        },
+        "database_bytes": 1089536,
+        "call_resolutions": {
+          "dynamic": 631,
+          "resolved": 451,
+          "unresolved": 457
+        },
+        "resolved_call_rate": 0.293
+      }
+    },
+    {
+      "id": "psf__requests-1724",
+      "repo": "psf/requests",
+      "base_commit": "1ba83c47ce7b177efe90d5f51f7760680f72eda0",
+      "changed_symbols": [
+        "requests.sessions::Session",
+        "requests.sessions::Session.request"
+      ],
+      "gold_files": [
+        "test_requests.py"
+      ],
+      "candidate_files": [
+        "requests/sessions.py",
+        "test_requests.py",
+        "requests/models.py",
+        "requests/cookies.py",
+        "requests/api.py",
+        "requests/auth.py",
+        "requests/utils.py",
+        "requests/hooks.py",
+        "requests/adapters.py",
+        "requests/structures.py"
+      ],
+      "hits": [
+        "test_requests.py"
+      ],
+      "patch_file_recall_at_k": 1.0,
+      "patch_file_precision_at_k": 0.1,
+      "symbol_found_rate": 1.0,
+      "query_ms": 6.563,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 75,
+        "nodes": 744,
+        "edges": 3209,
+        "flows": 446,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 100.8,
+          "parse": 1007.1,
+          "resolve": 3.5,
+          "write_db": 348.2,
+          "communities": 0.0,
+          "total": 1459.6
+        },
+        "database_bytes": 1454080,
+        "call_resolutions": {
+          "dynamic": 847,
+          "resolved": 694,
+          "unresolved": 657
+        },
+        "resolved_call_rate": 0.3157
+      }
+    },
+    {
+      "id": "psf__requests-1766",
+      "repo": "psf/requests",
+      "base_commit": "847735553aeda6e6633f2b32e14ba14ba86887a4",
+      "changed_symbols": [
+        "requests.auth::HTTPDigestAuth",
+        "requests.auth::HTTPDigestAuth.build_digest_header"
+      ],
+      "gold_files": [
+        "test_requests.py"
+      ],
+      "candidate_files": [
+        "requests/auth.py",
+        "test_requests.py",
+        "requests/api.py",
+        "requests/sessions.py",
+        "requests/utils.py",
+        "requests/hooks.py",
+        "requests/cookies.py",
+        "requests/adapters.py",
+        "requests/structures.py"
+      ],
+      "hits": [
+        "test_requests.py"
+      ],
+      "patch_file_recall_at_k": 1.0,
+      "patch_file_precision_at_k": 0.1111,
+      "symbol_found_rate": 1.0,
+      "query_ms": 1.808,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 76,
+        "nodes": 754,
+        "edges": 3247,
+        "flows": 455,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 91.0,
+          "parse": 830.6,
+          "resolve": 6.3,
+          "write_db": 272.2,
+          "communities": 0.0,
+          "total": 1200.1
+        },
+        "database_bytes": 1454080,
+        "call_resolutions": {
+          "dynamic": 856,
+          "resolved": 700,
+          "unresolved": 672
+        },
+        "resolved_call_rate": 0.3142
+      }
+    },
+    {
+      "id": "psf__requests-1921",
+      "repo": "psf/requests",
+      "base_commit": "3c88e520da24ae6f736929a750876e7654accc3d",
+      "changed_symbols": [
+        "requests.sessions::merge_setting"
+      ],
+      "gold_files": [
+        "test_requests.py"
+      ],
+      "candidate_files": [
+        "requests/sessions.py",
+        "requests/cookies.py",
+        "requests/utils.py",
+        "requests/models.py",
+        "requests/hooks.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 0.536,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 76,
+        "nodes": 803,
+        "edges": 3473,
+        "flows": 493,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 77.6,
+          "parse": 683.5,
+          "resolve": 5.0,
+          "write_db": 184.8,
+          "communities": 0.0,
+          "total": 950.9
+        },
+        "database_bytes": 1589248,
+        "call_resolutions": {
+          "dynamic": 905,
+          "resolved": 738,
+          "unresolved": 750
+        },
+        "resolved_call_rate": 0.3084
+      }
+    },
+    {
+      "id": "psf__requests-2317",
+      "repo": "psf/requests",
+      "base_commit": "091991be0da19de9108dbe5e3752917fea3d7fdc",
+      "changed_symbols": [
+        "requests.sessions::Session",
+        "requests.sessions::Session.request"
+      ],
+      "gold_files": [
+        "test_requests.py"
+      ],
+      "candidate_files": [
+        "requests/sessions.py",
+        "test_requests.py",
+        "requests/models.py",
+        "requests/cookies.py",
+        "requests/api.py",
+        "requests/auth.py",
+        "requests/utils.py",
+        "requests/hooks.py",
+        "requests/adapters.py",
+        "requests/structures.py"
+      ],
+      "hits": [
+        "test_requests.py"
+      ],
+      "patch_file_recall_at_k": 1.0,
+      "patch_file_precision_at_k": 0.1,
+      "symbol_found_rate": 1.0,
+      "query_ms": 4.6,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 83,
+        "nodes": 888,
+        "edges": 3830,
+        "flows": 550,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 87.3,
+          "parse": 639.1,
+          "resolve": 3.8,
+          "write_db": 259.7,
+          "communities": 0.0,
+          "total": 989.9
+        },
+        "database_bytes": 1724416,
+        "call_resolutions": {
+          "dynamic": 956,
+          "resolved": 841,
+          "unresolved": 822
+        },
+        "resolved_call_rate": 0.3211
+      }
+    },
+    {
+      "id": "psf__requests-2931",
+      "repo": "psf/requests",
+      "base_commit": "5f7a3a74aab1625c2bb65f643197ee885e3da576",
+      "changed_symbols": [
+        "requests.models::RequestEncodingMixin",
+        "requests.models::RequestEncodingMixin._encode_params",
+        "requests.models::PreparedRequest",
+        "requests.models::PreparedRequest.prepare_url"
+      ],
+      "gold_files": [
+        "test_requests.py"
+      ],
+      "candidate_files": [
+        "requests/models.py",
+        "requests/utils.py",
+        "requests/sessions.py",
+        "requests/cookies.py",
+        "test_requests.py",
+        "requests/hooks.py",
+        "requests/packages/urllib3/util/url.py",
+        "requests/exceptions.py",
+        "requests/packages/urllib3/exceptions.py"
+      ],
+      "hits": [
+        "test_requests.py"
+      ],
+      "patch_file_recall_at_k": 1.0,
+      "patch_file_precision_at_k": 0.1111,
+      "symbol_found_rate": 1.0,
+      "query_ms": 1.466,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 84,
+        "nodes": 996,
+        "edges": 4350,
+        "flows": 623,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 100.9,
+          "parse": 782.0,
+          "resolve": 9.9,
+          "write_db": 352.1,
+          "communities": 0.0,
+          "total": 1244.8
+        },
+        "database_bytes": 1974272,
+        "call_resolutions": {
+          "dynamic": 1090,
+          "resolved": 949,
+          "unresolved": 943
+        },
+        "resolved_call_rate": 0.3182
+      }
+    },
+    {
+      "id": "psf__requests-5414",
+      "repo": "psf/requests",
+      "base_commit": "39d0fdd9096f7dceccbc8f82e1eda7dd64717a8e",
+      "changed_symbols": [
+        "requests.models::PreparedRequest",
+        "requests.models::PreparedRequest.prepare_url"
+      ],
+      "gold_files": [
+        "tests/test_requests.py"
+      ],
+      "candidate_files": [
+        "requests/models.py",
+        "requests/sessions.py",
+        "requests/cookies.py",
+        "requests/utils.py",
+        "tests/test_requests.py",
+        "requests/hooks.py",
+        "tests/utils.py",
+        "requests/adapters.py",
+        "requests/structures.py",
+        "requests/exceptions.py"
+      ],
+      "hits": [
+        "tests/test_requests.py"
+      ],
+      "patch_file_recall_at_k": 1.0,
+      "patch_file_precision_at_k": 0.1,
+      "symbol_found_rate": 1.0,
+      "query_ms": 1.317,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 35,
+        "nodes": 743,
+        "edges": 3704,
+        "flows": 539,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 76.2,
+          "parse": 213.8,
+          "resolve": 5.3,
+          "write_db": 236.7,
+          "communities": 0.0,
+          "total": 532.0
+        },
+        "database_bytes": 1597440,
+        "call_resolutions": {
+          "dynamic": 851,
+          "resolved": 848,
+          "unresolved": 1027
+        },
+        "resolved_call_rate": 0.3111
+      }
+    },
+    {
+      "id": "psf__requests-6028",
+      "repo": "psf/requests",
+      "base_commit": "0192aac24123735b3eaf9b08df46429bb770c283",
+      "changed_symbols": [
+        "requests.utils::prepend_scheme_if_needed"
+      ],
+      "gold_files": [
+        "tests/test_utils.py"
+      ],
+      "candidate_files": [
+        "requests/utils.py",
+        "requests/adapters.py",
+        "tests/test_utils.py",
+        "requests/exceptions.py"
+      ],
+      "hits": [
+        "tests/test_utils.py"
+      ],
+      "patch_file_recall_at_k": 1.0,
+      "patch_file_precision_at_k": 0.25,
+      "symbol_found_rate": 1.0,
+      "query_ms": 0.353,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 35,
+        "nodes": 743,
+        "edges": 3705,
+        "flows": 539,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 124.8,
+          "parse": 236.4,
+          "resolve": 6.1,
+          "write_db": 238.3,
+          "communities": 0.0,
+          "total": 605.7
+        },
+        "database_bytes": 1601536,
+        "call_resolutions": {
+          "dynamic": 851,
+          "resolved": 848,
+          "unresolved": 1027
+        },
+        "resolved_call_rate": 0.3111
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-5840",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "73c5b7f4b11a81e971f7d1bb18072e06a87060f4",
+      "changed_symbols": [
+        "_pytest.config::PytestPluginManager",
+        "_pytest.config::PytestPluginManager._set_initial_conftests",
+        "_pytest.config::PytestPluginManager._getconftestmodules",
+        "_pytest.config::PytestPluginManager._rget_with_confmod",
+        "_pytest.config::PytestPluginManager._importconftest",
+        "_pytest.pathlib::parts",
+        "_pytest.pathlib::unique_path"
+      ],
+      "gold_files": [
+        "testing/test_conftest.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/config/__init__.py",
+        "src/_pytest/_code/code.py",
+        "src/_pytest/pytester.py",
+        "src/_pytest/monkeypatch.py",
+        "testing/acceptance_test.py",
+        "src/_pytest/python_api.py",
+        "src/_pytest/outcomes.py",
+        "testing/test_collection.py",
+        "testing/test_config.py",
+        "testing/test_conftest.py"
+      ],
+      "hits": [
+        "testing/test_conftest.py"
+      ],
+      "patch_file_recall_at_k": 1.0,
+      "patch_file_precision_at_k": 0.1,
+      "symbol_found_rate": 1.0,
+      "query_ms": 5.277,
+      "production_file_folds": [
+        {
+          "seed_file": "src/_pytest/config/__init__.py",
+          "changed_symbols": [
+            "_pytest.config::PytestPluginManager",
+            "_pytest.config::PytestPluginManager._set_initial_conftests",
+            "_pytest.config::PytestPluginManager._getconftestmodules",
+            "_pytest.config::PytestPluginManager._rget_with_confmod",
+            "_pytest.config::PytestPluginManager._importconftest"
+          ],
+          "gold_files": [
+            "src/_pytest/pathlib.py"
+          ],
+          "candidate_files": [
+            "src/_pytest/_code/code.py",
+            "src/_pytest/pytester.py",
+            "src/_pytest/monkeypatch.py",
+            "testing/acceptance_test.py",
+            "src/_pytest/python_api.py",
+            "src/_pytest/outcomes.py",
+            "testing/test_collection.py",
+            "testing/test_config.py",
+            "testing/test_conftest.py",
+            "testing/test_pluginmanager.py"
+          ],
+          "hits": [],
+          "recall_at_k": 0.0,
+          "precision_at_k": 0.0,
+          "query_ms": 2.682
+        },
+        {
+          "seed_file": "src/_pytest/pathlib.py",
+          "changed_symbols": [
+            "_pytest.pathlib::parts",
+            "_pytest.pathlib::unique_path"
+          ],
+          "gold_files": [
+            "src/_pytest/config/__init__.py"
+          ],
+          "candidate_files": [
+            "src/_pytest/python.py",
+            "src/_pytest/config/__init__.py",
+            "testing/test_conftest.py",
+            "src/_pytest/config/findpaths.py",
+            "src/_pytest/outcomes.py"
+          ],
+          "hits": [
+            "src/_pytest/config/__init__.py"
+          ],
+          "recall_at_k": 1.0,
+          "precision_at_k": 0.2,
+          "query_ms": 0.606
+        }
+      ],
+      "index": {
+        "source_files": 202,
+        "nodes": 4634,
+        "edges": 20670,
+        "flows": 3485,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 98.7,
+          "parse": 1152.2,
+          "resolve": 26.9,
+          "write_db": 1512.4,
+          "communities": 0.0,
+          "total": 2790.3
+        },
+        "database_bytes": 8974336,
+        "call_resolutions": {
+          "dynamic": 9985,
+          "resolved": 2366,
+          "unresolved": 4381
+        },
+        "resolved_call_rate": 0.1414
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-8399",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "6e7dc8bac831cd8cf7a53b08efa366bd84f0c0fe",
+      "changed_symbols": [
+        "_pytest.python::Module",
+        "_pytest.python::Module._inject_setup_module_fixture",
+        "_pytest.python::Module._inject_setup_module_fixture.xunit_setup_module_fixture",
+        "_pytest.python::Module._inject_setup_function_fixture",
+        "_pytest.python::Module._inject_setup_function_fixture.xunit_setup_function_fixture",
+        "_pytest.python::Class",
+        "_pytest.python::Class._inject_setup_class_fixture",
+        "_pytest.python::Class._inject_setup_class_fixture.xunit_setup_class_fixture",
+        "_pytest.python::Class._inject_setup_method_fixture",
+        "_pytest.python::Class._inject_setup_method_fixture.xunit_setup_method_fixture",
+        "_pytest.unittest::_make_xunit_fixture",
+        "_pytest.unittest::_make_xunit_fixture.fixture"
+      ],
+      "gold_files": [
+        "testing/test_nose.py",
+        "testing/test_unittest.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/python.py",
+        "src/_pytest/compat.py",
+        "src/_pytest/unittest.py",
+        "src/_pytest/fixtures.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 1.55,
+      "production_file_folds": [
+        {
+          "seed_file": "src/_pytest/python.py",
+          "changed_symbols": [
+            "_pytest.python::Module",
+            "_pytest.python::Module._inject_setup_module_fixture",
+            "_pytest.python::Module._inject_setup_module_fixture.xunit_setup_module_fixture",
+            "_pytest.python::Module._inject_setup_function_fixture",
+            "_pytest.python::Module._inject_setup_function_fixture.xunit_setup_function_fixture",
+            "_pytest.python::Class",
+            "_pytest.python::Class._inject_setup_class_fixture",
+            "_pytest.python::Class._inject_setup_class_fixture.xunit_setup_class_fixture",
+            "_pytest.python::Class._inject_setup_method_fixture",
+            "_pytest.python::Class._inject_setup_method_fixture.xunit_setup_method_fixture"
+          ],
+          "gold_files": [
+            "src/_pytest/unittest.py"
+          ],
+          "candidate_files": [
+            "src/_pytest/compat.py"
+          ],
+          "hits": [],
+          "recall_at_k": 0.0,
+          "precision_at_k": 0.0,
+          "query_ms": 0.946
+        },
+        {
+          "seed_file": "src/_pytest/unittest.py",
+          "changed_symbols": [
+            "_pytest.unittest::_make_xunit_fixture",
+            "_pytest.unittest::_make_xunit_fixture.fixture"
+          ],
+          "gold_files": [
+            "src/_pytest/python.py"
+          ],
+          "candidate_files": [
+            "src/_pytest/fixtures.py"
+          ],
+          "hits": [],
+          "recall_at_k": 0.0,
+          "precision_at_k": 0.0,
+          "query_ms": 0.17
+        }
+      ],
+      "index": {
+        "source_files": 235,
+        "nodes": 5418,
+        "edges": 24714,
+        "flows": 4088,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 141.5,
+          "parse": 2236.9,
+          "resolve": 62.0,
+          "write_db": 2517.4,
+          "communities": 0.0,
+          "total": 4957.8
+        },
+        "database_bytes": 10776576,
+        "call_resolutions": {
+          "dynamic": 10896,
+          "resolved": 3153,
+          "unresolved": 5128
+        },
+        "resolved_call_rate": 0.1644
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-10051",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "aa55975c7d3f6c9f6d7f68accc41bb7cadf0eb9a",
+      "changed_symbols": [
+        "_pytest.logging::LogCaptureHandler",
+        "_pytest.logging::LogCaptureHandler.reset",
+        "_pytest.logging::LogCaptureHandler.handleError",
+        "_pytest.logging::LogCaptureFixture",
+        "_pytest.logging::LogCaptureFixture.clear",
+        "_pytest.logging::LogCaptureFixture.set_level"
+      ],
+      "gold_files": [
+        "testing/logging/test_fixture.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/logging.py",
+        "src/_pytest/config/exceptions.py",
+        "src/_pytest/deprecated.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 0.56,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 245,
+        "nodes": 5603,
+        "edges": 25570,
+        "flows": 4240,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 138.7,
+          "parse": 1619.1,
+          "resolve": 43.6,
+          "write_db": 1914.4,
+          "communities": 0.0,
+          "total": 3715.8
+        },
+        "database_bytes": 11182080,
+        "call_resolutions": {
+          "dynamic": 11246,
+          "resolved": 3311,
+          "unresolved": 5279
+        },
+        "resolved_call_rate": 0.1669
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-10081",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "da9a2b584eb7a6c7e924b2621ed0ddaeca0a7bea",
+      "changed_symbols": [
+        "_pytest.unittest::TestCaseFunction",
+        "_pytest.unittest::TestCaseFunction.runtest"
+      ],
+      "gold_files": [
+        "testing/test_unittest.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/unittest.py",
+        "src/_pytest/compat.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 0.53,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 245,
+        "nodes": 5603,
+        "edges": 25570,
+        "flows": 4240,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 105.1,
+          "parse": 1580.0,
+          "resolve": 46.9,
+          "write_db": 1843.1,
+          "communities": 0.0,
+          "total": 3575.2
+        },
+        "database_bytes": 11186176,
+        "call_resolutions": {
+          "dynamic": 11247,
+          "resolved": 3311,
+          "unresolved": 5278
+        },
+        "resolved_call_rate": 0.1669
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-10356",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "3c1534944cbd34e8a41bc9e76818018fadefc9a1",
+      "changed_symbols": [
+        "_pytest.mark.structures::MarkDecorator",
+        "_pytest.mark.structures::get_unpacked_marks",
+        "_pytest.mark.structures::normalize_mark_list",
+        "_pytest.mark.structures::store_mark"
+      ],
+      "gold_files": [
+        "testing/test_mark.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/mark/structures.py",
+        "src/_pytest/outcomes.py",
+        "src/_pytest/deprecated.py",
+        "src/_pytest/python.py",
+        "src/_pytest/compat.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 0.765,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 244,
+        "nodes": 5626,
+        "edges": 25668,
+        "flows": 4259,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 66.9,
+          "parse": 1886.6,
+          "resolve": 77.4,
+          "write_db": 2528.5,
+          "communities": 0.0,
+          "total": 4559.4
+        },
+        "database_bytes": 11235328,
+        "call_resolutions": {
+          "dynamic": 11281,
+          "resolved": 3332,
+          "unresolved": 5301
+        },
+        "resolved_call_rate": 0.1673
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-5262",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "58e6a09db49f34886ff13f3b7520dd0bcd7063cd",
+      "changed_symbols": [
+        "_pytest.capture::EncodedFile",
+        "_pytest.capture::EncodedFile.name",
+        "_pytest.capture::EncodedFile.__getattr__"
+      ],
+      "gold_files": [
+        "testing/test_capture.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/capture.py",
+        "src/_pytest/compat.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 0.396,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 198,
+        "nodes": 4526,
+        "edges": 20577,
+        "flows": 3404,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 113.4,
+          "parse": 1263.4,
+          "resolve": 29.1,
+          "write_db": 1484.0,
+          "communities": 0.0,
+          "total": 2889.8
+        },
+        "database_bytes": 8896512,
+        "call_resolutions": {
+          "dynamic": 9650,
+          "resolved": 2367,
+          "unresolved": 4318
+        },
+        "resolved_call_rate": 0.1449
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-5631",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "cb828ebe70b4fa35cd5f9a7ee024272237eab351",
+      "changed_symbols": [
+        "_pytest.compat::num_mock_patch_args",
+        "_pytest.compat::getfuncargnames"
+      ],
+      "gold_files": [
+        "testing/python/integration.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/compat.py",
+        "src/_pytest/fixtures.py",
+        "src/_pytest/outcomes.py",
+        "src/_pytest/_io/saferepr.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 1.419,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 201,
+        "nodes": 4576,
+        "edges": 20359,
+        "flows": 3451,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 86.5,
+          "parse": 1252.0,
+          "resolve": 31.6,
+          "write_db": 1449.3,
+          "communities": 0.0,
+          "total": 2819.4
+        },
+        "database_bytes": 8851456,
+        "call_resolutions": {
+          "dynamic": 9855,
+          "resolved": 2352,
+          "unresolved": 4281
+        },
+        "resolved_call_rate": 0.1426
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-5787",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "955e54221008aba577ecbaefa15679f6777d3bf8",
+      "changed_symbols": [
+        "_pytest.reports::BaseReport",
+        "_pytest.reports::BaseReport._to_json",
+        "_pytest.reports::BaseReport._to_json.disassembled_report",
+        "_pytest.reports::BaseReport._from_json",
+        "_pytest.reports::_report_unserialization_failure",
+        "_pytest.reports::pytest_report_from_serializable"
+      ],
+      "gold_files": [
+        "testing/code/test_code.py",
+        "testing/code/test_excinfo.py",
+        "testing/conftest.py",
+        "testing/test_reports.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/reports.py",
+        "src/_pytest/_code/code.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 1.665,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 202,
+        "nodes": 4620,
+        "edges": 20632,
+        "flows": 3480,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 125.2,
+          "parse": 1388.2,
+          "resolve": 36.2,
+          "write_db": 1525.8,
+          "communities": 0.0,
+          "total": 3075.4
+        },
+        "database_bytes": 8945664,
+        "call_resolutions": {
+          "dynamic": 9967,
+          "resolved": 2370,
+          "unresolved": 4369
+        },
+        "resolved_call_rate": 0.1419
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-5809",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "8aba863a634f40560e25055d179220f0eefabe9a",
+      "changed_symbols": [
+        "_pytest.pastebin::create_new_paste"
+      ],
+      "gold_files": [
+        "testing/test_pastebin.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/pastebin.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 0.221,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 199,
+        "nodes": 4586,
+        "edges": 20907,
+        "flows": 3449,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 144.3,
+          "parse": 2254.4,
+          "resolve": 82.0,
+          "write_db": 1647.3,
+          "communities": 0.0,
+          "total": 4128.1
+        },
+        "database_bytes": 9003008,
+        "call_resolutions": {
+          "dynamic": 9800,
+          "resolved": 2408,
+          "unresolved": 4396
+        },
+        "resolved_call_rate": 0.145
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-6197",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "e856638ba086fcf5bebf1bebea32d5cf78de87b4",
+      "changed_symbols": [
+        "_pytest.python::PyobjMixin",
+        "_pytest.python::PyobjMixin.obj",
+        "_pytest.python::PyobjMixin._mount_obj_if_needed",
+        "_pytest.python::PyobjMixin._getobj",
+        "_pytest.python::Module",
+        "_pytest.python::Module.__init__",
+        "_pytest.python::Module._getobj",
+        "_pytest.python::Package",
+        "_pytest.python::Package.isinitpath",
+        "_pytest.python::Package.collect"
+      ],
+      "gold_files": [
+        "testing/test_collection.py",
+        "testing/test_skipping.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/python.py",
+        "src/_pytest/mark/structures.py",
+        "src/_pytest/pathlib.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 1.45,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 203,
+        "nodes": 4667,
+        "edges": 20865,
+        "flows": 3512,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 108.9,
+          "parse": 1321.6,
+          "resolve": 39.6,
+          "write_db": 1509.5,
+          "communities": 0.0,
+          "total": 2979.6
+        },
+        "database_bytes": 9052160,
+        "call_resolutions": {
+          "dynamic": 10066,
+          "resolved": 2377,
+          "unresolved": 4408
+        },
+        "resolved_call_rate": 0.1411
+      }
+    },
+    {
+      "id": "pytest-dev__pytest-6202",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "3a668ea6ff24b0c8f00498c3144c63bac561d925",
+      "changed_symbols": [
+        "_pytest.python::PyobjMixin",
+        "_pytest.python::PyobjMixin.getmodpath",
+        "_pytest.python::PyobjMixin.reportinfo"
+      ],
+      "gold_files": [
+        "testing/test_collection.py"
+      ],
+      "candidate_files": [
+        "src/_pytest/python.py",
+        "src/_pytest/compat.py",
+        "src/_pytest/_io/saferepr.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 0.91,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 203,
+        "nodes": 4666,
+        "edges": 20862,
+        "flows": 3512,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 107.3,
+          "parse": 1323.8,
+          "resolve": 30.1,
+          "write_db": 1530.9,
+          "communities": 0.0,
+          "total": 2992.1
+        },
+        "database_bytes": 9056256,
+        "call_resolutions": {
+          "dynamic": 10068,
+          "resolved": 2375,
+          "unresolved": 4407
+        },
+        "resolved_call_rate": 0.1409
+      }
+    },
+    {
+      "id": "pydata__xarray-3095",
+      "repo": "pydata/xarray",
+      "base_commit": "1757dffac2fa493d7b9a074b84cf8c830a706688",
+      "changed_symbols": [
+        "xarray.core.indexing::PandasIndexAdapter",
+        "xarray.core.indexing::PandasIndexAdapter.__init__",
+        "xarray.core.indexing::PandasIndexAdapter.dtype",
+        "xarray.core.indexing::PandasIndexAdapter.__array__",
+        "xarray.core.indexing::PandasIndexAdapter.shape",
+        "xarray.core.indexing::PandasIndexAdapter.__getitem__",
+        "xarray.core.indexing::PandasIndexAdapter.transpose",
+        "xarray.core.indexing::PandasIndexAdapter.__repr__",
+        "xarray.core.variable::Variable",
+        "xarray.core.variable::Variable._coarsen_reshape"
+      ],
+      "gold_files": [
+        "xarray/tests/test_variable.py"
+      ],
+      "candidate_files": [
+        "xarray/core/indexing.py",
+        "asv_bench/benchmarks/combine.py",
+        "xarray/core/dataset.py",
+        "xarray/core/dataarray.py",
+        "xarray/core/utils.py",
+        "xarray/core/variable.py",
+        "asv_bench/benchmarks/dataarray_missing.py",
+        "asv_bench/benchmarks/__init__.py",
+        "asv_bench/benchmarks/dataset_io.py",
+        "xarray/backends/api.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 796.386,
+      "production_file_folds": [
+        {
+          "seed_file": "xarray/core/indexing.py",
+          "changed_symbols": [
+            "xarray.core.indexing::PandasIndexAdapter",
+            "xarray.core.indexing::PandasIndexAdapter.__init__",
+            "xarray.core.indexing::PandasIndexAdapter.dtype",
+            "xarray.core.indexing::PandasIndexAdapter.__array__",
+            "xarray.core.indexing::PandasIndexAdapter.shape",
+            "xarray.core.indexing::PandasIndexAdapter.__getitem__",
+            "xarray.core.indexing::PandasIndexAdapter.transpose",
+            "xarray.core.indexing::PandasIndexAdapter.__repr__"
+          ],
+          "gold_files": [
+            "xarray/core/variable.py"
+          ],
+          "candidate_files": [
+            "asv_bench/benchmarks/combine.py",
+            "xarray/core/dataset.py",
+            "xarray/core/dataarray.py",
+            "xarray/core/utils.py",
+            "xarray/core/variable.py",
+            "asv_bench/benchmarks/dataarray_missing.py",
+            "asv_bench/benchmarks/__init__.py",
+            "asv_bench/benchmarks/dataset_io.py",
+            "xarray/backends/api.py",
+            "xarray/core/combine.py"
+          ],
+          "hits": [
+            "xarray/core/variable.py"
+          ],
+          "recall_at_k": 1.0,
+          "precision_at_k": 0.1,
+          "query_ms": 836.426
+        },
+        {
+          "seed_file": "xarray/core/variable.py",
+          "changed_symbols": [
+            "xarray.core.variable::Variable",
+            "xarray.core.variable::Variable._coarsen_reshape"
+          ],
+          "gold_files": [
+            "xarray/core/indexing.py"
+          ],
+          "candidate_files": [
+            "asv_bench/benchmarks/combine.py",
+            "xarray/core/dataset.py",
+            "xarray/core/dataarray.py",
+            "xarray/core/utils.py",
+            "asv_bench/benchmarks/dataarray_missing.py",
+            "asv_bench/benchmarks/__init__.py",
+            "asv_bench/benchmarks/dataset_io.py",
+            "xarray/backends/api.py",
+            "xarray/core/combine.py",
+            "xarray/core/merge.py"
+          ],
+          "hits": [],
+          "recall_at_k": 0.0,
+          "precision_at_k": 0.0,
+          "query_ms": 251.662
+        }
+      ],
+      "index": {
+        "source_files": 135,
+        "nodes": 4486,
+        "edges": 37027,
+        "flows": 3332,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 126.8,
+          "parse": 2048.5,
+          "resolve": 59.9,
+          "write_db": 2663.9,
+          "communities": 0.0,
+          "total": 4899.0
+        },
+        "database_bytes": 15351808,
+        "call_resolutions": {
+          "dynamic": 8348,
+          "resolved": 12466,
+          "unresolved": 11588
+        },
+        "resolved_call_rate": 0.3847
+      }
+    },
+    {
+      "id": "pydata__xarray-3305",
+      "repo": "pydata/xarray",
+      "base_commit": "69c7e01e5167a3137c285cb50d1978252bb8bcbf",
+      "changed_symbols": [
+        "xarray.core.dataset::Dataset",
+        "xarray.core.dataset::Dataset.quantile",
+        "xarray.core.variable::Variable",
+        "xarray.core.variable::Variable.no_conflicts",
+        "xarray.core.variable::Variable.quantile",
+        "xarray.core.variable::Variable.rank"
+      ],
+      "gold_files": [
+        "xarray/tests/test_dataarray.py"
+      ],
+      "candidate_files": [
+        "xarray/core/dataset.py",
+        "asv_bench/benchmarks/combine.py",
+        "asv_bench/benchmarks/dataset_io.py",
+        "xarray/backends/api.py",
+        "xarray/core/utils.py",
+        "xarray/core/combine.py",
+        "asv_bench/benchmarks/__init__.py",
+        "asv_bench/benchmarks/indexing.py",
+        "asv_bench/benchmarks/interp.py",
+        "asv_bench/benchmarks/reindexing.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 572.005,
+      "production_file_folds": [
+        {
+          "seed_file": "xarray/core/dataset.py",
+          "changed_symbols": [
+            "xarray.core.dataset::Dataset",
+            "xarray.core.dataset::Dataset.quantile"
+          ],
+          "gold_files": [
+            "xarray/core/variable.py"
+          ],
+          "candidate_files": [
+            "asv_bench/benchmarks/combine.py",
+            "asv_bench/benchmarks/dataset_io.py",
+            "xarray/backends/api.py",
+            "xarray/core/utils.py",
+            "xarray/core/combine.py",
+            "asv_bench/benchmarks/__init__.py",
+            "asv_bench/benchmarks/indexing.py",
+            "asv_bench/benchmarks/interp.py",
+            "asv_bench/benchmarks/reindexing.py",
+            "asv_bench/benchmarks/rolling.py"
+          ],
+          "hits": [],
+          "recall_at_k": 0.0,
+          "precision_at_k": 0.0,
+          "query_ms": 111.379
+        },
+        {
+          "seed_file": "xarray/core/variable.py",
+          "changed_symbols": [
+            "xarray.core.variable::Variable",
+            "xarray.core.variable::Variable.no_conflicts",
+            "xarray.core.variable::Variable.quantile",
+            "xarray.core.variable::Variable.rank"
+          ],
+          "gold_files": [
+            "xarray/core/dataset.py"
+          ],
+          "candidate_files": [
+            "asv_bench/benchmarks/combine.py",
+            "xarray/core/dataset.py",
+            "xarray/core/dataarray.py",
+            "xarray/core/utils.py",
+            "asv_bench/benchmarks/dataarray_missing.py",
+            "asv_bench/benchmarks/__init__.py",
+            "asv_bench/benchmarks/dataset_io.py",
+            "xarray/backends/api.py",
+            "xarray/core/combine.py",
+            "xarray/core/merge.py"
+          ],
+          "hits": [
+            "xarray/core/dataset.py"
+          ],
+          "recall_at_k": 1.0,
+          "precision_at_k": 0.1,
+          "query_ms": 210.593
+        }
+      ],
+      "index": {
+        "source_files": 137,
+        "nodes": 4325,
+        "edges": 35215,
+        "flows": 3171,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 92.4,
+          "parse": 1851.6,
+          "resolve": 64.6,
+          "write_db": 2058.9,
+          "communities": 0.0,
+          "total": 4067.5
+        },
+        "database_bytes": 14639104,
+        "call_resolutions": {
+          "dynamic": 7810,
+          "resolved": 11879,
+          "unresolved": 10964
+        },
+        "resolved_call_rate": 0.3875
+      }
+    },
+    {
+      "id": "pydata__xarray-3993",
+      "repo": "pydata/xarray",
+      "base_commit": "8cc34cb412ba89ebca12fc84f76a9e452628f1bc",
+      "changed_symbols": [
+        "xarray.core.dataarray::DataArray",
+        "xarray.core.dataarray::DataArray.differentiate",
+        "xarray.core.dataarray::DataArray.integrate",
+        "xarray.core.dataarray::DataArray.unify_chunks",
+        "xarray.core.dataset::Dataset",
+        "xarray.core.dataset::Dataset.differentiate",
+        "xarray.core.dataset::Dataset.integrate"
+      ],
+      "gold_files": [
+        "xarray/tests/test_dataset.py",
+        "xarray/tests/test_units.py"
+      ],
+      "candidate_files": [
+        "xarray/core/dataarray.py",
+        "asv_bench/benchmarks/combine.py",
+        "xarray/core/dataset.py",
+        "asv_bench/benchmarks/dataarray_missing.py",
+        "asv_bench/benchmarks/__init__.py",
+        "asv_bench/benchmarks/dataset_io.py",
+        "asv_bench/benchmarks/rolling.py",
+        "asv_bench/benchmarks/unstacking.py",
+        "properties/test_pandas_roundtrip.py",
+        "xarray/convert.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 748.918,
+      "production_file_folds": [
+        {
+          "seed_file": "xarray/core/dataarray.py",
+          "changed_symbols": [
+            "xarray.core.dataarray::DataArray",
+            "xarray.core.dataarray::DataArray.differentiate",
+            "xarray.core.dataarray::DataArray.integrate",
+            "xarray.core.dataarray::DataArray.unify_chunks"
+          ],
+          "gold_files": [
+            "xarray/core/dataset.py"
+          ],
+          "candidate_files": [
+            "asv_bench/benchmarks/combine.py",
+            "xarray/core/dataset.py",
+            "asv_bench/benchmarks/dataarray_missing.py",
+            "asv_bench/benchmarks/__init__.py",
+            "asv_bench/benchmarks/dataset_io.py",
+            "asv_bench/benchmarks/rolling.py",
+            "asv_bench/benchmarks/unstacking.py",
+            "properties/test_pandas_roundtrip.py",
+            "xarray/convert.py",
+            "xarray/core/dtypes.py"
+          ],
+          "hits": [
+            "xarray/core/dataset.py"
+          ],
+          "recall_at_k": 1.0,
+          "precision_at_k": 0.1,
+          "query_ms": 245.18
+        },
+        {
+          "seed_file": "xarray/core/dataset.py",
+          "changed_symbols": [
+            "xarray.core.dataset::Dataset",
+            "xarray.core.dataset::Dataset.differentiate",
+            "xarray.core.dataset::Dataset.integrate"
+          ],
+          "gold_files": [
+            "xarray/core/dataarray.py"
+          ],
+          "candidate_files": [
+            "asv_bench/benchmarks/combine.py",
+            "asv_bench/benchmarks/dataset_io.py",
+            "xarray/backends/api.py",
+            "xarray/core/utils.py",
+            "xarray/core/combine.py",
+            "asv_bench/benchmarks/__init__.py",
+            "asv_bench/benchmarks/indexing.py",
+            "asv_bench/benchmarks/interp.py",
+            "asv_bench/benchmarks/reindexing.py",
+            "asv_bench/benchmarks/rolling.py"
+          ],
+          "hits": [],
+          "recall_at_k": 0.0,
+          "precision_at_k": 0.0,
+          "query_ms": 874.904
+        }
+      ],
+      "index": {
+        "source_files": 151,
+        "nodes": 5078,
+        "edges": 44984,
+        "flows": 3791,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 76.2,
+          "parse": 2434.1,
+          "resolve": 67.8,
+          "write_db": 2120.3,
+          "communities": 0.0,
+          "total": 4698.4
+        },
+        "database_bytes": 19734528,
+        "call_resolutions": {
+          "dynamic": 9507,
+          "resolved": 15594,
+          "unresolved": 14624
+        },
+        "resolved_call_rate": 0.3925
+      }
+    },
+    {
+      "id": "pydata__xarray-6938",
+      "repo": "pydata/xarray",
+      "base_commit": "c4e40d991c28be51de9ac560ce895ac7f9b14924",
+      "changed_symbols": [
+        "xarray.core.dataset::Dataset",
+        "xarray.core.dataset::Dataset.swap_dims",
+        "xarray.core.variable::Variable",
+        "xarray.core.variable::Variable.to_base_variable",
+        "xarray.core.variable::Variable.to_index_variable",
+        "xarray.core.variable::Variable.to_index",
+        "xarray.core.variable::IndexVariable",
+        "xarray.core.variable::IndexVariable._data_equals",
+        "xarray.core.variable::IndexVariable.to_index_variable",
+        "xarray.core.variable::IndexVariable.to_index",
+        "xarray.core.variable::IndexVariable.level_names",
+        "xarray.core.variable::IndexVariable.get_level_variable",
+        "xarray.core.variable::IndexVariable.name",
+        "xarray.core.variable::IndexVariable._inplace_binary_op"
+      ],
+      "gold_files": [
+        "xarray/tests/test_variable.py"
+      ],
+      "candidate_files": [
+        "xarray/core/dataset.py",
+        "asv_bench/benchmarks/combine.py",
+        "xarray/core/combine.py",
+        "xarray/core/utils.py",
+        "asv_bench/benchmarks/dataset_io.py",
+        "asv_bench/benchmarks/__init__.py",
+        "xarray/backends/api.py",
+        "xarray/backends/common.py",
+        "asv_bench/benchmarks/groupby.py",
+        "asv_bench/benchmarks/indexing.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 1675.178,
+      "production_file_folds": [
+        {
+          "seed_file": "xarray/core/dataset.py",
+          "changed_symbols": [
+            "xarray.core.dataset::Dataset",
+            "xarray.core.dataset::Dataset.swap_dims"
+          ],
+          "gold_files": [
+            "xarray/core/variable.py"
+          ],
+          "candidate_files": [
+            "asv_bench/benchmarks/combine.py",
+            "xarray/core/combine.py",
+            "xarray/core/utils.py",
+            "asv_bench/benchmarks/dataset_io.py",
+            "asv_bench/benchmarks/__init__.py",
+            "xarray/backends/api.py",
+            "xarray/backends/common.py",
+            "asv_bench/benchmarks/groupby.py",
+            "asv_bench/benchmarks/indexing.py",
+            "asv_bench/benchmarks/interp.py"
+          ],
+          "hits": [],
+          "recall_at_k": 0.0,
+          "precision_at_k": 0.0,
+          "query_ms": 487.039
+        },
+        {
+          "seed_file": "xarray/core/variable.py",
+          "changed_symbols": [
+            "xarray.core.variable::Variable",
+            "xarray.core.variable::Variable.to_base_variable",
+            "xarray.core.variable::Variable.to_index_variable",
+            "xarray.core.variable::Variable.to_index",
+            "xarray.core.variable::IndexVariable",
+            "xarray.core.variable::IndexVariable._data_equals",
+            "xarray.core.variable::IndexVariable.to_index_variable",
+            "xarray.core.variable::IndexVariable.to_index",
+            "xarray.core.variable::IndexVariable.level_names",
+            "xarray.core.variable::IndexVariable.get_level_variable",
+            "xarray.core.variable::IndexVariable.name",
+            "xarray.core.variable::IndexVariable._inplace_binary_op"
+          ],
+          "gold_files": [
+            "xarray/core/dataset.py"
+          ],
+          "candidate_files": [
+            "asv_bench/benchmarks/combine.py",
+            "xarray/core/dataset.py",
+            "xarray/core/dataarray.py",
+            "xarray/core/merge.py",
+            "xarray/core/combine.py",
+            "xarray/core/utils.py",
+            "xarray/core/indexes.py",
+            "xarray/core/alignment.py",
+            "xarray/core/concat.py",
+            "asv_bench/benchmarks/dataarray_missing.py"
+          ],
+          "hits": [
+            "xarray/core/dataset.py"
+          ],
+          "recall_at_k": 1.0,
+          "precision_at_k": 0.1,
+          "query_ms": 1306.505
+        }
+      ],
+      "index": {
+        "source_files": 170,
+        "nodes": 6265,
+        "edges": 54016,
+        "flows": 4790,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 99.3,
+          "parse": 3405.6,
+          "resolve": 84.2,
+          "write_db": 2946.3,
+          "communities": 0.0,
+          "total": 6535.4
+        },
+        "database_bytes": 24801280,
+        "call_resolutions": {
+          "dynamic": 12374,
+          "resolved": 17915,
+          "unresolved": 17170
+        },
+        "resolved_call_rate": 0.3775
+      }
+    },
+    {
+      "id": "pydata__xarray-6992",
+      "repo": "pydata/xarray",
+      "base_commit": "45c0a114e2b7b27b83c9618bc05b36afac82183c",
+      "changed_symbols": [
+        "xarray.core.dataset::Dataset",
+        "xarray.core.dataset::Dataset.set_index",
+        "xarray.core.dataset::Dataset.reset_index",
+        "xarray.core.dataset::Dataset.reorder_levels",
+        "xarray.core.indexes::PandasMultiIndex",
+        "xarray.core.indexes::PandasMultiIndex.keep_levels",
+        "xarray.core.indexes::PandasMultiIndex.reorder_levels"
+      ],
+      "gold_files": [
+        "xarray/tests/test_dataarray.py",
+        "xarray/tests/test_dataset.py",
+        "xarray/tests/test_groupby.py"
+      ],
+      "candidate_files": [
+        "xarray/core/dataset.py",
+        "asv_bench/benchmarks/combine.py",
+        "xarray/core/combine.py",
+        "xarray/core/utils.py",
+        "asv_bench/benchmarks/dataset_io.py",
+        "asv_bench/benchmarks/__init__.py",
+        "xarray/backends/api.py",
+        "xarray/backends/common.py",
+        "asv_bench/benchmarks/groupby.py",
+        "asv_bench/benchmarks/indexing.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 1500.598,
+      "production_file_folds": [
+        {
+          "seed_file": "xarray/core/dataset.py",
+          "changed_symbols": [
+            "xarray.core.dataset::Dataset",
+            "xarray.core.dataset::Dataset.set_index",
+            "xarray.core.dataset::Dataset.reset_index",
+            "xarray.core.dataset::Dataset.reorder_levels"
+          ],
+          "gold_files": [
+            "xarray/core/indexes.py"
+          ],
+          "candidate_files": [
+            "asv_bench/benchmarks/combine.py",
+            "xarray/core/combine.py",
+            "xarray/core/utils.py",
+            "asv_bench/benchmarks/dataset_io.py",
+            "asv_bench/benchmarks/__init__.py",
+            "xarray/backends/api.py",
+            "xarray/backends/common.py",
+            "asv_bench/benchmarks/groupby.py",
+            "asv_bench/benchmarks/indexing.py",
+            "asv_bench/benchmarks/interp.py"
+          ],
+          "hits": [],
+          "recall_at_k": 0.0,
+          "precision_at_k": 0.0,
+          "query_ms": 702.571
+        },
+        {
+          "seed_file": "xarray/core/indexes.py",
+          "changed_symbols": [
+            "xarray.core.indexes::PandasMultiIndex",
+            "xarray.core.indexes::PandasMultiIndex.keep_levels",
+            "xarray.core.indexes::PandasMultiIndex.reorder_levels"
+          ],
+          "gold_files": [
+            "xarray/core/dataset.py"
+          ],
+          "candidate_files": [
+            "asv_bench/benchmarks/combine.py",
+            "xarray/core/dataset.py",
+            "xarray/core/dataarray.py",
+            "xarray/core/merge.py",
+            "xarray/core/variable.py",
+            "xarray/core/alignment.py",
+            "xarray/core/indexing.py",
+            "xarray/core/combine.py",
+            "xarray/core/utils.py",
+            "xarray/core/concat.py"
+          ],
+          "hits": [
+            "xarray/core/dataset.py"
+          ],
+          "recall_at_k": 1.0,
+          "precision_at_k": 0.1,
+          "query_ms": 914.712
+        }
+      ],
+      "index": {
+        "source_files": 169,
+        "nodes": 6282,
+        "edges": 54188,
+        "flows": 4810,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 57.0,
+          "parse": 2798.1,
+          "resolve": 94.1,
+          "write_db": 2644.1,
+          "communities": 0.0,
+          "total": 5593.2
+        },
+        "database_bytes": 24862720,
+        "call_resolutions": {
+          "dynamic": 12418,
+          "resolved": 17953,
+          "unresolved": 17242
+        },
+        "resolved_call_rate": 0.3771
+      }
+    },
+    {
+      "id": "pydata__xarray-2905",
+      "repo": "pydata/xarray",
+      "base_commit": "7c4e2ac83f7b4306296ff9b7b51aaf016e5ad614",
+      "changed_symbols": [
+        "xarray.core.variable::as_compatible_data"
+      ],
+      "gold_files": [
+        "xarray/tests/test_variable.py"
+      ],
+      "candidate_files": [
+        "xarray/core/variable.py",
+        "asv_bench/benchmarks/combine.py",
+        "xarray/core/dataset.py",
+        "xarray/core/dataarray.py",
+        "xarray/core/merge.py",
+        "asv_bench/benchmarks/dataarray_missing.py",
+        "asv_bench/benchmarks/__init__.py",
+        "asv_bench/benchmarks/dataset_io.py",
+        "xarray/backends/api.py",
+        "xarray/core/utils.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 729.08,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 152,
+        "nodes": 5113,
+        "edges": 45300,
+        "flows": 3819,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 93.7,
+          "parse": 3597.4,
+          "resolve": 96.5,
+          "write_db": 2312.9,
+          "communities": 0.0,
+          "total": 6100.5
+        },
+        "database_bytes": 19968000,
+        "call_resolutions": {
+          "dynamic": 9573,
+          "resolved": 15704,
+          "unresolved": 14724
+        },
+        "resolved_call_rate": 0.3926
+      }
+    },
+    {
+      "id": "pydata__xarray-3151",
+      "repo": "pydata/xarray",
+      "base_commit": "118f4d996e7711c9aced916e6049af9f28d5ec66",
+      "changed_symbols": [
+        "xarray.core.combine::combine_by_coords"
+      ],
+      "gold_files": [
+        "xarray/tests/test_combine.py"
+      ],
+      "candidate_files": [
+        "xarray/core/combine.py",
+        "asv_bench/benchmarks/dataset_io.py",
+        "xarray/backends/api.py",
+        "xarray/core/utils.py",
+        "xarray/tests/test_backends.py",
+        "xarray/core/dataset.py",
+        "xarray/tests/__init__.py",
+        "xarray/core/concat.py",
+        "xarray/core/dataarray.py",
+        "xarray/core/variable.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 21.443,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 135,
+        "nodes": 4164,
+        "edges": 33696,
+        "flows": 3044,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 88.7,
+          "parse": 1726.8,
+          "resolve": 47.2,
+          "write_db": 1533.6,
+          "communities": 0.0,
+          "total": 3396.3
+        },
+        "database_bytes": 14004224,
+        "call_resolutions": {
+          "dynamic": 7527,
+          "resolved": 11289,
+          "unresolved": 10483
+        },
+        "resolved_call_rate": 0.3853
+      }
+    },
+    {
+      "id": "pydata__xarray-3677",
+      "repo": "pydata/xarray",
+      "base_commit": "ef6e6a7b86f8479b9a1fecf15ad5b88a2326b31e",
+      "changed_symbols": [
+        "xarray.core.dataset::Dataset",
+        "xarray.core.dataset::Dataset.merge"
+      ],
+      "gold_files": [
+        "xarray/tests/test_merge.py"
+      ],
+      "candidate_files": [
+        "xarray/core/dataset.py",
+        "asv_bench/benchmarks/combine.py",
+        "asv_bench/benchmarks/dataset_io.py",
+        "xarray/backends/api.py",
+        "xarray/core/utils.py",
+        "xarray/core/combine.py",
+        "asv_bench/benchmarks/__init__.py",
+        "asv_bench/benchmarks/indexing.py",
+        "asv_bench/benchmarks/interp.py",
+        "asv_bench/benchmarks/reindexing.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 323.372,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 144,
+        "nodes": 4619,
+        "edges": 39618,
+        "flows": 3399,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 60.3,
+          "parse": 2147.0,
+          "resolve": 57.0,
+          "write_db": 1632.9,
+          "communities": 0.0,
+          "total": 3897.2
+        },
+        "database_bytes": 17215488,
+        "call_resolutions": {
+          "dynamic": 8432,
+          "resolved": 13682,
+          "unresolved": 12719
+        },
+        "resolved_call_rate": 0.3928
+      }
+    },
+    {
+      "id": "pydata__xarray-4075",
+      "repo": "pydata/xarray",
+      "base_commit": "19b088636eb7d3f65ab7a1046ac672e0689371d8",
+      "changed_symbols": [
+        "xarray.core.weighted::Weighted",
+        "xarray.core.weighted::Weighted._sum_of_weights"
+      ],
+      "gold_files": [
+        "xarray/tests/test_weighted.py"
+      ],
+      "candidate_files": [
+        "xarray/core/weighted.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 1.032,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 143,
+        "nodes": 4788,
+        "edges": 42242,
+        "flows": 3582,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 50.7,
+          "parse": 2146.8,
+          "resolve": 70.4,
+          "write_db": 2343.3,
+          "communities": 0.0,
+          "total": 4611.2
+        },
+        "database_bytes": 18542592,
+        "call_resolutions": {
+          "dynamic": 8879,
+          "resolved": 14756,
+          "unresolved": 13660
+        },
+        "resolved_call_rate": 0.3957
+      }
+    },
+    {
+      "id": "pydata__xarray-4094",
+      "repo": "pydata/xarray",
+      "base_commit": "a64cf2d5476e7bbda099b34c40b7be1880dbd39a",
+      "changed_symbols": [
+        "xarray.core.dataarray::DataArray",
+        "xarray.core.dataarray::DataArray.to_unstacked_dataset"
+      ],
+      "gold_files": [
+        "xarray/tests/test_dataset.py"
+      ],
+      "candidate_files": [
+        "xarray/core/dataarray.py",
+        "asv_bench/benchmarks/combine.py",
+        "xarray/core/dataset.py",
+        "asv_bench/benchmarks/dataarray_missing.py",
+        "asv_bench/benchmarks/__init__.py",
+        "asv_bench/benchmarks/dataset_io.py",
+        "asv_bench/benchmarks/rolling.py",
+        "asv_bench/benchmarks/unstacking.py",
+        "properties/test_pandas_roundtrip.py",
+        "xarray/convert.py"
+      ],
+      "hits": [],
+      "patch_file_recall_at_k": 0.0,
+      "patch_file_precision_at_k": 0.0,
+      "symbol_found_rate": 1.0,
+      "query_ms": 236.72,
+      "production_file_folds": [],
+      "index": {
+        "source_files": 144,
+        "nodes": 4837,
+        "edges": 42445,
+        "flows": 3611,
+        "communities": 0,
+        "timings_ms": {
+          "list_files": 76.9,
+          "parse": 2461.1,
+          "resolve": 55.3,
+          "write_db": 1694.9,
+          "communities": 0.0,
+          "total": 4288.2
+        },
+        "database_bytes": 18583552,
+        "call_resolutions": {
+          "dynamic": 9003,
+          "resolved": 14698,
+          "unresolved": 13750
+        },
+        "resolved_call_rate": 0.3925
+      }
+    }
+  ]
+}
