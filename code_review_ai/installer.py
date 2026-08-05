@@ -9,6 +9,7 @@ so an outsider needs only ``uv`` (which also fetches the required Python 3.14) a
 appends a tool-usage section to the user-global CLAUDE.md (marker-guarded, idempotent)
 so the AI in any project knows how to call the registered tools.
 """
+import importlib.resources
 import os
 import shutil
 import subprocess
@@ -20,7 +21,14 @@ DEFAULT_SOURCE = "git+https://github.com/Monkey-D-sj/code-review-ai"
 DEFAULT_MCP_ENTRY = "code-review-ai-mcp"
 DEFAULT_NAME = "code-review-ai"
 
-SUPPORTED_PLATFORMS = {"claude-code"}
+SUPPORTED_PLATFORMS = {"claude-code", "codex"}
+
+SKILL_NAMES = (
+    "code-review-langs",
+    "code-review-python",
+    "code-review-typescript",
+    "code-review-javascript",
+)
 
 # Tool-usage section appended to the user-global CLAUDE.md on install. The block
 # between the markers is replaced in place, so re-installs don't duplicate it.
@@ -69,16 +77,29 @@ def _claude_executable() -> str | None:
     return path
 
 
-def _global_claude_md() -> Path:
-    return Path.home() / ".claude" / "CLAUDE.md"
+def _global_context_file(platform: str) -> Path:
+    """The platform's always-injected context file for tool-usage docs."""
+    home = Path.home()
+    if platform == "codex":
+        return home / ".codex" / "AGENTS.md"
+    return home / ".claude" / "CLAUDE.md"
 
 
-def append_usage_docs() -> Path | None:
-    """Append (or refresh) the MCP tool-usage section to the user-global
-    CLAUDE.md, so the AI in any project knows how to call the tools. Idempotent:
-    the block between the markers is replaced in place. Returns the path written,
-    or None if the file couldn't be written (install still succeeds)."""
-    md = _global_claude_md()
+def _global_skills_dir(platform: str) -> Path:
+    """The platform's user-scope skills directory."""
+    home = Path.home()
+    if platform == "codex":
+        return home / ".codex" / "skills"
+    return home / ".claude" / "skills"
+
+
+def append_usage_docs(platform: str = "claude-code") -> Path | None:
+    """Append (or refresh) the MCP tool-usage section to the platform's
+    user-global context file (CLAUDE.md / AGENTS.md), so the AI in any project
+    knows how to call the tools. Idempotent: the block between the markers is
+    replaced in place. Returns the path written, or None if it couldn't be
+    written (install still succeeds)."""
+    md = _global_context_file(platform)
     try:
         md.parent.mkdir(parents=True, exist_ok=True)
         content = md.read_text(encoding="utf-8") if md.exists() else ""
@@ -96,16 +117,52 @@ def append_usage_docs() -> Path | None:
         return None
 
 
-def install(platform: str = "claude-code", source: str = DEFAULT_SOURCE,
-            scope: str = "user", name: str = DEFAULT_NAME,
-            mcp_entry: str = DEFAULT_MCP_ENTRY) -> InstallResult:
-    """Register the MCP server with the target platform, then append tool-usage
-    docs to the user-global CLAUDE.md. Returns a result; never raises - callers
-    just print ``message`` and map ``success`` to exit code."""
-    if platform not in SUPPORTED_PLATFORMS:
-        return InstallResult(False, f"unsupported platform: {platform}", [])
-    launch_cmd = _launch_command(source, mcp_entry)
-    add_cmd = _claude_add_command(name, scope, launch_cmd)
+def deploy_skills(platform: str = "claude-code",
+                  skills_root: Path | None = None) -> Path | None:
+    """Copy the bundled language-review skills into the target platform's
+    user-scope skills dir. Idempotent: overwrites SKILL.md in place. Returns
+    the target dir, or None on failure (install still succeeds)."""
+    target = skills_root or _global_skills_dir(platform)
+    try:
+        source = importlib.resources.files("code_review_ai").joinpath("skills")
+        for name in SKILL_NAMES:
+            skill_dir = target / name
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            payload = (source / name / "SKILL.md").read_text(encoding="utf-8")
+            (skill_dir / "SKILL.md").write_text(payload, encoding="utf-8")
+        return target
+    except (OSError, FileNotFoundError):
+        return None
+
+
+def _deploy_docs_and_skills(platform: str, msg: str) -> str:
+    """Append usage docs + deploy skills for a platform; fold the outcomes
+    into the success message. Both steps are non-fatal."""
+    doc_path = append_usage_docs(platform)
+    skills_dir = deploy_skills(platform)
+    if doc_path is not None:
+        msg += f" Appended tool usage docs to {doc_path}."
+    if skills_dir is not None:
+        msg += f" Deployed {len(SKILL_NAMES)} review skills to {skills_dir}."
+    return msg
+
+
+def _install_codex() -> InstallResult:
+    """Codex has no ``codex mcp add`` CLI: deploy skills + usage docs only,
+    MCP registration stays manual (edit ~/.codex/config.toml)."""
+    msg = _deploy_docs_and_skills(
+        "codex",
+        "Registered review skills with Codex. MCP registration is manual: "
+        "add a [mcp_servers.code-review-ai] block to ~/.codex/config.toml "
+        "(see README).",
+    )
+    return InstallResult(True, msg, [])
+
+
+def _install_claude(source: str, scope: str, name: str,
+                    mcp_entry: str) -> InstallResult:
+    """Register the MCP server with Claude Code, then deploy docs + skills."""
+    add_cmd = _claude_add_command(name, scope, _launch_command(source, mcp_entry))
     claude = _claude_executable()
     if claude is None:
         return InstallResult(
@@ -114,23 +171,36 @@ def install(platform: str = "claude-code", source: str = DEFAULT_SOURCE,
             + " ".join(add_cmd),
             add_cmd,
         )
-    add_cmd = [claude, *add_cmd[1:]]  # bare shim may not be spawnable on Windows
+    add_cmd = [claude, *add_cmd[1:]]
     proc = subprocess.run(add_cmd, capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
-    if proc.returncode == 0:
-        doc_path = append_usage_docs()
-        msg = f"Registered '{name}' with Claude Code (scope={scope})."
-        if doc_path is not None:
-            msg += f" Appended tool usage docs to {doc_path}."
-        msg += " Restart Claude Code (or run /mcp) to see the tools."
-        return InstallResult(True, msg, add_cmd)
-    detail = (proc.stderr or proc.stdout).strip()
-    return InstallResult(
-        False,
-        f"claude mcp add failed (exit {proc.returncode}):\n{detail}\n"
-        f"If '{name}' already exists, remove it first: claude mcp remove {name}",
-        add_cmd,
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        return InstallResult(
+            False,
+            f"claude mcp add failed (exit {proc.returncode}):\n{detail}\n"
+            f"If '{name}' already exists, remove it first: claude mcp remove {name}",
+            add_cmd,
+        )
+    msg = _deploy_docs_and_skills(
+        "claude-code",
+        f"Registered '{name}' with Claude Code (scope={scope}).",
     )
+    msg += " Restart Claude Code (or run /mcp) to see the tools."
+    return InstallResult(True, msg, add_cmd)
+
+
+def install(platform: str = "claude-code", source: str = DEFAULT_SOURCE,
+            scope: str = "user", name: str = DEFAULT_NAME,
+            mcp_entry: str = DEFAULT_MCP_ENTRY) -> InstallResult:
+    """Register MCP + deploy skills/docs for the target platform. Returns a
+    result; never raises - callers just print ``message`` and map ``success``
+    to exit code."""
+    if platform not in SUPPORTED_PLATFORMS:
+        return InstallResult(False, f"unsupported platform: {platform}", [])
+    if platform == "codex":
+        return _install_codex()
+    return _install_claude(source, scope, name, mcp_entry)
 
 
 def _launch_command(source: str, mcp_entry: str) -> list[str]:
