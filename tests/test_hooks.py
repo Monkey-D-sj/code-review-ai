@@ -81,8 +81,20 @@ def test_install_hooks_review_captures_debug_log(tmp_path):
     written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
     content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
     assert "--verbose" in content
-    assert "2> '" in content
+    assert '2> "$debug"' in content
     assert ".debug.log" in content
+
+
+def test_install_hooks_review_archives_by_date(tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
+    content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
+    assert "date +%F" in content
+    assert "reviews/" in content
+    assert "mkdir -p" in content
+    assert 'cp "$archive"' in content
+    assert '${stamp}-${short_sha}.md' in content
 
 
 def test_install_hooks_review_launch_overrides_platform(tmp_path):

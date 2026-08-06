@@ -149,7 +149,6 @@ def _review_script(repo: str, db: str, launch: str, review_launch: str,
     db_abs = str(Path(db).resolve()).replace("\\", "/")
     out_abs = str(Path(review_out or Path(repo_abs) / ".code-review-ai" / "last-review.md")
                   .resolve()).replace("\\", "/")
-    debug_abs = f"{out_abs}.debug.log"
     return (
         "#!/bin/sh\n"
         "# code-review-ai: rebuild index + review the commit's change impact\n"
@@ -178,13 +177,24 @@ def _review_script(repo: str, db: str, launch: str, review_launch: str,
         + "  exit 0\n"
         + "fi\n"
         + f'echo "code-review-ai: reviewing with {review_launch}..."\n'
+        + "# archive one copy per commit under reviews/<date>/<stamp>-<short-sha>.md;\n"
+        + "# <out> stays a latest pointer for convenience\n"
+        + "date_dir=$(date +%F)\n"
+        + "stamp=$(date +%F-%H%M%S)\n"
+        + "short_sha=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)\n"
+        + f"archive_dir='{repo_abs}/.code-review-ai/reviews/'\"$date_dir\"\n"
+        + 'mkdir -p "$archive_dir"\n'
+        + 'archive="$archive_dir/${stamp}-${short_sha}.md"\n'
+        + 'debug="${archive}.debug.log"\n'
         + f"printf '%s' \"$summary\" | {review_launch} "
-        f"'{_REVIEW_PROMPT}' {review_tail} {review_debug} > '{out_abs}' 2> '{debug_abs}'\n"
+        f"'{_REVIEW_PROMPT}' {review_tail} {review_debug} > \"$archive\" 2> \"$debug\"\n"
         + "review_status=$?\n"
         + 'if [ "$review_status" -eq 0 ]; then\n'
-        + f'  echo "code-review-ai: review written to {out_abs} (debug: {debug_abs})"\n'
+        + f"  cp \"$archive\" '{out_abs}'\n"
+        + f"  cp \"$debug\" '{out_abs}.debug.log'\n"
+        + '  echo "code-review-ai: review written to $archive (debug: $debug)"\n'
         + "else\n"
-        + f'  echo "code-review-ai: review command failed; no report written (debug: {debug_abs})" >&2\n'
+        + '  echo "code-review-ai: review command failed; no report written (debug: $debug)" >&2\n'
         + "fi\n"
         + "exit 0\n"
     )
