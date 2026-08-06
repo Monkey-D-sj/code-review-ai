@@ -121,10 +121,14 @@ LANG = {
             "enum_declaration", "record_declaration",
         },
         "inherit_fields": {
-            "class_declaration": [("superclass", "extends"), ("super_interfaces", "implements")],
+            # class/enum/record implement via the 'interfaces' FIELD (node type
+            # super_interfaces); interface extends is a bare 'extends_interfaces'
+            # CHILD node (no field name) — _inherit_clause falls back to a
+            # child-type lookup for it.
+            "class_declaration": [("superclass", "extends"), ("interfaces", "implements")],
             "interface_declaration": [("extends_interfaces", "extends")],
-            "enum_declaration": [("super_interfaces", "implements")],
-            "record_declaration": [("super_interfaces", "implements")],
+            "enum_declaration": [("interfaces", "implements")],
+            "record_declaration": [("interfaces", "implements")],
         },
     },
 }
@@ -403,28 +407,59 @@ def _maybe_arrow_def(node, source, module_qname, scope_qname, parent_kind, lang,
     _walk_defs_typed(value, source, module_qname, qn, kind, lang, output)
 
 
+_INHERIT_BASE_TYPES = ("identifier", "type_identifier", "property_identifier",
+                       "attribute", "member_expression")
+
+
+def _inherit_clause(node, clause_name: str):
+    """Return an inheritance clause: the named field when present, else the
+    child node of that type (Java interface 'extends' is a bare child node)."""
+    return node.child_by_field_name(clause_name) or _find_child(node, clause_name)
+
+
+def _inherit_bases(clause):
+    """Yield base type nodes from an inheritance clause, descending type_list
+    (Java wraps interface extends and class implements in a type_list)."""
+    stack = list(clause.children)
+    while stack:
+        node = stack.pop()
+        if node.type == "type_list":
+            stack.extend(node.children)
+        else:
+            yield node
+
+
 def _walk_inherits(node, module_qname, lang, out: list):
-    """Walk AST for class inheritance: extends / implements clauses."""
+    """Walk AST for class inheritance: extends / implements clauses.
+
+    Python/TS use a single ``class_def`` + ``class_extends``/``class_implements``
+    field-name pair; Java declares per-node-type ``inherit_fields`` (e.g. an
+    interface's supertypes live under ``extends_interfaces``, a class's under
+    ``superclass``/``super_interfaces``)."""
+    class_defs = lang.get("class_def_nodes")
     for child in node.children:
         t = child.type
-        if t == lang.get("class_def"):
+        is_class_def = (t in class_defs) if class_defs else (t == lang.get("class_def"))
+        if is_class_def:
             cls_name_node = child.child_by_field_name("name")
             if cls_name_node is None:
                 continue
             cls_qname = qname.join(module_qname, cls_name_node.text.decode("utf-8"))
-            # extends
-            for field in ("class_extends", "class_implements"):
-                ext = lang.get(field)
-                if not ext:
-                    continue
-                rel = "extends" if field == "class_extends" else "implements"
-                clause = child.child_by_field_name(ext)
+            if lang.get("inherit_fields"):
+                pairs = lang["inherit_fields"].get(t, ())
+            else:
+                pairs = []
+                for field_key, rel in (("class_extends", "extends"),
+                                       ("class_implements", "implements")):
+                    field_name = lang.get(field_key)
+                    if field_name:
+                        pairs.append((field_name, rel))
+            for field_name, rel in pairs:
+                clause = _inherit_clause(child, field_name)
                 if clause is None:
                     continue
-                for base in clause.children:
-                    if base.type in ("identifier", "type_identifier",
-                                     "property_identifier", "attribute",
-                                     "member_expression"):
+                for base in _inherit_bases(clause):
+                    if base.type in _INHERIT_BASE_TYPES:
                         out.append(RawInherit(
                             class_qname=cls_qname,
                             base_expr=base.text.decode("utf-8"),
@@ -582,7 +617,40 @@ def _extract_imports(root, module_qname, lang, lang_name: str,
                      file_path: str) -> list[ImportEntry]:
     if lang_name == "python":
         return _extract_imports_python(root, module_qname, lang, file_path)
+    if lang_name == "java":
+        return _extract_imports_java(root, lang)
     return _extract_imports_esm(root, lang)
+
+
+def _extract_imports_java(root, lang) -> list[ImportEntry]:
+    """Extract Java imports: regular, wildcard, and static forms.
+
+      import a.b.C;          -> local C  from module a.b (imported_name=C)
+      import a.b.*;          -> star import of module a.b
+      import static a.b.C.m; -> local m from class a.b::C (imported_name=m)
+    """
+    entries: list[ImportEntry] = []
+    for node in root.children:
+        if node.type not in lang["import_nodes"]:
+            continue
+        # import_declaration exposes the name as a direct scoped_identifier
+        # child (no 'name' field in this grammar).
+        scoped = _find_child(node, "scoped_identifier")
+        if scoped is None:
+            continue
+        full = scoped.text.decode("utf-8")
+        child_types = {ch.type for ch in node.children}
+        if "static" in child_types:
+            module, _, member = full.rpartition(".")
+            pkg, _, cls = module.rpartition(".")
+            class_qn = f"{pkg}::{cls}" if cls else module
+            entries.append(ImportEntry(member, class_qn, member, False))
+        elif "asterisk" in child_types:
+            entries.append(ImportEntry("*", full, None, True))
+        else:
+            pkg, _, cls = full.rpartition(".")
+            entries.append(ImportEntry(cls, pkg, cls, False))
+    return entries
 
 
 def _extract_imports_python(root, module_qname, lang,

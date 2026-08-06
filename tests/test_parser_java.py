@@ -64,3 +64,38 @@ def test_module_fallback_path_when_no_package(tmp_path):
     src.write_text("class App {}\n", encoding="utf-8")
     pf = parse_file(str(src), str(tmp_path))
     assert pf.module_qname == "App"
+
+
+def test_extract_imports_regular_wildcard_static(tmp_path):
+    src = tmp_path / "S.java"
+    src.write_text(
+        "package a.b;\n"
+        "import com.foo.UserService;\n"
+        "import java.util.*;\n"
+        "import static com.foo.util.Util.compute;\n"
+        "class S { void m() { compute(); } }\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(src), str(tmp_path))
+    imp = {i.local_name: i for i in pf.imports}
+    assert imp["UserService"].module == "com.foo"
+    assert imp["UserService"].imported_name == "UserService"
+    assert imp["*"].module == "java.util"
+    assert imp["*"].is_star is True
+    static = imp["compute"]
+    assert static.module == "com.foo.util::Util"  # 静态 import:module 是类 qname
+    assert static.imported_name == "compute"
+
+
+def test_extract_inherits_extends_implements():
+    pf = _parse("com/foo/UserService.java")
+    ih = {(i.relation, i.base_expr) for i in pf.inherits}
+    assert ("extends", "BaseService") in ih
+    assert ("implements", "Auth") in ih
+
+
+def test_extract_inherits_interface_extends_type_list():
+    # interface extends 走 extends_interfaces 字段(包着 type_list)——验证下钻
+    pf = _parse("com/foo/Auth.java")
+    ih = {(i.relation, i.base_expr) for i in pf.inherits}
+    assert ("extends", "Marker") in ih
