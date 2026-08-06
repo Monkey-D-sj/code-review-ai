@@ -146,9 +146,9 @@ def test_find_dead_code_tool(tmp_path):
     assert "find_dead_code" in tools
     data = json.loads(tools["find_dead_code"].fn())
     assert set(data) == {"symbols", "files", "meta"}
-    qnames = {s["qname"] for s in data["symbols"]}
+    qnames = {symbol["qname"] for symbol in data["symbols"]}
     assert Q("util", "hash_pw") in qnames
     assert Q("app", "main") not in qnames
-    assert any(f["qname"] == "util" for f in data["files"])
+    assert any(file_entry["qname"] == "util" for file_entry in data["files"])
     assert data["meta"]["symbol_count"] == len(data["symbols"])
     assert data["meta"]["file_count"] == len(data["files"])

@@ -139,8 +139,8 @@ def test_cli_dead_code_json(tmp_path, capsys):
     assert code == 0
     data = json.loads(capsys.readouterr().out)
     assert set(data) == {"symbols", "files", "meta"}
-    assert any(s["qname"] == Q("util", "hash_pw") for s in data["symbols"])
-    assert not any(s["qname"] == Q("app", "main") for s in data["symbols"])
+    assert any(symbol["qname"] == Q("util", "hash_pw") for symbol in data["symbols"])
+    assert not any(symbol["qname"] == Q("app", "main") for symbol in data["symbols"])
 
 
 def test_cli_dead_code_text(tmp_path, capsys):
