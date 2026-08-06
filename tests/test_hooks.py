@@ -81,8 +81,18 @@ def test_install_hooks_review_captures_debug_log(tmp_path):
     written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
     content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
     assert "--output-format stream-json --verbose" in content
+    assert "--allowedTools" in content
+    assert 'mcp__code-review-ai__*' in content
     assert "extract-review" in content
     assert ".debug.log" in content
+
+
+def test_install_hooks_review_prompt_orders_change_summary_first(tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
+    content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
+    assert content.index("get_change_summary") < content.index("get_impact")
 
 
 def test_install_hooks_review_archives_by_date(tmp_path):

@@ -28,8 +28,12 @@ HOOK_NAMES = ("post-commit", "post-merge", "post-checkout", "post-rewrite")
 
 _SOURCE_SUFFIX_RE = re.compile(r"\.(py|ts|tsx|js|mjs|cjs|jsx|vue)$", re.IGNORECASE)
 _REVIEW_PROMPT = (
-    "对以下代码变更影响做代码评审：按 error / warning / info 三级输出发现，"
-    "每条给出文件、行号、问题描述与具体失败场景，用中文回答。"
+    "对以下代码变更影响做代码评审。输入是 code-review-ai 生成的变更摘要 JSON。"
+    "请按顺序使用 code-review-ai 的 MCP 工具：先用 get_change_summary 确认变更明细，"
+    "再用 get_impact 查上游调用方 / 下游被调方 / 受影响业务入口，"
+    "search_symbol / query_graph 按需补充；不要用 git diff / grep 自己重算；"
+    "再按语言用 code-review 系列 skill 评审，只在必要时用 Read 确认文件细节。"
+    "按 error / warning / info 三级输出发现，每条给出文件、行号、问题描述与具体失败场景，用中文回答。"
 )
 # Per-platform review LLM invocation: (launch command, args, answer mode).
 # Answer mode "extract" parses the final answer out of a stream-json debug log
@@ -38,9 +42,18 @@ _REVIEW_PROMPT = (
 # --output-format stream-json (which --verbose is required alongside in --print
 # mode); codex exec prints the answer on stdout and already streams activity to
 # stderr, so it needs no extraction.
+# --allowedTools pre-authorizes the review's tools so a headless `claude -p`
+# run can use them without an interactive permission prompt (MCP tools prompt by
+# default and fail in non-interactive hooks); codex needs --full-auto to proceed
+# without approvals.
 _PLATFORM_REVIEW: dict[str, tuple[str, str, str]] = {
-    "claude-code": ("claude -p", "--output-format stream-json --verbose", "extract"),
-    "codex": ("codex exec", "", "stdout"),
+    "claude-code": (
+        "claude -p",
+        '--output-format stream-json --verbose '
+        '--allowedTools Bash Read Grep Glob "mcp__code-review-ai__*" "mcp__codegraph__*"',
+        "extract",
+    ),
+    "codex": ("codex exec", "--full-auto", "stdout"),
 }
 
 
