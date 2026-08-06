@@ -74,6 +74,13 @@ def build_route_edges(parsed_files, existing_qnames) -> list[Edge]
 - 夹具:新增小 controller + 测试的 Java 文件,断言 route 边存在且进 flow。
 - **验收**:重跑 `scripts/run_swebench_suite.py --cases benchmarks/spring-petclinic-history-10.json` ,对比 `macro_test_file_recall_all`(基线 0.2333)与 per-case `patch_file_recall_all`。
 
+## 实现备注(与设计文档的偏离)
+
+- **Java 注解嵌在 `modifiers` 子节点里**,不是 def 的直接子节点也不是兄弟节点;decorator 提取(`_annotation_children`)需在 `lang.get("annotations_in_modifiers")` 时下钻 `modifiers`。`decorator_node` 由单值改为集合(`{"marker_annotation", "annotation"}`),`_decorator_types` 兼容旧单值配置。
+- **`_decorator_name` 增加 `type_identifier` 匹配**(Java 注解名可能用 type_identifier)。
+- **基准结果**:Test Recall@All 23.33% → **58.33%**(4 个零命中变非零,3 个到 100%)。详见 `benchmarks/SPRING_PETCLINIC_RECALL_ANALYSIS.md`「改进后结果」。
+- `benchmark-results/` 被 .gitignore 忽略(生成物),只提交分析文档。
+
 ## 非目标(本次不做)
 
 - Java 类型绑定(字段/参数/局部变量声明类型推断)——P1,后续单独做。
