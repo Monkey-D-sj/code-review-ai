@@ -305,4 +305,6 @@ def resolve_edges(parsed: list[ParsedFile],
     edges.extend(_build_contains(parsed, existing_qnames))
     edges.extend(_build_imports(parsed, existing_qnames))
     edges.extend(_build_inherits(parsed, existing_qnames))
+    from code_review_ai.java_routing import build_route_edges
+    edges.extend(build_route_edges(parsed, existing_qnames))
     return edges
