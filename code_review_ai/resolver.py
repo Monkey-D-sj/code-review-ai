@@ -2,7 +2,8 @@ from code_review_ai import qname
 
 from dataclasses import dataclass
 
-from code_review_ai.parser import ParsedFile, RawCall, CALL_SIMPLE, CALL_ATTRIBUTE
+from code_review_ai.parser import (ParsedFile, RawCall, CALL_SIMPLE,
+                                   CALL_ATTRIBUTE, CALL_CONSTRUCT)
 
 
 @dataclass
@@ -22,16 +23,14 @@ class Edge:
 
 
 def _module_symbols(parsed_files: list[ParsedFile]) -> dict:
-    """module_qname -> {local_name: qualified_name} for functions/classes."""
+    """module_qname -> {local_name: qualified_name}, merged across files that
+    share a module (Java classes in the same package)."""
     out: dict[str, dict[str, str]] = {}
     for pf in parsed_files:
-        syms: dict[str, str] = {}
+        syms = out.setdefault(pf.module_qname, {})
         for n in pf.nodes:
             if n.kind in ("function", "class"):
-                short = qname.short(n.qualified_name)
-
-                syms[short] = n.qualified_name
-        out[pf.module_qname] = syms
+                syms[qname.short(n.qualified_name)] = n.qualified_name
     return out
 
 
@@ -53,7 +52,8 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str]) -> 
         local = mod_syms.get(pf.module_qname, {})
         imports = _import_map(pf)
         for c in pf.raw_calls:
-            edge = _resolve_one(c, local, imports, existing_qnames, all_import_maps)
+            edge = _resolve_one(c, local, imports, existing_qnames, all_import_maps,
+                                mod_syms=mod_syms, source_module=pf.module_qname)
             edges.append(edge)
             if edge.resolution == "resolved" and edge.target in class_qnames:
                 init_qn = qname.join(qname.module(edge.target), "__init__", edge.target)
@@ -65,9 +65,13 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str]) -> 
 
 
 def _resolve_one(c: RawCall, local: dict, imports: dict,
-                 existing: set[str], all_import_maps: dict) -> Edge:
+                 existing: set[str], all_import_maps: dict,
+                 mod_syms: dict | None = None,
+                 source_module: str | None = None) -> Edge:
     base = Edge(source=c.source_qname, target=c.target_expr, kind="call",
                 file_path=c.file_path, call_line=c.call_line, resolution="unresolved")
+    if c.language == "java":
+        return _resolve_java(c, local, imports, existing, mod_syms, source_module, base)
     if c.call_form == CALL_SIMPLE:
         name = c.target_expr
         if name in local:
@@ -126,6 +130,115 @@ def _resolved(base: Edge, target: str, existing: set[str]) -> Edge:
     return base
 
 
+# ── Java call resolution ──────────────────────────────────────────────
+
+
+def _join_target(mod: str, name: str) -> str:
+    """Join a module/class prefix with a member into a qualified name.
+
+    When mod already contains '::' (a class qname — e.g. a Java static-import
+    target), append with SCOPE_SEP; otherwise the standard module::name form."""
+    if "::" in mod:
+        return f"{mod}.{name}"
+    return qname.join(mod, name)
+
+
+def _enclosing_class(qualified_name: str) -> str | None:
+    """The first scope of a qname (the class containing a method), or None."""
+    mod = qname.module(qualified_name)
+    rest = qualified_name[len(mod) + len(qname.MODULE_SEP):]
+    if not rest:
+        return None
+    first_scope = rest.split(qname.SCOPE_SEP, 1)[0]
+    return qname.join(mod, first_scope)
+
+
+def _resolve_java_dotted(expr: str, mod_syms: dict, existing: set[str]) -> str | None:
+    """Resolve a dotted call by longest module prefix (FQCN / same-package).
+
+    e.g. com.foo.Bar.create() or Bar.create() where Bar is in a known module.
+    """
+    parts = expr.split(".")
+    for i in range(len(parts) - 1, 0, -1):
+        mod = ".".join(parts[:i])
+        syms = mod_syms.get(mod)
+        if not syms:
+            continue
+        head = parts[i]
+        if head not in syms:
+            continue
+        class_qn = syms[head]
+        member = ".".join(parts[i + 1:])
+        if member:
+            target = _join_target(class_qn, member)
+            if target in existing:
+                return target
+        elif class_qn in existing:
+            return class_qn
+    return None
+
+
+def _resolve_java(c, local: dict, imports: dict, existing: set[str],
+                  mod_syms: dict | None, source_module: str | None,
+                  base: Edge) -> Edge:
+    """Java-aware call resolution: simple / attribute / construct forms."""
+    if c.call_form == CALL_SIMPLE:
+        name = c.target_expr
+        if name in local:
+            return _resolved(base, local[name], existing)
+        if name in imports:
+            mod, imported, _star = imports[name]
+            if imported:
+                return _resolved(base, _join_target(mod, imported), existing)
+            return _resolved(base, mod, existing)
+        if mod_syms and source_module:
+            same_pkg = mod_syms.get(source_module, {})
+            if name in same_pkg:
+                return _resolved(base, same_pkg[name], existing)
+        enclosing = _enclosing_class(c.source_qname)
+        if enclosing:
+            target = _join_target(enclosing, name)
+            if target in existing:
+                return _resolved(base, target, existing)
+        return base
+    if c.call_form == CALL_ATTRIBUTE:
+        head, sep, rest = c.target_expr.partition(".")
+        if not sep:
+            base.resolution = "dynamic"
+            return base
+        if head in imports:
+            mod, imported, _star = imports[head]
+            if imported:
+                class_qn = _join_target(mod, imported)
+                return _resolved(base, _join_target(class_qn, rest), existing)
+            return _resolved(base, _join_target(mod, rest), existing)
+        if head in local and local[head] in existing:
+            return _resolved(base, _join_target(local[head], rest), existing)
+        if mod_syms:
+            target = _resolve_java_dotted(c.target_expr, mod_syms, existing)
+            if target:
+                return _resolved(base, target, existing)
+        base.resolution = "dynamic"
+        return base
+    if c.call_form == CALL_CONSTRUCT:
+        name = c.target_expr
+        candidates: list[str] = []
+        if name in local:
+            candidates.append(local[name])
+        if name in imports:
+            mod, imported, _star = imports[name]
+            candidates.append(_join_target(mod, imported) if imported else mod)
+        if mod_syms and source_module:
+            same_pkg = mod_syms.get(source_module, {})
+            if name in same_pkg:
+                candidates.append(same_pkg[name])
+        for candidate in candidates:
+            if candidate in existing:
+                return _resolved(base, candidate, existing)
+        return base
+    return base  # CALL_OTHER -> unresolved
+
+
 # ── edge generators: structural relationships ─────────────────────────
 
 
@@ -148,7 +261,9 @@ def _build_imports(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
     edges: list[Edge] = []
     for pf in parsed:
         for imp in pf.imports:
-            if imp.is_star:
+            # Java static imports reference a class member (module is a class
+            # qname, not a module) — not an import edge.
+            if imp.is_star or "::" in imp.module:
                 continue
             tgt = imp.module
             edges.append(Edge(
