@@ -1,20 +1,23 @@
 
 import fnmatch
+import os
 import re
 import subprocess
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from code_review_ai.qname import join as qn_join
+from code_review_ai import qname
 
 import tree_sitter_python as tspython
 import tree_sitter_typescript as tstypescript
+import tree_sitter_java as tsjava
 from tree_sitter import Language, Parser
 
 PY_LANGUAGE = Language(tspython.language())
 TS_LANGUAGE = Language(tstypescript.language_typescript())
 TSX_LANGUAGE = Language(tstypescript.language_tsx())
+JAVA_LANGUAGE = Language(tsjava.language())
 _TLS = threading.local()
 
 
@@ -48,7 +51,7 @@ LANG = {
             "class_definition",
             "function_definition",
         },
-        "call_node": "call",
+        "call_node": {"call"},
         "import_nodes": {
             "import_statement",
             "import_from_statement",
@@ -65,7 +68,7 @@ LANG = {
         "scope_nodes": {
             "function_declaration", "class_declaration", "method_definition",
         },
-        "call_node": "call_expression",
+        "call_node": {"call_expression"},
         "import_nodes": {
             "import_statement",
             "export_statement",
@@ -84,7 +87,7 @@ LANG = {
         "scope_nodes": {
             "function_declaration", "class_declaration", "method_definition",
         },
-        "call_node": "call_expression",
+        "call_node": {"call_expression"},
         "import_nodes": {
             "import_statement",
             "export_statement",
@@ -93,6 +96,36 @@ LANG = {
         "class_def": "class_declaration",
         "class_extends": "extends_clause",
         "class_implements": "implements_clause",
+    },
+    "java": {
+        "def_nodes": {
+            "class_declaration": "class",
+            "interface_declaration": "class",
+            "enum_declaration": "class",
+            "record_declaration": "class",
+            "method_declaration": "method",
+            "constructor_declaration": "method",
+        },
+        "scope_nodes": {
+            "class_declaration", "interface_declaration", "enum_declaration",
+            "record_declaration", "method_declaration", "constructor_declaration",
+        },
+        "call_node": {"method_invocation", "object_creation_expression"},
+        "constructor_node": "object_creation_expression",
+        "constructor_type_field": "type",
+        "call_name_field": "name",
+        "call_object_field": "object",
+        "import_nodes": {"import_declaration"},
+        "class_def_nodes": {
+            "class_declaration", "interface_declaration",
+            "enum_declaration", "record_declaration",
+        },
+        "inherit_fields": {
+            "class_declaration": [("superclass", "extends"), ("super_interfaces", "implements")],
+            "interface_declaration": [("extends_interfaces", "extends")],
+            "enum_declaration": [("super_interfaces", "implements")],
+            "record_declaration": [("super_interfaces", "implements")],
+        },
     },
 }
 
@@ -106,6 +139,7 @@ _EXT_MAP: dict[str, tuple[str, dict, Language]] = {
     ".cjs": ("javascript", LANG["javascript"], TS_LANGUAGE),
     ".jsx": ("javascript", LANG["javascript"], TSX_LANGUAGE),
     ".vue": ("typescript", LANG["typescript"], TS_LANGUAGE),
+    ".java": ("java", LANG["java"], JAVA_LANGUAGE),
 }
 
 # Public — derived from _EXT_MAP, single source of truth for file matching.
@@ -125,6 +159,7 @@ def _lang_for_path(file_path: str) -> tuple[str, dict, Language]:
 CALL_SIMPLE    = "simple"     # bare name:  login()
 CALL_ATTRIBUTE = "attribute"  # dotted:     a.login()
 CALL_OTHER     = "other"      # subscript, call-chain, etc.: vals[0]()  f()()
+CALL_CONSTRUCT = "construct"  # new Foo()
 
 # ── helpers ──────────────────────────────────────────────────────────
 
@@ -157,6 +192,7 @@ class RawCall:
     call_form: str
     file_path: str
     call_line: int
+    language: str = "python"
 
 
 @dataclass
@@ -231,11 +267,79 @@ def filter_excluded(files: list[str], patterns: list[str]) -> list[str]:
     return keep
 
 
+def is_test_node(file_path: str, qualified_name: str,
+                 test_globs: list[str], test_names: list[str],
+                 repo_root: str = "") -> bool:
+    """True if a node lives in a test file or has a test-style short name.
+
+    File-path globs (``test_globs``) are matched against the **repo-relative**
+    path with forward slashes (the same form ``git ls-files`` /
+    ``filter_excluded`` use), not the absolute path - otherwise a repo living
+    under ``.../test-platform/`` or a pytest tmp dir named ``test_impact_*``
+    would tag every node as a test. A leading ``*/`` matches any leading
+    directory chain; the ``*/``-stripped pattern is also matched against the
+    path and the bare filename so ``*/test*`` catches a top-level
+    ``test_auth.py``. Name globs (``test_names``) match the node's short name
+    (e.g. ``test_*`` -> ``test_login``). Either match wins.
+    """
+    rel = _repo_relative_path(file_path, repo_root)
+    if _matches_test_globs(rel, test_globs):
+        return True
+    short = qname.short(qualified_name)
+    return any(fnmatch.fnmatch(short, pat) for pat in test_names)
+
+
+def _repo_relative_path(file_path: str, repo_root: str) -> str:
+    """Repo-relative path with forward slashes. Empty ``repo_root`` treats
+    ``file_path`` as already relative (used by unit tests)."""
+    rel = os.path.relpath(file_path, repo_root) if repo_root else file_path
+    return rel.replace("\\", "/")
+
+
+def _matches_test_globs(rel_path: str, test_globs: list[str]) -> bool:
+    basename = Path(rel_path).name
+    for raw in test_globs:
+        pat = raw.lstrip("*/")
+        if (fnmatch.fnmatch(rel_path, raw) or fnmatch.fnmatch(rel_path, pat)
+                or fnmatch.fnmatch(basename, pat)):
+            return True
+    return False
+
+
 def _module_qname(file_path: str, repo_root: str) -> str:
     rel = Path(file_path).resolve().relative_to(Path(repo_root).resolve())
     parts = list(rel.with_suffix("").parts)
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
+    if parts and parts[0] == "src":
+        parts = parts[1:]
+    return ".".join(parts)
+
+
+def _java_module_qname(tree, file_path: str, repo_root: str) -> str:
+    """Java module qname: the package declaration when present, else path-derived.
+
+    A Java package matches how imports reference classes (`import a.b.C` binds
+    local C to class a.b::C), so the package is the module in the qname model.
+    """
+    root = tree.root_node
+    for child in root.children:
+        if child.type == "package_declaration":
+            # package_declaration exposes the package name as a direct
+            # scoped_identifier child (no 'name' field in this grammar).
+            pkg_node = _find_child(child, "scoped_identifier")
+            if pkg_node is not None:
+                return pkg_node.text.decode("utf-8")
+    return _java_path_module(file_path, repo_root)
+
+
+def _java_path_module(file_path: str, repo_root: str) -> str:
+    """Path-derived module for a Java file with no package declaration."""
+    rel = Path(file_path).resolve().relative_to(Path(repo_root).resolve())
+    parts = list(rel.with_suffix("").parts)
+    for marker in (("src", "main", "java"), ("src", "test", "java")):
+        if parts[:len(marker)] == list(marker):
+            return ".".join(parts[len(marker):])
     if parts and parts[0] == "src":
         parts = parts[1:]
     return ".".join(parts)
@@ -260,7 +364,7 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
             if name_node is None:
                 continue  # anonymous function/class — skip
             name = name_node.text.decode("utf-8")
-            qn = qn_join(module_qname, name, scope_qname)
+            qn = qname.join(module_qname, name, scope_qname)
             kind = lang["def_nodes"][t]
             if kind == "function" and parent_kind == "class":
                 kind = "method"
@@ -289,7 +393,7 @@ def _maybe_arrow_def(node, source, module_qname, scope_qname, parent_kind, lang,
     if name_node is None:
         return
     name = name_node.text.decode("utf-8")
-    qn = qn_join(module_qname, name, scope_qname)
+    qn = qname.join(module_qname, name, scope_qname)
     kind = "method" if parent_kind == "class" else "function"
     output.append(ParsedNode(
         qualified_name=qn, kind=kind, file_path="",
@@ -307,7 +411,7 @@ def _walk_inherits(node, module_qname, lang, out: list):
             cls_name_node = child.child_by_field_name("name")
             if cls_name_node is None:
                 continue
-            cls_qname = qn_join(module_qname, cls_name_node.text.decode("utf-8"))
+            cls_qname = qname.join(module_qname, cls_name_node.text.decode("utf-8"))
             # extends
             for field in ("class_extends", "class_implements"):
                 ext = lang.get(field)
@@ -335,7 +439,6 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     else:
         lang_name = "python"
         ts_lang = PY_LANGUAGE
-    module_qname = _module_qname(file_path, repo_root)
     source = Path(file_path).read_bytes()
     line_offset = 0
     original_line_count = 0
@@ -344,6 +447,10 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
         source, line_offset = _extract_vue_script(source)
     tree = _parser(ts_lang).parse(source)
     root = tree.root_node
+    if lang_name == "java":
+        module_qname = _java_module_qname(tree, file_path, repo_root)
+    else:
+        module_qname = _module_qname(file_path, repo_root)
 
     pf = ParsedFile(file_path=file_path, module_qname=module_qname, language=lang_name)
     # 当前文件 module — use original file range for .vue
@@ -381,6 +488,7 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
             n.end_line += line_offset
     for c in pf.raw_calls:
         c.file_path = file_path
+        c.language = lang_name
         if line_offset:
             c.call_line += line_offset
 
@@ -404,12 +512,35 @@ def _call_target(func_node) -> tuple[str, str]:
     return func_node.text.decode("utf-8"), CALL_OTHER
 
 
+def _call_target_for(node, lang) -> tuple[str | None, str | None]:
+    """Language-aware call-target extraction.
+
+    Returns (target_expr, call_form); (None, None) when no usable target.
+    Java's method_invocation splits receiver/name into separate fields; its
+    object_creation_expression ('new Foo()') carries the type in a 'type' field.
+    """
+    if lang.get("constructor_node") and node.type == lang["constructor_node"]:
+        ctor = node.child_by_field_name(lang.get("constructor_type_field", "type"))
+        if ctor is None:
+            return None, None
+        return ctor.text.decode("utf-8"), CALL_CONSTRUCT
+    name_field = lang.get("call_name_field", "function")
+    func = node.child_by_field_name(name_field)
+    if func is None:
+        return None, None
+    obj_field = lang.get("call_object_field")
+    if obj_field:
+        obj = node.child_by_field_name(obj_field)
+        if obj is not None:
+            return f"{obj.text.decode('utf-8')}.{func.text.decode('utf-8')}", CALL_ATTRIBUTE
+    return _call_target(func)
+
+
 def _walk_calls(node, module_qname, cur_scope, lang, out):
     for child in node.children:
-        if child.type == lang["call_node"]:
-            func = child.child_by_field_name("function")
-            if func is not None:
-                expr, form = _call_target(func)
+        if child.type in lang["call_node"]:
+            expr, form = _call_target_for(child, lang)
+            if expr is not None:
                 out.append(RawCall(
                     source_qname=cur_scope or module_qname,
                     target_expr=expr, call_form=form,
@@ -419,7 +550,7 @@ def _walk_calls(node, module_qname, cur_scope, lang, out):
             name_node = child.child_by_field_name("name")
             if name_node is not None:
                 name = name_node.text.decode("utf-8")
-                new_scope = qn_join(module_qname, name, cur_scope)
+                new_scope = qname.join(module_qname, name, cur_scope)
                 _walk_calls(child, module_qname, new_scope, lang, out)
             else:
                 _walk_calls(child, module_qname, cur_scope, lang, out)
@@ -437,7 +568,7 @@ def _maybe_arrow_scope(node, module_qname, cur_scope, lang, out):
         name_node = node.child_by_field_name("name")
         if name_node is not None:
             name = name_node.text.decode("utf-8")
-            new_scope = qn_join(module_qname, name, cur_scope)
+            new_scope = qname.join(module_qname, name, cur_scope)
             _walk_calls(node, module_qname, new_scope, lang, out)
             return
     _walk_calls(node, module_qname, cur_scope, lang, out)
