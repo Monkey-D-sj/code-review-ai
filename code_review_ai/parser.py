@@ -633,7 +633,8 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     # handle nodes
     _walk_defs_typed(root, source, module_qname, None, None, lang, pf.nodes)
     # handle edges
-    _walk_calls(root, module_qname, None, lang, pf.raw_calls)
+    mockmvc_requests: list[tuple[str, tuple[str, str]]] = []
+    _walk_calls(root, module_qname, None, lang, pf.raw_calls, mockmvc_requests)
     pf.imports = _extract_imports(root, module_qname, lang, lang_name, file_path)
     # handle inheritance
     _walk_inherits(root, module_qname, lang, pf.inherits)
@@ -660,6 +661,14 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
         c.language = lang_name
         if line_offset:
             c.call_line += line_offset
+
+    # Attach captured MockMvc requests to the methods that made them
+    mockmvc_map: dict[str, list[tuple[str, str]]] = {}
+    for scope_qname, request in mockmvc_requests:
+        mockmvc_map.setdefault(scope_qname, []).append(request)
+    for n in pf.nodes:
+        if n.qualified_name in mockmvc_map:
+            n.mockmvc_requests = mockmvc_map[n.qualified_name]
 
     return pf
 
@@ -705,7 +714,53 @@ def _call_target_for(node, lang) -> tuple[str | None, str | None]:
     return _call_target(func)
 
 
-def _walk_calls(node, module_qname, cur_scope, lang, out):
+_MOCKMVC_BUILDERS = {"get", "post", "put", "delete", "patch", "head", "options"}
+
+
+def _mockmvc_request(node, lang) -> tuple[str, str] | None:
+    """From a mockMvc.perform(...) method_invocation, return (HTTP_METHOD, path)
+    or None when the call isn't a MockMvc request."""
+    obj = node.child_by_field_name(lang.get("call_object_field", "object"))
+    if obj is None or obj.text.decode("utf-8") != "mockMvc":
+        return None
+    name_node = node.child_by_field_name(lang.get("call_name_field", "name"))
+    if name_node is None or name_node.text.decode("utf-8") != "perform":
+        return None
+    args = node.child_by_field_name("arguments")
+    builder = _find_builder_call(args) if args is not None else None
+    if builder is None:
+        return None
+    builder_name = builder.child_by_field_name("name").text.decode("utf-8")
+    path = _first_string_literal(builder)
+    if path is None:
+        return None
+    return builder_name.upper(), path
+
+
+def _find_builder_call(node) -> object | None:
+    """First method_invocation in the subtree whose name is a MockMvc request
+    builder (the root of a get/post/... chain, possibly wrapped in .param())."""
+    if node is None:
+        return None
+    if node.type == "method_invocation":
+        name_node = node.child_by_field_name("name")
+        if name_node is not None and name_node.text.decode("utf-8") in _MOCKMVC_BUILDERS:
+            return node
+    for child in node.children:
+        found = _find_builder_call(child)
+        if found is not None:
+            return found
+    return None
+
+
+def _first_string_literal(node) -> str | None:
+    for literal in _collect_by_type(node, "string_literal"):
+        return literal.text.decode("utf-8").strip("\"'")
+    return None
+
+
+def _walk_calls(node, module_qname, cur_scope, lang, out,
+                mockmvc_requests: list | None = None):
     for child in node.children:
         if child.type in lang["call_node"]:
             expr, form = _call_target_for(child, lang)
@@ -715,21 +770,26 @@ def _walk_calls(node, module_qname, cur_scope, lang, out):
                     target_expr=expr, call_form=form,
                     file_path="", call_line=child.start_point[0] + 1,
                 ))
+            if mockmvc_requests is not None and lang.get("mockmvc_capture"):
+                request = _mockmvc_request(child, lang)
+                if request is not None:
+                    mockmvc_requests.append((cur_scope or module_qname, request))
         if _is_scope(child.type, lang):
             name_node = child.child_by_field_name("name")
             if name_node is not None:
                 name = name_node.text.decode("utf-8")
                 new_scope = qname.join(module_qname, name, cur_scope)
-                _walk_calls(child, module_qname, new_scope, lang, out)
+                _walk_calls(child, module_qname, new_scope, lang, out, mockmvc_requests)
             else:
-                _walk_calls(child, module_qname, cur_scope, lang, out)
+                _walk_calls(child, module_qname, cur_scope, lang, out, mockmvc_requests)
         elif lang.get("detect_arrow_in_vars") and child.type == "variable_declarator":
-            _maybe_arrow_scope(child, module_qname, cur_scope, lang, out)
+            _maybe_arrow_scope(child, module_qname, cur_scope, lang, out, mockmvc_requests)
         else:
-            _walk_calls(child, module_qname, cur_scope, lang, out)
+            _walk_calls(child, module_qname, cur_scope, lang, out, mockmvc_requests)
 
 
-def _maybe_arrow_scope(node, module_qname, cur_scope, lang, out):
+def _maybe_arrow_scope(node, module_qname, cur_scope, lang, out,
+                       mockmvc_requests: list | None = None):
     """If a variable_declarator's value is an arrow/function expression, open a
     new scope for nested calls."""
     value = node.child_by_field_name("value")
@@ -738,9 +798,9 @@ def _maybe_arrow_scope(node, module_qname, cur_scope, lang, out):
         if name_node is not None:
             name = name_node.text.decode("utf-8")
             new_scope = qname.join(module_qname, name, cur_scope)
-            _walk_calls(node, module_qname, new_scope, lang, out)
+            _walk_calls(node, module_qname, new_scope, lang, out, mockmvc_requests)
             return
-    _walk_calls(node, module_qname, cur_scope, lang, out)
+    _walk_calls(node, module_qname, cur_scope, lang, out, mockmvc_requests)
 
 
 def _dotted(node) -> str:

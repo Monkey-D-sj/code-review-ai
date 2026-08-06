@@ -101,6 +101,27 @@ def test_extract_inherits_interface_extends_type_list():
     assert ("extends", "Marker") in ih
 
 
+def test_java_mockmvc_request_capture(tmp_path):
+    src = tmp_path / "HomeControllerTests.java"
+    src.write_text(
+        "package com.example;\n"
+        "class HomeControllerTests {\n"
+        "    void listOk() {\n"
+        "        mockMvc.perform(get(\"/owners?page=1\"));\n"
+        "    }\n"
+        "    void createOk() {\n"
+        "        mockMvc.perform(post(\"/owners/new\").param(\"x\", \"y\"));\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(src), str(tmp_path))
+    by = {n.qualified_name: n.mockmvc_requests for n in pf.nodes}
+    assert by["com.example::HomeControllerTests.listOk"] == [("GET", "/owners?page=1")]
+    # 链式 .param(...) 也能取到根请求构建器
+    assert by["com.example::HomeControllerTests.createOk"] == [("POST", "/owners/new")]
+
+
 def test_java_annotations_capture_mappings(tmp_path):
     src = tmp_path / "HomeController.java"
     src.write_text(
