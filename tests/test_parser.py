@@ -4,7 +4,7 @@ from conftest import FIXTURES as FIX, Q
 
 
 def test_is_test_node_matches_file_path_or_name():
-    globs, names = ["*/test*", "*/tests/*"], ["test_*"]
+    globs, names = ["*/tests/*", "test_*.py"], ["test_*"]
     # test files (path match) - any function inside is a test node
     assert is_test_node("tests/test_auth.py", "tests.test_auth::test_login", globs, names)
     assert is_test_node("app/test_users.py", "app.test_users::test_login", globs, names)
@@ -22,12 +22,29 @@ def test_is_test_node_ignores_test_in_absolute_repo_path():
     (e.g. /home/u/test-platform/auth.py, or a pytest tmp dir named
     test_impact_*) must NOT be tagged as a test - matching is against the
     repo-relative path, not the absolute one."""
-    globs, names = ["*/test*", "*/tests/*"], ["test_*"]
+    globs, names = ["*/tests/*", "test_*.py"], ["test_*"]
     repo = "/tmp/pytest-test_impact_x"
     assert not is_test_node(f"{repo}/a.py", "a::entry", globs, names, repo)
     # but a genuine test file under that same repo IS a test
     assert is_test_node(f"{repo}/tests/test_a.py", "tests.test_a::test_a",
                         globs, names, repo)
+
+
+def test_is_test_node_default_globs_skip_testish_prod_filenames():
+    """Default globs must not tag a production module whose filename starts
+    with "test" but lacks the underscore (e.g. testimpact.py, testhelpers.py)
+    - the dogfood failure that put testimpact.py in test_files. Only
+    test_*.py / */tests/* match."""
+    globs, names = ["*/tests/*", "test_*.py"], ["test_*"]
+    assert not is_test_node("code_review_ai/testimpact.py",
+                            "code_review_ai.testimpact::get_test_impact",
+                            globs, names)
+    assert not is_test_node("app/testhelpers.py",
+                            "app.testhelpers::helper", globs, names)
+    # genuine test files still match under the same globs
+    assert is_test_node("tests/test_impact.py",
+                        "tests.test_impact::test_x", globs, names)
+    assert is_test_node("test_auth.py", "test_auth::test_login", globs, names)
 
 
 def test_parse_extracts_nodes():

@@ -17,7 +17,7 @@ DEFAULTS = dict(
         "router.get", "router.post", "celery.task",
     ],
     exclude=["*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
-    test_globs=["*/test*", "*/tests/*"],
+    test_globs=["*/tests/*", "test_*.py"],  # not */test* — would tag prod files whose name starts with "test" (e.g. testimpact.py)
     test_names=["test_*"],
     community_detection=False,
     community_weight="plain",
