@@ -138,3 +138,17 @@ def test_query_graph_tool(tmp_path):
     assert out["qname"] == Q("auth", "login")
     assert out["edge_kind"] == "call" and out["direction"] == "both"
     assert [n["qname"] for n in out["in"]] == [Q("app", "main")]
+
+
+def test_find_dead_code_tool(tmp_path):
+    server, conn, cfg = _server(tmp_path)
+    tools = server._tool_manager._tools
+    assert "find_dead_code" in tools
+    data = json.loads(tools["find_dead_code"].fn())
+    assert set(data) == {"symbols", "files", "meta"}
+    qnames = {s["qname"] for s in data["symbols"]}
+    assert Q("util", "hash_pw") in qnames
+    assert Q("app", "main") not in qnames
+    assert any(f["qname"] == "util" for f in data["files"])
+    assert data["meta"]["symbol_count"] == len(data["symbols"])
+    assert data["meta"]["file_count"] == len(data["files"])

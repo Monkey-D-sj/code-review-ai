@@ -14,6 +14,7 @@ from code_review_ai.db import connect, init_schema
 from code_review_ai.graph import query_graph as _query_graph
 from code_review_ai.impact import get_impact as _get_impact
 from code_review_ai.testimpact import get_test_impact as _get_test_impact
+from code_review_ai.deadcode import find_dead_code as _find_dead_code
 from code_review_ai.update import sync
 
 
@@ -66,6 +67,15 @@ def create_server(config: Config):
         must I run", not "which business code breaks"."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
         return json.dumps(_get_test_impact(conn, changed))
+
+    @mcp.tool()
+    def find_dead_code() -> str:
+        """Dead-code / orphan detection: symbols with no static callers that
+        are not entry points (entry_names glob / entry_decorators decorator),
+        plus whole files nothing imports. Returns a JSON candidate list —
+        symbols + files — with a note that these are static-analysis
+        candidates, not deletion orders."""
+        return json.dumps(_find_dead_code(conn, config))
 
     @mcp.tool()
     def get_change_summary(symbols: list[str] | None = None,
