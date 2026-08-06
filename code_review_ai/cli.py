@@ -90,8 +90,13 @@ def main(argv: list[str] | None = None) -> int:
     hp.add_argument("--review", action="store_true",
                     help="also review each commit's change impact with an LLM "
                          "(post-commit hook only)")
-    hp.add_argument("--review-launch", default="claude -p",
-                    help="LLM review command (default: 'claude -p')")
+    hp.add_argument("--platform", default="claude-code",
+                    choices=["claude-code", "codex"],
+                    help="AI platform running the review LLM; sets the default "
+                         "review command (default: %(default)s)")
+    hp.add_argument("--review-launch", default=None,
+                    help="override the platform's default review command, e.g. "
+                         "'codex exec'")
     hp.add_argument("--review-out", default=None,
                     help="review report path "
                          "(default: <repo>/.code-review-ai/last-review.md)")
@@ -196,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
         from code_review_ai.hooks import install_hooks
         for path in install_hooks(cfg.repo_path, cfg.db_path, args.launch,
                                   with_review=args.review,
+                                  platform=args.platform,
                                   review_launch=args.review_launch,
                                   review_out=args.review_out,
                                   source=args.source):

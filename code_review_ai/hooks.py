@@ -31,23 +31,44 @@ _REVIEW_PROMPT = (
     "对以下代码变更影响做代码评审：按 error / warning / info 三级输出发现，"
     "每条给出文件、行号、问题描述与具体失败场景，用中文回答。"
 )
+# Per-platform review LLM invocation: (launch command, trailing flags, debug
+# flag). codex exec has no --output-format flag (plain text is the default),
+# reads stdin as prompt context, and already streams activity to stderr.
+# claude -p uses --output-format text for the answer and --verbose to dump
+# tool/skill/MCP activity to stderr — the debug log captures stderr, so one run
+# yields both the final review and the full flow.
+_PLATFORM_REVIEW: dict[str, tuple[str, str, str]] = {
+    "claude-code": ("claude -p", "--output-format text", "--verbose"),
+    "codex": ("codex exec", "", ""),
+}
 
 
 def install_hooks(repo: str, db: str, launch: str = "code-review-ai",
                   with_review: bool = False,
-                  review_launch: str = "claude -p",
+                  platform: str = "claude-code",
+                  review_launch: str | None = None,
                   review_out: str | None = None,
                   source: str = DEFAULT_SOURCE) -> list[str]:
     """Write the post-* hooks under the dir git actually reads: `core.hooksPath`
     if set, else <repo>/.git/hooks. Husky's hooksPath points at its auto-generated
     `.husky/_` shim dir, so for husky the hooks land in `.husky/` where the shims
-    source them from. Returns paths."""
+    source them from. Returns paths.
+
+    `platform` selects the review LLM's default command (`claude-code` ->
+    `claude -p --output-format text`, `codex` -> `codex exec`). An explicit
+    `review_launch` overrides the platform's command entirely."""
+    if platform not in _PLATFORM_REVIEW:
+        raise ValueError(f"unsupported review platform: {platform}")
+    review_cmd, review_tail, review_debug = _PLATFORM_REVIEW[platform]
+    if review_launch is not None:
+        review_cmd, review_tail, review_debug = review_launch, "", ""
     hooks_dir = _resolve_hooks_dir(repo)
     hooks_dir.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     for name in HOOK_NAMES:
         review = name == "post-commit" and with_review
-        script = (_review_script(repo, db, launch, review_launch, review_out, source)
+        script = (_review_script(repo, db, launch, review_cmd, review_tail,
+                                 review_debug, review_out, source)
                   if review else _sync_script(repo, db, launch, source))
         path = hooks_dir / name
         path.write_text(script, encoding="utf-8")
@@ -113,31 +134,57 @@ def _sync_script(repo: str, db: str, launch: str, source: str) -> str:
     return (
         "#!/bin/sh\n"
         "# code-review-ai: rebuild flows/communities at commit time\n"
+        "set +e\n"
         + _launcher_line(launch, source)
+        + 'echo "code-review-ai: syncing code graph index..."\n'
         + f"$LAUNCH sync --repo '{repo_abs}' --db '{db_abs}'\n"
+        + "exit 0\n"
     )
 
 
 def _review_script(repo: str, db: str, launch: str, review_launch: str,
-                   review_out: str | None, source: str) -> str:
+                   review_tail: str, review_debug: str, review_out: str | None,
+                   source: str) -> str:
     repo_abs = str(Path(repo).resolve())
     db_abs = str(Path(db).resolve()).replace("\\", "/")
     out_abs = str(Path(review_out or Path(repo_abs) / ".code-review-ai" / "last-review.md")
                   .resolve()).replace("\\", "/")
+    debug_abs = f"{out_abs}.debug.log"
     return (
         "#!/bin/sh\n"
         "# code-review-ai: rebuild index + review the commit's change impact\n"
+        "# set +e: never let errexit abort the hook; failures are logged, not fatal\n"
+        "set +e\n"
         + _launcher_line(launch, source)
-        + f"$LAUNCH sync --repo '{repo_abs}' --db '{db_abs}' >/dev/null 2>&1\n"
+        + 'echo "code-review-ai: syncing code graph index..."\n'
+        + f"if ! $LAUNCH sync --repo '{repo_abs}' --db '{db_abs}'; then\n"
+        + '  echo "code-review-ai: sync failed; skipping review (sh -x <hook> to debug)" >&2\n'
+        + "  exit 0\n"
+        + "fi\n"
         + "files=$(git diff-tree --name-only --no-commit-id HEAD -r 2>/dev/null "
         f"| grep -E '{_SOURCE_SUFFIX_RE.pattern}' || true)\n"
-        + '# root commit has no parent: nothing to diff against, skip\n'
-        + '[ -z "$files" ] && exit 0\n'
+        + 'if [ -z "$files" ]; then\n'
+        + '  echo "code-review-ai: no source files changed; skipping review"\n'
+        + "  exit 0\n"
+        + "fi\n"
+        + 'echo "code-review-ai: changed files: $files"\n'
+        + 'echo "code-review-ai: building change summary..."\n'
         + "# CRAI_DIFF_BASE=HEAD^ diffs the commit itself, so the hook works\n"
         + "# even before origin/main exists\n"
         + f"summary=$(CRAI_DIFF_BASE=HEAD^ $LAUNCH summary --repo '{repo_abs}' "
-        f"--db '{db_abs}' --files $files 2>/dev/null) || exit 0\n"
+        f"--db '{db_abs}' --files $files)\n"
+        + 'if [ -z "$summary" ]; then\n'
+        + '  echo "code-review-ai: change summary failed; skipping review" >&2\n'
+        + "  exit 0\n"
+        + "fi\n"
+        + f'echo "code-review-ai: reviewing with {review_launch}..."\n'
         + f"printf '%s' \"$summary\" | {review_launch} "
-        f"'{_REVIEW_PROMPT}' --output-format text > '{out_abs}' 2>/dev/null || exit 0\n"
-        + f"echo \"code-review-ai: review written to {out_abs}\"\n"
+        f"'{_REVIEW_PROMPT}' {review_tail} {review_debug} > '{out_abs}' 2> '{debug_abs}'\n"
+        + "review_status=$?\n"
+        + 'if [ "$review_status" -eq 0 ]; then\n'
+        + f'  echo "code-review-ai: review written to {out_abs} (debug: {debug_abs})"\n'
+        + "else\n"
+        + f'  echo "code-review-ai: review command failed; no report written (debug: {debug_abs})" >&2\n'
+        + "fi\n"
+        + "exit 0\n"
     )

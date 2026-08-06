@@ -63,6 +63,61 @@ def test_install_hooks_default_launch_falls_back_to_uvx(tmp_path):
     assert "$LAUNCH sync" in content
 
 
+def test_install_hooks_codex_platform_uses_codex_exec(tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True,
+                            platform="codex")
+    content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
+    assert "codex exec" in content
+    assert "claude -p" not in content
+    assert "--output-format text" not in content
+    assert ".debug.log" in content  # codex streams activity to stderr by default
+
+
+def test_install_hooks_review_captures_debug_log(tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
+    content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
+    assert "--verbose" in content
+    assert "2> '" in content
+    assert ".debug.log" in content
+
+
+def test_install_hooks_review_launch_overrides_platform(tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True,
+                            platform="codex", review_launch="claude -p")
+    content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
+    assert "claude -p" in content
+    assert "--output-format text" not in content  # explicit launch = full control
+
+
+def test_install_hooks_unsupported_platform_raises(tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    try:
+        install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True,
+                      platform="copilot")
+    except ValueError:
+        return
+    raise AssertionError("expected ValueError for unsupported platform")
+
+
+def test_install_hooks_review_has_progress_output(tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
+    content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
+    assert "set +e" in content
+    assert "syncing code graph index" in content
+    assert "changed files:" in content
+    assert "change summary failed" in content
+    assert "review written" in content
+
+
 def _init_git(repo):
     subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
 
