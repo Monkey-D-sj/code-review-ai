@@ -117,6 +117,9 @@ def main(argv: list[str] | None = None) -> int:
     xr = sub.add_parser("extract-review")
     xr.add_argument("debug", help="claude stream-json transcript to read")
     xr.add_argument("out", help="file to write the final answer to")
+    tr = sub.add_parser("trace-review")
+    tr.add_argument("debug", help="claude stream-json transcript to read")
+    tr.add_argument("out", help="file to write the concise tool trace to")
     ip = sub.add_parser("install")
     ip.add_argument("--platform", default="claude-code")
     ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
@@ -135,6 +138,14 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("error: no answer text found in debug log", file=sys.stderr)
         return 0 if ok else 1
+    if args.cmd == "trace-review":
+        from code_review_ai.extract import trace_review
+        count = trace_review(args.debug, args.out)
+        if count:
+            print(f"wrote tool trace ({count} calls) to {args.out}")
+        else:
+            print("error: no tool calls found in debug log", file=sys.stderr)
+        return 0 if count else 1
 
     # Config comes from the current project (cwd), matching the MCP server;
     # --repo/--db only select what gets analyzed, not where config is read.

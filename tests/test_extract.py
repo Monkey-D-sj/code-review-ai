@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from code_review_ai.extract import extract_review
+from code_review_ai.extract import extract_review, trace_review
 
 
 def test_extract_review_writes_last_result_text(tmp_path):
@@ -48,3 +48,36 @@ def test_extract_review_skips_malformed_lines(tmp_path):
                      encoding="utf-8")
     assert extract_review(str(debug), str(out))
     assert out.read_text(encoding="utf-8") == "ok\n"
+
+
+def test_trace_review_writes_concise_per_tool_trace(tmp_path):
+    debug = tmp_path / "debug.jsonl"
+    trace = tmp_path / "trace.log"
+    events = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Skill", "input": {"skill": "code-review-python"}}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "content": "reviewing 3 files"}]}},
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Read", "input": {"file_path": "src/app.py"}}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "content": "def foo():\n    pass"}]}},
+        {"type": "result", "result": "done", "is_error": False},
+    ]
+    debug.write_text("\n".join(json.dumps(event) for event in events) + "\n",
+                     encoding="utf-8")
+    assert trace_review(str(debug), str(trace)) == 2
+    content = trace.read_text(encoding="utf-8")
+    assert "tool: Skill skill=code-review-python" in content
+    assert "tool: Read file_path=src/app.py" in content
+    assert "-> reviewing 3 files" in content
+    assert "result: done" in content
+
+
+def test_trace_review_no_tools_writes_result_line(tmp_path):
+    debug = tmp_path / "debug.jsonl"
+    trace = tmp_path / "trace.log"
+    debug.write_text(json.dumps({"type": "result", "result": "ok", "is_error": False}) + "\n",
+                     encoding="utf-8")
+    assert trace_review(str(debug), str(trace)) == 0
+    assert trace.read_text(encoding="utf-8") == "result: ok\n"

@@ -190,8 +190,10 @@ def _review_script(repo: str, db: str, launch: str, review_cmd: str,
         + 'mkdir -p "$archive_dir"\n'
         + 'archive="$archive_dir/${stamp}-${short_sha}.md"\n'
         + 'debug="${archive}.debug.log"\n'
+        + 'raw="${archive}.debug.jsonl"\n'
         + review_block
         + f"  cp \"$archive\" '{out_abs}'\n"
+        + (f"  cp \"$raw\" '{out_abs}.debug.jsonl'\n" if answer_mode == "extract" else "")
         + f"  cp \"$debug\" '{out_abs}.debug.log'\n"
         + '  echo "code-review-ai: review written to $archive (debug: $debug)"\n'
         + "exit 0\n"
@@ -199,21 +201,23 @@ def _review_script(repo: str, db: str, launch: str, review_cmd: str,
 
 
 def _extract_review_block(review_cmd: str, review_args: str) -> str:
-    """claude: capture the full stream-json flow to $debug, then extract the
-    final answer into $archive via `code-review-ai extract-review`."""
+    """claude: capture the full stream-json flow to $raw, extract the final
+    answer into $archive via `code-review-ai extract-review`, and distill a
+    concise per-tool trace into $debug via `code-review-ai trace-review`."""
     return (
         f"printf '%s' \"$summary\" | {review_cmd} "
-        f"'{_REVIEW_PROMPT}' {review_args} > \"$debug\" 2>/dev/null\n"
+        f"'{_REVIEW_PROMPT}' {review_args} > \"$raw\" 2>/dev/null\n"
         + "review_status=$?\n"
         + 'if [ "$review_status" -eq 0 ]; then\n'
-        + "  $LAUNCH extract-review \"$debug\" \"$archive\"\n"
+        + "  $LAUNCH extract-review \"$raw\" \"$archive\"\n"
         + "  extract_status=$?\n"
         + '  if [ "$extract_status" -ne 0 ] || [ ! -s "$archive" ]; then\n'
-        + '    echo "code-review-ai: review produced no answer text (debug: $debug)" >&2\n'
+        + '    echo "code-review-ai: review produced no answer text (debug: $raw)" >&2\n'
         + "    exit 0\n"
         + "  fi\n"
+        + "  $LAUNCH trace-review \"$raw\" \"$debug\"\n"
         + "else\n"
-        + '  echo "code-review-ai: review command failed (debug: $debug)" >&2\n'
+        + '  echo "code-review-ai: review command failed (debug: $raw)" >&2\n'
         + "  exit 0\n"
         + "fi\n"
     )

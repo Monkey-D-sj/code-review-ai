@@ -40,3 +40,67 @@ def extract_review(debug_path: str, out_path: str) -> bool:
         return False
     Path(out_path).write_text(answer.rstrip() + "\n", encoding="utf-8")
     return True
+
+
+def trace_review(debug_path: str, trace_path: str) -> int:
+    """Write a concise one-line-per-tool trace of the flow to trace_path.
+
+    The raw stream-json transcript is huge (system/thinking blocks drown the
+    signal), so the trace keeps just one line per tool_use (skill/tool/MCP
+    name + compacted input) with the tool_result's first line beneath it, plus
+    a final `result:` line. Returns the number of tool calls traced.
+    """
+    lines: list[str] = []
+    tool_count = 0
+    with open(debug_path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event_type = event.get("type")
+            if event_type == "assistant":
+                for block in event.get("message", {}).get("content") or []:
+                    if block.get("type") == "tool_use":
+                        name = block.get("name", "?")
+                        input_text = _compact_input(block.get("input") or {})
+                        entry = f"tool: {name} {input_text}".rstrip()
+                        lines.append(entry)
+                        tool_count += 1
+            elif event_type == "user":
+                for block in event.get("message", {}).get("content") or []:
+                    if block.get("type") == "tool_result":
+                        lines.append(f"  -> {_first_line(block.get('content'))}")
+            elif event_type == "result":
+                lines.append(f"result: {_first_line(event.get('result'))}")
+    if not lines:
+        return 0
+    Path(trace_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return tool_count
+
+
+def _compact_input(data: dict) -> str:
+    parts: list[str] = []
+    for key, value in data.items():
+        text = str(value)
+        if len(text) > 60:
+            text = text[:57] + "..."
+        parts.append(f"{key}={text}")
+    return ", ".join(parts)
+
+
+def _first_line(content) -> str:
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        text = " ".join(str(block.get("text", ""))
+                        for block in content if isinstance(block, dict))
+    else:
+        text = str(content)
+    text = " ".join(text.split())
+    if len(text) > 100:
+        text = text[:97] + "..."
+    return text
