@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 from code_review_ai.hooks import HOOK_NAMES, install_hooks
 
@@ -60,3 +61,30 @@ def test_install_hooks_default_launch_falls_back_to_uvx(tmp_path):
     assert "command -v code-review-ai" in content
     assert "LAUNCH='uvx --from" in content
     assert "$LAUNCH sync" in content
+
+
+def _init_git(repo):
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+
+
+def test_install_hooks_writes_to_husky_dir(tmp_path):
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    _init_git(repo)
+    subprocess.run(["git", "-C", str(repo), "config", "core.hooksPath", ".husky/_"],
+                   check=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"))
+    assert written[0] == str(repo / ".husky" / "post-commit")
+    assert (repo / ".husky" / "post-commit").exists()
+    assert not (repo / ".git" / "hooks" / "post-commit").exists()
+
+
+def test_install_hooks_honors_custom_hooks_path(tmp_path):
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    _init_git(repo)
+    subprocess.run(["git", "-C", str(repo), "config", "core.hooksPath", "custom-hooks"],
+                   check=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"))
+    assert written[0] == str(repo / "custom-hooks" / "post-commit")
+    assert (repo / "custom-hooks" / "post-commit").exists()

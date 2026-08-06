@@ -8,6 +8,10 @@ The hook self-bootstraps: at runtime it prefers a PATH-installed `code-review-ai
 and otherwise falls back to `uvx --from <source>`, so no global install is
 required. A custom `launch` is used verbatim instead.
 
+Hooks are written to the directory git actually reads: `core.hooksPath` if set,
+else `.git/hooks`. Husky's hooksPath is its auto-generated `.husky/_` shim dir,
+so for husky the hooks go to `.husky/` (the files the shims source).
+
 With `with_review`, the post-commit hook additionally summarizes the commit's
 change impact and hands it to an LLM (``claude -p`` by default), writing the
 report to ``.code-review-ai/last-review.md``. Review runs on post-commit only,
@@ -15,6 +19,7 @@ where the changed-file set is unambiguous; the other hooks always sync only.
 """
 
 import re
+import subprocess
 from pathlib import Path
 
 from code_review_ai.installer import DEFAULT_SOURCE
@@ -33,8 +38,12 @@ def install_hooks(repo: str, db: str, launch: str = "code-review-ai",
                   review_launch: str = "claude -p",
                   review_out: str | None = None,
                   source: str = DEFAULT_SOURCE) -> list[str]:
-    """Write the post-* hooks under <repo>/.git/hooks. Returns paths."""
-    hooks_dir = _ensure_hooks_dir(repo)
+    """Write the post-* hooks under the dir git actually reads: `core.hooksPath`
+    if set, else <repo>/.git/hooks. Husky's hooksPath points at its auto-generated
+    `.husky/_` shim dir, so for husky the hooks land in `.husky/` where the shims
+    source them from. Returns paths."""
+    hooks_dir = _resolve_hooks_dir(repo)
+    hooks_dir.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     for name in HOOK_NAMES:
         review = name == "post-commit" and with_review
@@ -47,10 +56,33 @@ def install_hooks(repo: str, db: str, launch: str = "code-review-ai",
     return written
 
 
-def _ensure_hooks_dir(repo: str) -> Path:
-    hooks_dir = Path(repo) / ".git" / "hooks"
-    hooks_dir.mkdir(parents=True, exist_ok=True)
-    return hooks_dir
+def _resolve_hooks_dir(repo: str) -> Path:
+    """Where git runs hooks from. Returns the husky user-hook dir when
+    `core.hooksPath` points at `.husky/_`; otherwise the hooksPath dir itself,
+    or `.git/hooks` when hooksPath is unset."""
+    default = Path(repo) / ".git" / "hooks"
+    hooks_path = _read_hooks_path(repo)
+    if hooks_path is None:
+        return default
+    path = Path(hooks_path)
+    if not path.is_absolute():
+        path = Path(repo) / path
+    if path.name == "_" and path.parent.name == ".husky":
+        return path.parent
+    return path
+
+
+def _read_hooks_path(repo: str) -> str | None:
+    """`git config core.hooksPath` resolved relative to repo root, or None."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "config", "--path", "--get", "core.hooksPath"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
 
 
 def _make_executable(path: Path) -> None:
