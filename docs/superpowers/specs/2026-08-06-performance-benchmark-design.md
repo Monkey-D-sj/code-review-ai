@@ -44,6 +44,7 @@ roadmap item 7：为 code-review-ai 提供**可复现的性能基准**，产出�
 - 固定 exclude 默认值
 - 每仓库独立临时 DB（放 `--cache-dir` 下）
 - 报告顶部写明实际使用的配置
+- **脚本显式构造一份固定 `Config` 应用于所有仓库**（覆盖 `repo_path`/`db_path` 后复用），**不**逐仓库 `load_config`——避免缓存仓库自带的 pyproject 配置污染曲线
 
 ## `perf.py` 设计
 
@@ -122,7 +123,7 @@ roadmap item 7：为 code-review-ai 提供**可复现的性能基准**，产出�
 - `--out`（默认 `benchmark-results/perf-<日期>.json`）
 - `--report`（默认 `benchmarks/PERF.md`）
 
-仓库列表 = `.benchmark-cache/repos/*` + 当前仓库 + 合成档。
+仓库列表 = `.benchmark-cache/repos/*`（按名排序）+ 当前仓库（脚本运行所在仓库根，即 `Path(__file__).parents[1]`）+ `--repos` 追加 + 合成档。
 
 ## 测试计划（TDD，`tests/test_perf.py`）
 
