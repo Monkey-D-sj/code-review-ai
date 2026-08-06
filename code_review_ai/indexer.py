@@ -108,10 +108,12 @@ def _write_nodes(conn, parsed, config) -> dict[str, int]:
                          n.start_line, n.end_line, n.signature,
                          1 if is_test_node(n.file_path, n.qualified_name,
                                            config.test_globs, config.test_names,
-                                           config.repo_path) else 0))
+                                           config.repo_path) else 0,
+                         json.dumps(n.decorators)))
     conn.executemany(
         "INSERT INTO nodes(qualified_name,kind,language,file_path,"
-        "start_line,end_line,signature,parent_id,is_test) VALUES(?,?,?,?,?,?,?,NULL,?)",
+        "start_line,end_line,signature,parent_id,is_test,decorators) "
+        "VALUES(?,?,?,?,?,?,?,NULL,?,?)",
         rows,
     )
     qname_to_id = {r["qualified_name"]: r["id"]

@@ -1,3 +1,4 @@
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -337,3 +338,28 @@ def test_repair_new_direction_no_reparse_of_importer(tmp_path, monkeypatch):
     row = conn.execute(
         "SELECT resolution FROM edges WHERE target='auth::User'").fetchone()
     assert row is not None and row["resolution"] == "resolved"
+
+
+def test_decorators_persisted_on_full_and_incremental(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    (repo / "web.py").write_text(
+        'from flask import Flask\napp = Flask(__name__)\n\n'
+        '@app.route("/")\ndef index():\n    return "ok"\n',
+        encoding="utf-8")
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    # 全量路径（indexer._write_nodes）
+    row = conn.execute(
+        "SELECT decorators FROM nodes WHERE qualified_name='web::index'"
+    ).fetchone()
+    assert row is not None and json.loads(row["decorators"]) == ["app.route"]
+    # 增量路径（update._insert_nodes）：改文件 -> watcher hint 只 re-parse web.py
+    (repo / "web.py").write_text(
+        'from flask import Flask\napp = Flask(__name__)\n\n'
+        '@app.route("/")\n@cache\ndef index():\n    return "ok"\n',
+        encoding="utf-8")
+    upd.update_nodes_edges(cfg, conn, ["web.py"])
+    row = conn.execute(
+        "SELECT decorators FROM nodes WHERE qualified_name='web::index'"
+    ).fetchone()
+    assert json.loads(row["decorators"]) == ["app.route", "cache"]
