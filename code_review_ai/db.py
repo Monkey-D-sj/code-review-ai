@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Bumped whenever the schema or its meaning changes in a way that makes an
 # older index.db incompatible; indexers check this before rebuilding.
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (
@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     signature TEXT,
     parent_id INTEGER REFERENCES nodes(id),
     in_degree INTEGER NOT NULL DEFAULT 0,
-    out_degree INTEGER NOT NULL DEFAULT 0
+    out_degree INTEGER NOT NULL DEFAULT 0,
+    is_test INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS edges (
     id INTEGER PRIMARY KEY,
@@ -110,6 +111,8 @@ def _migrate_nodes(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE nodes ADD COLUMN in_degree INTEGER NOT NULL DEFAULT 0")
     if "out_degree" not in cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN out_degree INTEGER NOT NULL DEFAULT 0")
+    if "is_test" not in cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0")
 
 
 @contextmanager

@@ -13,6 +13,7 @@ from code_review_ai.config import Config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.graph import query_graph as _query_graph
 from code_review_ai.impact import get_impact as _get_impact
+from code_review_ai.testimpact import get_test_impact as _get_test_impact
 from code_review_ai.update import sync
 
 
@@ -52,6 +53,19 @@ def create_server(config: Config):
         grepping when assessing what a code change breaks."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
         return json.dumps(_get_impact(conn, changed))
+
+    @mcp.tool()
+    def get_test_impact(symbols: list[str] | None = None,
+                        files: list[str] | None = None) -> str:
+        """Test impact analysis: for changed symbols, the tests that reach
+        them (directly or transitively) -> "run only these tests". Pass
+        explicit `symbols` (e.g. ["auth::login"]) or `files`; if both
+        omitted, changed symbols are derived from the git diff (diff_base).
+        Returns affected tests grouped by file with the changed symbols each
+        covers. Prefer this over get_impact when the question is "which tests
+        must I run", not "which business code breaks"."""
+        changed = detect_changed_symbols(config, symbols=symbols, files=files)
+        return json.dumps(_get_test_impact(conn, changed))
 
     @mcp.tool()
     def get_change_summary(symbols: list[str] | None = None,
@@ -111,7 +125,7 @@ def create_server(config: Config):
         Useful to see the top-level business flows the index has built."""
         rows = conn.execute(
             "SELECT DISTINCT f.name, n.qualified_name, n.file_path FROM flows f "
-            "JOIN nodes n ON n.id=f.entry_point_id"
+            "JOIN nodes n ON n.id=f.entry_point_id WHERE n.is_test=0"
         ).fetchall()
         return json.dumps([{"qname": r["qualified_name"], "name": r["name"],
                             "file": r["file_path"]} for r in rows])

@@ -10,6 +10,7 @@ from code_review_ai.db import connect, init_schema
 from code_review_ai.graph import query_graph
 from code_review_ai.export_graph import export as export_graph
 from code_review_ai.impact import get_impact
+from code_review_ai.testimpact import get_test_impact
 from code_review_ai.indexer import rebuild
 from code_review_ai.installer import DEFAULT_SOURCE, install
 from code_review_ai.update import sync, update_nodes_edges
@@ -50,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
 
     _add_common(sub.add_parser("rebuild"))
     s = sub.add_parser("query")
+    _add_common(s)
+    s.add_argument("--symbols", nargs="*")
+    s.add_argument("--files", nargs="*")
+    s = sub.add_parser("test-impact")
     _add_common(s)
     s.add_argument("--symbols", nargs="*")
     s.add_argument("--files", nargs="*")
@@ -129,6 +134,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(get_impact(conn, changed)))
+    elif args.cmd == "test-impact":
+        try:
+            changed = detect_changed_symbols(cfg, symbols=args.symbols, files=args.files)
+        except RuntimeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(get_test_impact(conn, changed)))
     elif args.cmd == "summary":
         try:
             payload = build_change_summary(cfg, conn,

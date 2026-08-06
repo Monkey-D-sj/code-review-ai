@@ -103,6 +103,33 @@ def test_get_change_summary_tool(tmp_path):
     assert record["end_line"] == 7
 
 
+def test_get_test_impact_tool(tmp_path):
+    import subprocess
+    # isolated repo with a test file (FIX has none)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "prod.py").write_text(
+        "def login(user, pw):\n    return user\n", encoding="utf-8")
+    (repo / "test_prod.py").write_text(
+        "from prod import login\n\ndef test_login():\n    login('u','p')\n",
+        encoding="utf-8")
+    for cmd in (["git", "init"], ["git", "add", "-A"], ["git", "commit", "-m", "x"]):
+        subprocess.run(cmd, cwd=repo, check=True, capture_output=True)
+    cfg = load_config(str(repo))
+    cfg.db_path = str(tmp_path / "ti.db")
+    cfg.repo_path = str(repo)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    rebuild(cfg, conn)
+    server = create_server(cfg)
+    tools = server._tool_manager._tools
+    assert "get_test_impact" in tools
+    data = json.loads(tools["get_test_impact"].fn(symbols=["prod::login"]))
+    assert data["test_count"] == 1
+    assert data["affected_tests"][0]["qname"] == "test_prod::test_login"
+    assert data["affected_tests"][0]["covers"] == ["prod::login"]
+
+
 def test_query_graph_tool(tmp_path):
     server, conn, cfg = _server(tmp_path)
     tools = server._tool_manager._tools

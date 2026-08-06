@@ -42,12 +42,12 @@ def test_init_schema_migrates_legacy_nodes(tmp_path):
     conn = connect(str(db))
     init_schema(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(nodes)")}
-    assert "in_degree" in cols and "out_degree" in cols
+    assert "in_degree" in cols and "out_degree" in cols and "is_test" in cols
     # legacy row backfilled with the column default
     row = conn.execute(
-        "SELECT in_degree, out_degree FROM nodes WHERE qualified_name='mod::old'"
+        "SELECT in_degree, out_degree, is_test FROM nodes WHERE qualified_name='mod::old'"
     ).fetchone()
-    assert row["in_degree"] == 0 and row["out_degree"] == 0
+    assert row["in_degree"] == 0 and row["out_degree"] == 0 and row["is_test"] == 0
 
 
 def test_files_table_and_busy_timeout(tmp_path):
@@ -58,7 +58,7 @@ def test_files_table_and_busy_timeout(tmp_path):
         "INSERT INTO files(path,mtime,size,file_hash) VALUES('a.py', 1.0, 3, 'x')")
     row = conn.execute("SELECT * FROM files").fetchone()
     assert row["path"] == "a.py" and row["size"] == 3
-    assert INDEX_VERSION == 2
+    assert INDEX_VERSION == 3
     # busy_timeout 生效（PRAGMA 返回毫秒）
     assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     conn.close()

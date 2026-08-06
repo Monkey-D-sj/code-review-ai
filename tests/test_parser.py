@@ -1,6 +1,33 @@
-from code_review_ai.parser import parse_file, filter_excluded, CALL_SIMPLE, CALL_ATTRIBUTE, CALL_OTHER
+from code_review_ai.parser import parse_file, filter_excluded, is_test_node, CALL_SIMPLE, CALL_ATTRIBUTE, CALL_OTHER
 
 from conftest import FIXTURES as FIX, Q
+
+
+def test_is_test_node_matches_file_path_or_name():
+    globs, names = ["*/test*", "*/tests/*"], ["test_*"]
+    # test files (path match) - any function inside is a test node
+    assert is_test_node("tests/test_auth.py", "tests.test_auth::test_login", globs, names)
+    assert is_test_node("app/test_users.py", "app.test_users::test_login", globs, names)
+    # top-level test file caught via the bare-filename fallback
+    assert is_test_node("test_auth.py", "test_auth::test_login", globs, names)
+    # production file but test-style short name -> still a test (name match)
+    assert is_test_node("auth.py", "auth::test_login", globs, names)
+    # production file + production name -> not a test
+    assert not is_test_node("auth.py", "auth::login", globs, names)
+    assert not is_test_node("app/services.py", "app.services::UserService", globs, names)
+
+
+def test_is_test_node_ignores_test_in_absolute_repo_path():
+    """A production file under a repo whose absolute path contains 'test'
+    (e.g. /home/u/test-platform/auth.py, or a pytest tmp dir named
+    test_impact_*) must NOT be tagged as a test - matching is against the
+    repo-relative path, not the absolute one."""
+    globs, names = ["*/test*", "*/tests/*"], ["test_*"]
+    repo = "/tmp/pytest-test_impact_x"
+    assert not is_test_node(f"{repo}/a.py", "a::entry", globs, names, repo)
+    # but a genuine test file under that same repo IS a test
+    assert is_test_node(f"{repo}/tests/test_a.py", "tests.test_a::test_a",
+                        globs, names, repo)
 
 
 def test_parse_extracts_nodes():

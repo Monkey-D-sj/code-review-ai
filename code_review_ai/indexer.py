@@ -12,7 +12,7 @@ from code_review_ai.community import build_communities, inter_community_edges, W
 from code_review_ai.config import Config
 from code_review_ai.db import transaction
 from code_review_ai.flow_builder import NodeRow, EdgeRow, FlowRecord, build_flows
-from code_review_ai.parser import ParsedFile, SOURCE_GLOBS, filter_excluded, list_source_files, parse_file
+from code_review_ai.parser import ParsedFile, SOURCE_GLOBS, filter_excluded, is_test_node, list_source_files, parse_file
 from code_review_ai.resolver import resolve_edges
 
 
@@ -56,7 +56,7 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
 
     with transaction(conn):
         _clear_tables(conn)
-        qname_to_id = _write_nodes(conn, parsed)
+        qname_to_id = _write_nodes(conn, parsed, config)
         _write_edges(conn, all_edges)
         recompute_degrees(conn)
         call_edges = [e for e in all_edges if e.kind == "call"]
@@ -90,21 +90,35 @@ def _clear_tables(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM nodes")
 
 
-def _write_nodes(conn, parsed) -> dict[str, int]:
+def _write_nodes(conn, parsed, config) -> dict[str, int]:
     """Insert all nodes with parent_id NULL, then backfill parent_id in one
-    batch. Returns the qname -> id map (ids are db-assigned)."""
+    batch. Dedupes by qualified_name — several Java files in one package each
+    parse a module node for the shared package; keep only the first. Returns
+    the qname -> id map (ids are db-assigned)."""
+    seen: set[str] = set()
+    inserted: list = []
+    rows: list[tuple] = []
+    for pf in parsed:
+        for n in pf.nodes:
+            if n.qualified_name in seen:
+                continue
+            seen.add(n.qualified_name)
+            inserted.append(n)
+            rows.append((n.qualified_name, n.kind, n.language, n.file_path,
+                         n.start_line, n.end_line, n.signature,
+                         1 if is_test_node(n.file_path, n.qualified_name,
+                                           config.test_globs, config.test_names,
+                                           config.repo_path) else 0))
     conn.executemany(
         "INSERT INTO nodes(qualified_name,kind,language,file_path,"
-        "start_line,end_line,signature,parent_id) VALUES(?,?,?,?,?,?,?,NULL)",
-        [(n.qualified_name, n.kind, n.language, n.file_path,
-          n.start_line, n.end_line, n.signature)
-         for pf in parsed for n in pf.nodes],
+        "start_line,end_line,signature,parent_id,is_test) VALUES(?,?,?,?,?,?,?,NULL,?)",
+        rows,
     )
     qname_to_id = {r["qualified_name"]: r["id"]
                    for r in conn.execute("SELECT id, qualified_name FROM nodes")}
     parent_updates = [
         (qname_to_id[n.parent_qname], qname_to_id[n.qualified_name])
-        for pf in parsed for n in pf.nodes
+        for n in inserted
         if n.parent_qname and n.parent_qname in qname_to_id
     ]
     if parent_updates:

@@ -16,7 +16,9 @@ DEFAULTS = dict(
         "app.route", "click.command",
         "router.get", "router.post", "celery.task",
     ],
-    exclude=["*/test*", "*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
+    exclude=["*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
+    test_globs=["*/test*", "*/tests/*"],
+    test_names=["test_*"],
     community_detection=False,
     community_weight="plain",
     external_service_url="http://localhost:3000",
@@ -32,6 +34,8 @@ class Config:
     entry_names: list[str]
     entry_decorators: list[str]
     exclude: list[str]
+    test_globs: list[str]
+    test_names: list[str]
     community_detection: bool
     community_weight: str
     external_service_url: str
@@ -65,6 +69,7 @@ def load_config(repo_path: str = ".") -> Config:
 
 
 _CONFIG_HASH_KEYS = ("diff_base", "entry_names", "entry_decorators", "exclude",
+                     "test_globs", "test_names",
                      "community_detection", "community_weight")
 
 

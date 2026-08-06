@@ -8,6 +8,7 @@ dependencies = [
     "tree-sitter>=0.25",
     "tree-sitter-python>=0.23",
     "tree-sitter-typescript>=0.23",
+    "tree-sitter-java>=0.23",
     "mcp>=2",
     "watchfiles>=0.21",
 ]
@@ -28,7 +29,7 @@ build-backend = "hatchling.build"
 community_detection = true
 community_weight = "hub_pruned"
 diff_base = "origin/master"
-exclude = ["*/test*", "*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*", "*/alembic/*", "*/hmg-ai-agent-platform-backend/*"]
+exclude = ["*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*", "*/alembic/*", "*/hmg-ai-agent-platform-backend/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

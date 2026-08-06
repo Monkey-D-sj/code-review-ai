@@ -64,6 +64,31 @@ def test_cli_benchmark_writes_report(tmp_path):
     assert report["aggregate"]["macro_patch_file_recall_at_k"] == 1.0
 
 
+def test_cli_test_impact(tmp_path, capsys, monkeypatch):
+    import subprocess
+    # isolated repo with a test file (FIX has none). chdir into it so the
+    # CLI's load_config() reads no pyproject and uses the test-friendly
+    # defaults (exclude without */test*).
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "prod.py").write_text(
+        "def login(user, pw):\n    return user\n", encoding="utf-8")
+    (tmp_path / "test_prod.py").write_text(
+        "from prod import login\n\ndef test_login():\n    login('u','p')\n",
+        encoding="utf-8")
+    for cmd in (["git", "init"], ["git", "add", "-A"], ["git", "commit", "-m", "x"]):
+        subprocess.run(cmd, cwd=tmp_path, check=True, capture_output=True)
+    db = str(tmp_path / "ti.db")
+    assert main(["rebuild", "--repo", str(tmp_path), "--db", db]) == 0
+    _ = capsys.readouterr()
+    code = main(["test-impact", "--symbols", "prod::login",
+                 "--repo", str(tmp_path), "--db", db])
+    assert code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["test_count"] == 1
+    assert data["affected_tests"][0]["qname"] == "test_prod::test_login"
+    assert data["affected_tests"][0]["covers"] == ["prod::login"]
+
+
 def test_cli_update_and_sync(tmp_path, capsys):
     from conftest import FIXTURES as FIX
     from code_review_ai import cli

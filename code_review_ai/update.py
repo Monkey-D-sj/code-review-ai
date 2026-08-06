@@ -16,7 +16,7 @@ from code_review_ai.db import INDEX_VERSION, transaction
 from code_review_ai.flow_builder import EdgeRow, NodeRow, build_flows
 from code_review_ai.indexer import rebuild, recompute_degrees, _stamp_built_at
 from code_review_ai.parser import (SOURCE_GLOBS, filter_excluded,
-                                   list_source_files, parse_file)
+                                   is_test_node, list_source_files, parse_file)
 from code_review_ai.resolver import resolve_edges
 
 
@@ -103,7 +103,7 @@ def update_nodes_edges(config, conn, changed_paths: list[str] | None = None) -> 
     parsed = [parse_file(os.path.join(repo, rel), repo) for rel in parse_paths]
     with transaction(conn):
         nodes, edges = _apply_nodes_edges_delta(
-            conn, repo, parsed, changed | added, deleted)
+            conn, repo, parsed, changed | added, deleted, config)
         repair_resolutions(conn)
         _sync_manifest(conn, repo, parse_paths, deleted)
         _stamp_built_at(conn)
@@ -128,7 +128,7 @@ def _classify_hint(config, conn, changed_paths: list[str]):
 
 
 def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
-                             deleted_set: set[str]) -> tuple[int, int]:
+                             deleted_set: set[str], config) -> tuple[int, int]:
     touch = [os.path.join(repo, rel) for rel in changed_set | deleted_set]
     removed_ids: list[int] = []
     for abs_path in touch:
@@ -142,25 +142,39 @@ def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
                  for r in conn.execute("SELECT qualified_name FROM nodes")}
     new_qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
     global_set = remaining | new_qnames
-    node_count = _insert_nodes(conn, parsed)
+    node_count = _insert_nodes(conn, parsed, config, skip_qnames=remaining)
     edges = resolve_edges(parsed, global_set)
     _insert_edges(conn, edges)
     recompute_degrees(conn)
     return node_count, len(edges)
 
 
-def _insert_nodes(conn, parsed) -> int:
-    rows = [(n.qualified_name, n.kind, n.language, n.file_path,
-             n.start_line, n.end_line, n.signature)
-            for pf in parsed for n in pf.nodes]
+def _insert_nodes(conn, parsed, config, skip_qnames=frozenset()) -> int:
+    """Insert the changed files' nodes, deduping by qualified_name against
+    ``skip_qnames`` (qnames already in the DB — e.g. a Java package module node
+    owned by another file) and against earlier nodes in this batch."""
+    seen = set(skip_qnames)
+    inserted: list = []
+    rows: list[tuple] = []
+    for pf in parsed:
+        for n in pf.nodes:
+            if n.qualified_name in seen:
+                continue
+            seen.add(n.qualified_name)
+            inserted.append(n)
+            rows.append((n.qualified_name, n.kind, n.language, n.file_path,
+                         n.start_line, n.end_line, n.signature,
+                         1 if is_test_node(n.file_path, n.qualified_name,
+                                           config.test_globs, config.test_names,
+                                           config.repo_path) else 0))
     conn.executemany(
         "INSERT INTO nodes(qualified_name,kind,language,file_path,start_line,"
-        "end_line,signature,parent_id) VALUES(?,?,?,?,?,?,?,NULL)", rows)
+        "end_line,signature,parent_id,is_test) VALUES(?,?,?,?,?,?,?,NULL,?)", rows)
     qname_to_id = {r["qualified_name"]: r["id"]
                    for r in conn.execute("SELECT id,qualified_name FROM nodes")}
     parent_updates = [
         (qname_to_id[n.parent_qname], qname_to_id[n.qualified_name])
-        for pf in parsed for n in pf.nodes
+        for n in inserted
         if n.parent_qname and n.parent_qname in qname_to_id]
     if parent_updates:
         conn.executemany(
