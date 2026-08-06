@@ -229,6 +229,32 @@ and publish the report:
 Both install the `claude` CLI in the runner via npm and require
 `.code-review-ai/` in the target project's `.gitignore`.
 
+## Automating test selection
+
+The same always-fresh index powers `test-impact`: given the changed symbols
+in a PR, it reverse-walks the call graph to the test functions that reach
+them, so CI can run only the tests this change can actually break. Add
+`--format paths` and the CLI prints space-separated, shell-ready test files
+(forward slashes, no `./` prefix) - built for `pytest $(...)`:
+
+```bash
+code-review-ai test-impact --files <changed> --format paths
+```
+
+### Run only affected tests in CI
+
+Ready-to-adapt templates that run `sync -> test-impact -> pytest` and fall
+back to the full suite when there are no source changes, no test coverage,
+or the query fails:
+
+- `examples/ci/github-actions-test-select.yml` - pull_request pipelines
+- `examples/ci/gitlab-ci-test-select.yml` - merge_request pipelines
+
+Both need `.code-review-ai/` in the target project's `.gitignore`. The
+fallback is deliberate: if TIA ever can't answer, CI still runs the full
+suite rather than silently skipping. To skip instead of falling back when
+no test covers the change, swap the empty-`$tests` branch for `exit 0`.
+
 ## Config
 
 Layered: defaults -> `[tool.code-review-ai]` in `pyproject.toml` (or a standalone `cr-ai.toml`) -> env `CRAI_<UPPER_KEY>`. Notable keys: `diff_base` (default `origin/main`), `entry_names`, `community_detection` (bool, default `false`; set `CRAI_COMMUNITY_DETECTION=1` to enable Leiden communities).
