@@ -7,6 +7,7 @@ SKILL_NAMES = (
     "code-review-python",
     "code-review-typescript",
     "code-review-javascript",
+    "code-review-java",
 )
 LANGUAGE_SKILLS = SKILL_NAMES[1:]
 REQUIRED_SECTIONS = ("安全", "正确性", "性能", "架构", "语言特有")
@@ -37,9 +38,9 @@ def test_each_skill_is_a_directory_with_matching_frontmatter():
         assert fm.get("description")
 
 
-def test_entry_lists_exactly_the_three_language_skills():
+def test_entry_lists_exactly_the_language_skills():
     entry = _read("code-review-langs")
-    referenced = set(re.findall(r"code-review-(?:python|typescript|javascript)", entry))
+    referenced = set(re.findall(r"code-review-(?:python|typescript|javascript|java)", entry))
     assert referenced == set(LANGUAGE_SKILLS)
 
 

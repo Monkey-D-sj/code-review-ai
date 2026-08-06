@@ -14,6 +14,7 @@ description: 审查任何代码前先看本 skill——语言审核 skill 套件
 | Python | `.py` | `code-review-python` |
 | TypeScript | `.ts` / `.tsx` | `code-review-typescript` |
 | JavaScript | `.js` / `.jsx` / `.mjs` / `.cjs` | `code-review-javascript` |
+| Java | `.java` | `code-review-java` |
 
 ## 路由规则
 

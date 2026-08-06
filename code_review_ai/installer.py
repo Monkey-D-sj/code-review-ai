@@ -33,6 +33,7 @@ SKILL_NAMES = (
     "code-review-python",
     "code-review-typescript",
     "code-review-javascript",
+    "code-review-java",
 )
 
 # Tool-usage section marker-injected into the platform's context file on install
