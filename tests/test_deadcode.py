@@ -93,3 +93,34 @@ def test_find_dead_code_tolerates_bad_decorators_json(tmp_path):
     payload = find_dead_code(conn, cfg)
     record = next(s for s in payload["symbols"] if s["qname"] == Q("m", "f"))
     assert record["decorators"] == []
+
+
+def test_find_dead_code_file_with_internal_callers(tmp_path):
+    cfg = load_config(FIX)
+    cfg.db_path = str(tmp_path / "x.db")
+    cfg.repo_path = str(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    conn.execute(
+        "INSERT INTO nodes(qualified_name,kind,file_path,start_line,signature,"
+        "decorators,in_degree,is_test) VALUES(?,?,?,?,?,?,?,0)",
+        ("m", "module", "m.py", 1, "", "[]", 0))
+    conn.execute(
+        "INSERT INTO nodes(qualified_name,kind,file_path,start_line,signature,"
+        "decorators,in_degree,is_test) VALUES(?,?,?,?,?,?,?,0)",
+        (Q("m", "a"), "function", "m.py", 1, "def a():", "[]", 1))
+    conn.execute(
+        "INSERT INTO nodes(qualified_name,kind,file_path,start_line,signature,"
+        "decorators,in_degree,is_test) VALUES(?,?,?,?,?,?,?,0)",
+        (Q("m", "b"), "function", "m.py", 1, "def b():", "[]", 1))
+    conn.commit()
+    payload = find_dead_code(conn, cfg)
+    # nothing imports m.py, and it holds no entry/test -> file IS a candidate
+    file_qnames = {f["qname"] for f in payload["files"]}
+    assert "m" in file_qnames
+    # but its functions call each other (in_degree > 0) -> no dead-symbol rollup
+    m_file = next(f for f in payload["files"] if f["qname"] == "m")
+    assert m_file["symbol_count"] == 0
+    symbols = {s["qname"] for s in payload["symbols"]}
+    assert Q("m", "a") not in symbols
+    assert Q("m", "b") not in symbols

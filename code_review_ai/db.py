@@ -105,7 +105,8 @@ def _migrate_nodes(conn: sqlite3.Connection) -> None:
     """Add columns introduced after the initial schema to pre-existing DBs.
 
     CREATE TABLE IF NOT EXISTS won't alter an existing table, so an older
-    index.db needs ALTER TABLE to gain in_degree/out_degree.
+    index.db needs ALTER TABLE to gain in_degree/out_degree, is_test, and
+    decorators.
     """
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(nodes)")}
     if "in_degree" not in cols:
