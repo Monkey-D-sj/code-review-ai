@@ -2,7 +2,7 @@
 
 Parse a codebase with tree-sitter, persist a call graph + call flows to SQLite, and expose impact-chain queries over MCP - so an AI reviewer (Claude Code, etc.) can pull just the relevant call chain instead of reading whole files.
 
-Supports **Python, TypeScript, and JavaScript**. Requires Python 3.14 (auto-fetched by `uv`, so you don't install it yourself).
+Supports **Python, TypeScript, JavaScript, and Java**. Requires Python 3.14 (auto-fetched by `uv`, so you don't install it yourself).
 
 ## Install
 

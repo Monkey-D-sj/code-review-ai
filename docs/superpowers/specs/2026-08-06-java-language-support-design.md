@@ -108,6 +108,15 @@ Java 分支(`RawCall.language == "java"`)解析顺序:
 - tree-sitter 对残缺代码容忍(产 `ERROR` 节点不抛异常),walkers 只认已知 node type,天然免疫畸形 Java —— 无新增错误处理
 - `.java` 文件在 `git ls-files` 后消失 → 现有 `changes.py` / `indexer` 的 `OSError` 捕获已覆盖,不变
 
+## 实现备注(与设计文档的偏离)
+
+- **tree-sitter-java 0.23.5 语法字段名与设计假设不同**,实现时已按真实语法修正:
+  - `package_declaration` / `import_declaration` **没有 `name` 字段**,包名/导入名是直接子节点 `scoped_identifier`(经 `_find_child` 获取)。
+  - `class_declaration` / `enum_declaration` / `record_declaration` 的 implements 字段名是 **`interfaces`**(节点类型才是 `super_interfaces`)。
+  - `interface_declaration` 的 extends 是**无字段名的直接子节点** `extends_interfaces`(包着 `type_list`),经 `_inherit_clause` 回退到子节点类型查找。
+- **同包多文件的 module 节点去重**:Java 同包多个文件都产出 package 模块节点,写入 `nodes` 表时按 qualified_name 去重(保留首个)——全量(`indexer._write_nodes`)与增量(`update._insert_nodes` 传 `skip_qnames`)都处理。
+- `new Foo()` 的 target_expr 是**类型名**(`Foo`),不带 `new` 关键字。
+
 ## 非目标(本次不做)
 
 - **Java 基准样本**:`benchmarks/` 现有 SWE-bench 数据是 Python 专用格式,新增 Java 基准集需要真实 Java 仓库的 changed_ranges,单独立项
