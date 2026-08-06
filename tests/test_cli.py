@@ -130,3 +130,25 @@ def test_cli_install_dispatches_with_defaults(monkeypatch, capsys):
 def test_cli_install_returns_nonzero_on_failure(monkeypatch):
     monkeypatch.setattr(cli, "install", lambda **k: _Res(False, "nope"))
     assert main(["install"]) == 1
+
+
+def test_cli_dead_code_json(tmp_path, capsys):
+    assert main(["rebuild", "--repo", FIX, "--db", str(tmp_path / "dc.db")]) == 0
+    _ = capsys.readouterr()
+    code = main(["dead-code", "--repo", FIX, "--db", str(tmp_path / "dc.db")])
+    assert code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert set(data) == {"symbols", "files", "meta"}
+    assert any(s["qname"] == Q("util", "hash_pw") for s in data["symbols"])
+    assert not any(s["qname"] == Q("app", "main") for s in data["symbols"])
+
+
+def test_cli_dead_code_text(tmp_path, capsys):
+    assert main(["rebuild", "--repo", FIX, "--db", str(tmp_path / "dc.db")]) == 0
+    _ = capsys.readouterr()
+    code = main(["dead-code", "--format", "text",
+                 "--repo", FIX, "--db", str(tmp_path / "dc.db")])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert Q("util", "hash_pw") in out
+    assert "FILE" in out

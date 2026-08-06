@@ -11,6 +11,7 @@ from code_review_ai.graph import query_graph
 from code_review_ai.export_graph import export as export_graph
 from code_review_ai.impact import get_impact
 from code_review_ai.testimpact import get_test_impact
+from code_review_ai.deadcode import find_dead_code
 from code_review_ai.indexer import rebuild
 from code_review_ai.installer import DEFAULT_SOURCE, install
 from code_review_ai.update import sync, update_nodes_edges
@@ -58,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(s)
     s.add_argument("--symbols", nargs="*")
     s.add_argument("--files", nargs="*")
+    s = sub.add_parser("dead-code")
+    _add_common(s)
+    s.add_argument("--format", choices=["json", "text"], default="json",
+                   help="output format (default: json)")
     s = sub.add_parser("summary")
     _add_common(s)
     s.add_argument("--symbols", nargs="*")
@@ -141,6 +146,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(get_test_impact(conn, changed)))
+    elif args.cmd == "dead-code":
+        payload = find_dead_code(conn, cfg)
+        if args.format == "text":
+            for s in payload["symbols"]:
+                print(f"{s['file']}:{s['line']}\t{s['kind']}\t{s['qname']}")
+            for f in payload["files"]:
+                print(f"FILE\t{f['path']}\t{f['qname']}\t{f['symbol_count']} symbols")
+        else:
+            print(json.dumps(payload))
     elif args.cmd == "summary":
         try:
             payload = build_change_summary(cfg, conn,
