@@ -72,6 +72,14 @@ def main(argv: list[str] | None = None) -> int:
     hp = sub.add_parser("install-hooks")
     _add_common(hp)
     hp.add_argument("--launch", default="code-review-ai")
+    hp.add_argument("--review", action="store_true",
+                    help="also review each commit's change impact with an LLM "
+                         "(post-commit hook only)")
+    hp.add_argument("--review-launch", default="claude -p",
+                    help="LLM review command (default: 'claude -p')")
+    hp.add_argument("--review-out", default=None,
+                    help="review report path "
+                         "(default: <repo>/.code-review-ai/last-review.md)")
     sp = sub.add_parser("communities")
     _add_common(sp)
     sp.add_argument("--symbol", default=None)
@@ -154,7 +162,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(sync(cfg, conn)))
     elif args.cmd == "install-hooks":
         from code_review_ai.hooks import install_hooks
-        for path in install_hooks(cfg.repo_path, cfg.db_path, args.launch):
+        for path in install_hooks(cfg.repo_path, cfg.db_path, args.launch,
+                                  with_review=args.review,
+                                  review_launch=args.review_launch,
+                                  review_out=args.review_out):
             print(f"installed {path}")
     elif args.cmd == "graph":
         export_graph(args.db, args.out, args.max_nodes, args.mode)

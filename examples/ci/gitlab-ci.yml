@@ -1,0 +1,48 @@
+# code-review-ai — GitLab CI 自动评审模板
+#
+# 复制本文件到你的真实项目根目录，命名为 .gitlab-ci.yml。
+# 每次 MR 自动执行：同步索引 → 汇总变更影响（影响链）→ 交给 LLM 评审 → 产出 review.md 工件。
+#
+# 前置要求：
+#   1. runner 能拉取 docker 镜像（模板使用 node:22-bookworm，内含 node + uv 安装脚本）
+#   2. 在 GitLab CI/CD 变量里配置 ANTHROPIC_API_KEY（供 claude -p 调用）
+#   3. 目标项目 .gitignore 里加一行：.code-review-ai/
+#
+# 按需调整：
+#   - 修改 below 的源 git URL（或改成内部 pip/uv 源）
+#   - 评审 prompt 可换成英文，或引用你们自己的 review 规范
+#   - 若想把 review.md 作为 MR 评论，需额外配置 GitLab API token 并调用 /notes API
+
+stages:
+  - review
+
+code-review-ai:
+  stage: review
+  image: node:22-bookworm
+  variables:
+    DIFF_BASE: "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-main}"
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+    - npm install -g @anthropic-ai/claude-code
+  script:
+    # 1) 建立调用图索引（增量，已最新则跳过）
+    - uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai sync --repo . --db .code-review-ai/index.db
+    # 2) 找出本次 MR 改动的源码文件
+    - files=$(git diff --name-only "${DIFF_BASE}...HEAD" 2>/dev/null | grep -E '\.(py|ts|tsx|js|mjs|cjs|jsx|vue)$' || true)
+    - |
+      if [ -z "$files" ]; then
+        echo "no source changes; skipping review"
+        exit 0
+      fi
+      # 3) 汇总变更影响（变更函数 + 影响链 JSON）
+      uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai summary --repo . --db .code-review-ai/index.db --files $files > impact.json
+      # 4) 把影响链交给 LLM 评审，结果写入 review.md
+      cat impact.json | claude -p "对以下代码变更影响做代码评审：按 error / warning / info 三级输出发现，每条给出文件、行号、问题描述与具体失败场景，用中文回答。" --output-format text > review.md
+  artifacts:
+    when: always
+    expose_as: code_review
+    paths:
+      - review.md
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"

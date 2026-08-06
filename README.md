@@ -184,6 +184,43 @@ code-review-ai graph -m flow        -o flows.html         # flow chart (BFS call
 
 Options: `-n` max items (200), `-m` mode (communities|graph|flow), `-o` output path.
 
+## Automating review
+
+The index keeps itself fresh automatically (watcher + git hooks + MCP startup
+catch-up); firing the *review* itself needs one extra hook. Two options, in
+increasing order of automation.
+
+### Review each commit (`install-hooks --review`)
+
+```bash
+code-review-ai install-hooks --repo . --db .code-review-ai/index.db --review
+```
+
+Writes the usual post-* sync hooks plus a review-enabled `post-commit`: it syncs
+the index, summarizes the commit's change impact (`summary --files <changed>`),
+pipes that JSON into `claude -p`, and writes the report to
+`.code-review-ai/last-review.md`. Tune the LLM command and output path:
+
+```bash
+code-review-ai install-hooks --review \
+  --review-launch "claude -p" \
+  --review-out .code-review-ai/last-review.md
+```
+
+`--review` only affects the post-commit hook; post-merge / post-checkout /
+post-rewrite still sync only.
+
+### Review each MR/PR in CI
+
+Ready-to-adapt templates that run `sync -> summary (impact chain) -> LLM review`
+and publish the report:
+
+- `examples/ci/gitlab-ci.yml` — artifact `review.md`, merge_request pipelines
+- `examples/ci/github-actions.yml` — artifact + PR comment, needs an `ANTHROPIC_API_KEY` secret
+
+Both install the `claude` CLI in the runner via npm and require
+`.code-review-ai/` in the target project's `.gitignore`.
+
 ## Config
 
 Layered: defaults -> `[tool.code-review-ai]` in `pyproject.toml` (or a standalone `cr-ai.toml`) -> env `CRAI_<UPPER_KEY>`. Notable keys: `diff_base` (default `origin/main`), `entry_names`, `community_detection` (bool, default `false`; set `CRAI_COMMUNITY_DETECTION=1` to enable Leiden communities).

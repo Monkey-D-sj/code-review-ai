@@ -1,0 +1,72 @@
+# code-review-ai — GitHub Actions 自动评审模板
+#
+# 复制本文件到你的真实项目 .github/workflows/ 目录。
+# 每次 Pull Request 自动执行：同步索引 → 汇总变更影响（影响链）→ 交给 LLM 评审 →
+# 上传 review.md 工件 + 在 PR 上发评论。
+#
+# 前置要求：
+#   1. 仓库 Settings → Secrets and variables 里配置 ANTHROPIC_API_KEY
+#   2. 目标项目 .gitignore 里加一行：.code-review-ai/
+#
+# 按需调整：
+#   - 下方 git URL 改成你们的发布源（或内部 uv 源）
+#   - 评审 prompt 可换成英文，或引用你们自己的 review 规范
+
+name: code-review-ai
+
+on:
+  pull_request:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # 用于发布 PR 评论
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # 需要完整历史做 diff
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Build code graph index
+        run: uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai sync --repo . --db .code-review-ai/index.db
+      - name: Summarize change impact
+        id: impact
+        run: |
+          files=$(git diff --name-only origin/main...HEAD | grep -E '\.(py|ts|tsx|js|mjs|cjs|jsx|vue)$' || true)
+          if [ -z "$files" ]; then
+            echo "no source changes; skipping review"
+            exit 0
+          fi
+          uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai summary --repo . --db .code-review-ai/index.db --files $files > impact.json
+      - name: Review with Claude
+        run: |
+          if [ -f impact.json ]; then
+            cat impact.json | claude -p "对以下代码变更影响做代码评审：按 error / warning / info 三级输出发现，每条给出文件、行号、问题描述与具体失败场景，用中文回答。" --output-format text > review.md
+          fi
+      - name: Upload review report
+        if: ${{ hashFiles('review.md') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-review
+          path: review.md
+      - name: Comment on PR
+        if: ${{ hashFiles('review.md') != '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('review.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '## 🤖 code-review-ai\n\n' + body.slice(0, 60000),
+            });

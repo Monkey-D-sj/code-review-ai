@@ -21,3 +21,29 @@ def test_install_hooks_idempotent(tmp_path):
     second = install_hooks(str(repo), str(tmp_path / "i.db"))
     assert first == second
     assert Path(first[0]).read_text(encoding="utf-8") == Path(second[0]).read_text(encoding="utf-8")
+
+
+def test_install_hooks_with_review_writes_review_only_on_post_commit(tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"),
+                            launch="code-review-ai", with_review=True)
+    post_commit = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
+    post_merge = Path(written[HOOK_NAMES.index("post-merge")]).read_text(encoding="utf-8")
+    assert "--files" in post_commit
+    assert "claude -p" in post_commit
+    assert "last-review.md" in post_commit
+    assert "--files" not in post_merge
+
+
+def test_install_hooks_review_honors_custom_launch_and_out(tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    review_out = tmp_path / "review.md"
+    written = install_hooks(str(repo), str(tmp_path / "i.db"), launch="code-review-ai",
+                            with_review=True, review_launch="codex exec",
+                            review_out=str(review_out))
+    content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
+    assert "codex exec" in content
+    assert "review.md" in content
+    assert "claude -p" not in content
