@@ -58,6 +58,7 @@ LANG = {
         },
         "class_def": "class_definition",
         "class_extends": "superclasses",
+        "decorator_node": "decorator",
     },
     "typescript": {
         "def_nodes": {
@@ -77,6 +78,7 @@ LANG = {
         "class_def": "class_declaration",
         "class_extends": "extends_clause",
         "class_implements": "implements_clause",
+        "decorator_node": "decorator",
     },
     "javascript": {
         "def_nodes": {
@@ -96,6 +98,7 @@ LANG = {
         "class_def": "class_declaration",
         "class_extends": "extends_clause",
         "class_implements": "implements_clause",
+        "decorator_node": "decorator",
     },
     "java": {
         "def_nodes": {
@@ -181,6 +184,7 @@ class ParsedNode:
     signature: str
     parent_qname: str | None
     language: str = "python"
+    decorators: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -355,9 +359,49 @@ def _sig(source: bytes, node) -> str:
     return source[node.start_byte:end].decode("utf-8").strip()
 
 
+def _decorator_names(node, lang) -> list[str]:
+    """Collect decorator names from a node's direct ``decorator`` children.
+    A lang without ``decorator_node`` configured is a no-op."""
+    deco_type = lang.get("decorator_node")
+    if not deco_type:
+        return []
+    return [_decorator_name(c) for c in node.children if c.type == deco_type]
+
+
+def _decorator_name(deco_node) -> str:
+    """Extract the decorator's name: '@app.route("/")' -> 'app.route',
+    '@staticmethod' -> 'staticmethod'. A call decorator strips its arguments to
+    the callee (the same field _call_target reads), so entry_decorators globs
+    match on the name a user would write."""
+    for child in deco_node.children:
+        if child.type in ("identifier", "attribute", "member_expression",
+                          "scoped_identifier"):
+            return child.text.decode("utf-8")
+        if child.type in ("call", "call_expression"):
+            func = child.child_by_field_name("function")
+            if func is not None:
+                return func.text.decode("utf-8")
+    return ""
+
+
 def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang, output):
+    """Walk AST for def nodes, capturing decorators.
+
+    Decorators precede their def as siblings (Python wraps decorated defs in a
+    ``decorated_definition`` container whose ``decorator`` children sit next to
+    the inner def; TS/JS put a ``decorator`` node directly before a class or
+    method, or as a child of it). Both shapes are handled: decorator siblings
+    accumulate into ``pending`` and are consumed by the next def node, and a
+    def node's own direct ``decorator`` children are collected too. A lang
+    without ``decorator_node`` configured is a no-op.
+    """
+    deco_type = lang.get("decorator_node")
+    pending: list[str] = []
     for child in node.children:
         t = child.type
+        if deco_type and t == deco_type:
+            pending.append(_decorator_name(child))
+            continue
         if t in lang["def_nodes"]:
             # method_definition outside a class is just an object-literal
             # shorthand — not a real definition
@@ -372,15 +416,23 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
             kind = lang["def_nodes"][t]
             if kind == "function" and parent_kind == "class":
                 kind = "method"
+            decorators = list(pending)
+            if deco_type:
+                decorators.extend(_decorator_names(child, lang))
             output.append(ParsedNode(
                 qualified_name=qn, kind=kind, file_path="",
                 start_line=child.start_point[0] + 1, end_line=child.end_point[0] + 1,
                 signature=_sig(source, child), parent_qname=scope_qname,
+                decorators=decorators,
             ))
+            pending = []
             _walk_defs_typed(child, source, module_qname, qn, kind, lang, output)
         elif lang.get("detect_arrow_in_vars") and t == "variable_declarator":
+            pending = []
             _maybe_arrow_def(child, source, module_qname, scope_qname, parent_kind, lang, output)
         else:
+            if child.children:
+                pending = []
             _walk_defs_typed(child, source, module_qname, scope_qname, parent_kind, lang, output)
 
 

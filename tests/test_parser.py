@@ -1,3 +1,4 @@
+from code_review_ai import qname
 from code_review_ai.parser import parse_file, filter_excluded, is_test_node, CALL_SIMPLE, CALL_ATTRIBUTE, CALL_OTHER
 
 from conftest import FIXTURES as FIX, Q
@@ -136,3 +137,59 @@ def test_relative_import_in_init_uses_package_base(tmp_path):
     pf = parse_file(str(init), str(tmp_path))
     imp = {i.local_name: i for i in pf.imports}
     assert imp["Thing"].module == "pkg.sub"
+
+
+def test_parse_captures_module_decorators(tmp_path):
+    mod = tmp_path / "web.py"
+    mod.write_text(
+        'import flask\n\n'
+        '@app.route("/")\n'
+        'def index():\n'
+        '    return "ok"\n',
+        encoding="utf-8")
+    pf = parse_file(str(mod), str(tmp_path))
+    index = next(n for n in pf.nodes if n.qualified_name == Q("web", "index"))
+    assert index.decorators == ["app.route"]
+
+
+def test_parse_captures_chained_and_arg_decorators(tmp_path):
+    mod = tmp_path / "cli.py"
+    mod.write_text(
+        'import click\n\n'
+        '@click.command()\n'
+        '@click.option("--x")\n'
+        'def run():\n'
+        '    pass\n',
+        encoding="utf-8")
+    pf = parse_file(str(mod), str(tmp_path))
+    run = next(n for n in pf.nodes if n.qualified_name == Q("cli", "run"))
+    assert run.decorators == ["click.command", "click.option"]
+
+
+def test_parse_captures_method_decorators(tmp_path):
+    mod = tmp_path / "svc.py"
+    mod.write_text(
+        'class Svc:\n'
+        '    @staticmethod\n'
+        '    def ping():\n'
+        '        return 1\n',
+        encoding="utf-8")
+    pf = parse_file(str(mod), str(tmp_path))
+    ping = next(n for n in pf.nodes
+                if n.qualified_name == Q("svc", "ping", Q("svc", "Svc")))
+    assert ping.decorators == ["staticmethod"]
+
+
+def test_parse_ts_captures_class_and_method_decorators(tmp_path):
+    mod = tmp_path / "pets.ts"
+    mod.write_text(
+        '@Controller("x")\n'
+        'export class Pets {\n'
+        '  @Get()\n'
+        '  list() { return [] }\n'
+        '}\n',
+        encoding="utf-8")
+    pf = parse_file(str(mod), str(tmp_path))
+    by_short = {qname.short(n.qualified_name): n for n in pf.nodes}
+    assert by_short["Pets"].decorators == ["Controller"]
+    assert by_short["list"].decorators == ["Get"]
