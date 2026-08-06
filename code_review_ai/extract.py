@@ -43,12 +43,14 @@ def extract_review(debug_path: str, out_path: str) -> bool:
 
 
 def trace_review(debug_path: str, trace_path: str) -> int:
-    """Write a concise one-line-per-tool trace of the flow to trace_path.
+    """Write a one-line-per-tool trace of the flow to trace_path.
 
     The raw stream-json transcript is huge (system/thinking blocks drown the
     signal), so the trace keeps just one line per tool_use (skill/tool/MCP
-    name + compacted input) with the tool_result's first line beneath it, plus
-    a final `result:` line. Returns the number of tool calls traced.
+    name + input) with the tool_result's content collapsed to one line beneath
+    it, plus a final `result:` line. Values are NOT truncated — the full input
+    and result are preserved for debugging. Returns the number of tool calls
+    traced.
     """
     lines: list[str] = []
     tool_count = 0
@@ -83,13 +85,7 @@ def trace_review(debug_path: str, trace_path: str) -> int:
 
 
 def _compact_input(data: dict) -> str:
-    parts: list[str] = []
-    for key, value in data.items():
-        text = str(value)
-        if len(text) > 60:
-            text = text[:57] + "..."
-        parts.append(f"{key}={text}")
-    return ", ".join(parts)
+    return ", ".join(f"{key}={value}" for key, value in data.items())
 
 
 def _first_line(content) -> str:
@@ -100,7 +96,4 @@ def _first_line(content) -> str:
                         for block in content if isinstance(block, dict))
     else:
         text = str(content)
-    text = " ".join(text.split())
-    if len(text) > 100:
-        text = text[:97] + "..."
-    return text
+    return " ".join(text.split())

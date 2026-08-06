@@ -81,3 +81,24 @@ def test_trace_review_no_tools_writes_result_line(tmp_path):
                      encoding="utf-8")
     assert trace_review(str(debug), str(trace)) == 0
     assert trace.read_text(encoding="utf-8") == "result: ok\n"
+
+
+def test_trace_review_does_not_truncate_values(tmp_path):
+    debug = tmp_path / "debug.jsonl"
+    trace = tmp_path / "trace.log"
+    long_path = "very/long/path/" + "p" * 200
+    long_result = "r" * 300
+    events = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Read", "input": {"file_path": long_path}}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "content": long_result}]}},
+        {"type": "result", "result": "ok", "is_error": False},
+    ]
+    debug.write_text("\n".join(json.dumps(event) for event in events) + "\n",
+                     encoding="utf-8")
+    assert trace_review(str(debug), str(trace)) == 1
+    content = trace.read_text(encoding="utf-8")
+    assert long_path in content
+    assert long_result in content
+    assert "..." not in content

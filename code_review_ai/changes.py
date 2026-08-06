@@ -2,7 +2,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from code_review_ai.config import Config
+from code_review_ai.config import DEFAULTS, Config
 from code_review_ai.parser import parse_file
 
 
@@ -19,7 +19,8 @@ def current_head(config: Config) -> str | None:
     return out.stdout.strip()
 
 
-def _git_diff(base: str, files: list[str] | None) -> dict[str, list[tuple[int, int]]]:
+def _git_diff(base: str, files: list[str] | None,
+              cwd: str | None = None) -> dict[str, list[tuple[int, int]]]:
     """Return {file_path: [(start, end), ...]} changed line ranges (added/removed)."""
     args = ["git", "diff", "--unified=0", base]
     if files:
@@ -28,7 +29,7 @@ def _git_diff(base: str, files: list[str] | None) -> dict[str, list[tuple[int, i
     # (GBK on zh-CN Windows) and crash on non-ASCII content. errors="replace"
     # keeps the @@ line-range parsing robust to any undecodable bytes.
     out = subprocess.run(args, capture_output=True, text=True,
-                         encoding="utf-8", errors="replace")
+                         encoding="utf-8", errors="replace", cwd=cwd)
     if out.returncode != 0:
         raise RuntimeError(
             f"git diff failed (exit {out.returncode}): {out.stderr.strip()}"
@@ -54,14 +55,15 @@ def _overlaps(start: int, end: int, ranges: list[tuple[int, int]]) -> bool:
     return any(not (end < s or start > e) for s, e in ranges)
 
 
-def _git_numstat(base: str, files: list[str] | None = None) -> dict[str, tuple[int, int]]:
+def _git_numstat(base: str, files: list[str] | None = None,
+                 cwd: str | None = None) -> dict[str, tuple[int, int]]:
     """{file: (added, removed)} per changed file. Binary files map to (0, 0)
     but keep their key so files_changed still counts them."""
     args = ["git", "diff", "--numstat", base]
     if files:
         args += ["--"] + files
     out = subprocess.run(args, capture_output=True, text=True,
-                         encoding="utf-8", errors="replace")
+                         encoding="utf-8", errors="replace", cwd=cwd)
     if out.returncode != 0:
         raise RuntimeError(
             f"git diff failed (exit {out.returncode}): {out.stderr.strip()}"
@@ -74,6 +76,25 @@ def _git_numstat(base: str, files: list[str] | None = None) -> dict[str, tuple[i
             continue
         stats[path] = (int(added_s), int(removed_s))
     return stats
+
+
+def _resolve_diff_base(config: Config) -> str:
+    """The git ref to diff against: an explicitly configured diff_base (any
+    value other than the default) wins; otherwise the current branch's upstream
+    (@{upstream}) when it exists, else HEAD^ (the last commit). The diff is
+    always based on the current branch and never depends on a main ref
+    existing. Falls back to the configured base so a genuinely empty repo still
+    surfaces a git error instead of silently returning empty."""
+    if config.diff_base != DEFAULTS["diff_base"]:
+        return config.diff_base
+    for candidate in ("@{upstream}", "HEAD^"):
+        check = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", candidate],
+            cwd=config.repo_path, capture_output=True, text=True,
+            encoding="utf-8", errors="replace")
+        if check.returncode == 0:
+            return candidate
+    return config.diff_base
 
 
 def _changed_functions(config: Config, diff_ranges: dict[str, list[tuple[int, int]]],
@@ -106,13 +127,14 @@ def detect_changed_symbols(config: Config,
                            symbols: list[str] | None = None,
                            files: list[str] | None = None) -> list[str]:
     """Changed symbol qnames: explicit `symbols`, or the git diff of `files`
-    (or the whole tree when neither is given) against config.diff_base.
+    (or the whole tree when neither is given) against a resolved base
+    (diff_base, else the branch's upstream, else HEAD^).
 
-    Raises RuntimeError if the git diff fails (e.g. diff_base doesn't exist) so
+    Raises RuntimeError if the git diff fails (e.g. no commits at all) so
     callers surface the misconfiguration instead of returning an empty list."""
     if symbols is not None:
         return list(symbols)
-    diff = _git_diff(config.diff_base, files)
+    diff = _git_diff(_resolve_diff_base(config), files, config.repo_path)
     return [record["qname"] for record in _changed_functions(
         config, diff, kinds=("function", "method"))]
 
@@ -149,12 +171,14 @@ def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
                          files: list[str] | None = None) -> dict:
     """Change summary + changed functions. With `symbols`, resolve each qname
     from the graph; otherwise compute from the git diff of `files` (or the whole
-    tree) against config.diff_base. Returns {"summary", "changed_functions"}.
-    Raises RuntimeError if the git diff fails (bad diff_base)."""
+    tree) against a resolved base (diff_base, else the branch's upstream, else
+    HEAD^). Returns {"summary", "changed_functions"}.
+    Raises RuntimeError if the git diff fails (e.g. no commits at all)."""
     if symbols is not None:
         return _symbols_summary(config, conn, symbols)
-    diff = _git_diff(config.diff_base, files)
-    numstat = _git_numstat(config.diff_base, files)
+    base = _resolve_diff_base(config)
+    diff = _git_diff(base, files, config.repo_path)
+    numstat = _git_numstat(base, files, config.repo_path)
     functions = _changed_functions(config, diff)
     return {"summary": {"files_changed": len(numstat),
                         "lines_added": sum(added for added, _ in numstat.values()),
