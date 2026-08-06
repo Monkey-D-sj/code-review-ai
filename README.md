@@ -192,19 +192,27 @@ increasing order of automation.
 
 ### Review each commit (`install-hooks --review`)
 
+One command, no global install needed — the hook self-bootstraps: at commit time
+it prefers a PATH-installed `code-review-ai` and otherwise falls back to
+`uvx --from <source>`:
+
 ```bash
-code-review-ai install-hooks --repo . --db .code-review-ai/index.db --review
+uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai \
+  install-hooks --repo . --db .code-review-ai/index.db --review
 ```
 
 Writes the usual post-* sync hooks plus a review-enabled `post-commit`: it syncs
-the index, summarizes the commit's change impact (`summary --files <changed>`),
-pipes that JSON into `claude -p`, and writes the report to
-`.code-review-ai/last-review.md`. Tune the LLM command and output path:
+the index, summarizes the commit's change impact (`summary --files <changed>`
+diffed against `HEAD^`, i.e. the commit itself, so it works before `origin/main`
+exists), pipes that JSON into `claude -p`, and writes the report to
+`.code-review-ai/last-review.md`. Tune the LLM command, output path, and fallback
+source:
 
 ```bash
 code-review-ai install-hooks --review \
   --review-launch "claude -p" \
-  --review-out .code-review-ai/last-review.md
+  --review-out .code-review-ai/last-review.md \
+  --from git+https://github.com/Monkey-D-sj/code-review-ai
 ```
 
 `--review` only affects the post-commit hook; post-merge / post-checkout /

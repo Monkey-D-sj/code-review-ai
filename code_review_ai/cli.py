@@ -71,7 +71,12 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(sp)
     hp = sub.add_parser("install-hooks")
     _add_common(hp)
-    hp.add_argument("--launch", default="code-review-ai")
+    hp.add_argument("--launch", default="code-review-ai",
+                    help="command the hook uses to run code-review-ai "
+                         "(default: prefer PATH, fall back to uvx --from <source>)")
+    hp.add_argument("--from", dest="source", default=DEFAULT_SOURCE,
+                    help="package source for the uvx fallback launcher "
+                         "(default: %(default)s)")
     hp.add_argument("--review", action="store_true",
                     help="also review each commit's change impact with an LLM "
                          "(post-commit hook only)")
@@ -165,7 +170,8 @@ def main(argv: list[str] | None = None) -> int:
         for path in install_hooks(cfg.repo_path, cfg.db_path, args.launch,
                                   with_review=args.review,
                                   review_launch=args.review_launch,
-                                  review_out=args.review_out):
+                                  review_out=args.review_out,
+                                  source=args.source):
             print(f"installed {path}")
     elif args.cmd == "graph":
         export_graph(args.db, args.out, args.max_nodes, args.mode)

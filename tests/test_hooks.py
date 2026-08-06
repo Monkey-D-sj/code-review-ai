@@ -31,6 +31,7 @@ def test_install_hooks_with_review_writes_review_only_on_post_commit(tmp_path):
     post_commit = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
     post_merge = Path(written[HOOK_NAMES.index("post-merge")]).read_text(encoding="utf-8")
     assert "--files" in post_commit
+    assert "CRAI_DIFF_BASE=HEAD^" in post_commit
     assert "claude -p" in post_commit
     assert "last-review.md" in post_commit
     assert "--files" not in post_merge
@@ -40,10 +41,22 @@ def test_install_hooks_review_honors_custom_launch_and_out(tmp_path):
     repo = tmp_path / "proj"
     (repo / ".git").mkdir(parents=True)
     review_out = tmp_path / "review.md"
-    written = install_hooks(str(repo), str(tmp_path / "i.db"), launch="code-review-ai",
+    written = install_hooks(str(repo), str(tmp_path / "i.db"), launch="my-cr",
                             with_review=True, review_launch="codex exec",
                             review_out=str(review_out))
     content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
+    assert "LAUNCH='my-cr'" in content
     assert "codex exec" in content
     assert "review.md" in content
     assert "claude -p" not in content
+    assert "uvx --from" not in content  # custom launch bypasses the uvx fallback
+
+
+def test_install_hooks_default_launch_falls_back_to_uvx(tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"))
+    content = Path(written[0]).read_text(encoding="utf-8")
+    assert "command -v code-review-ai" in content
+    assert "LAUNCH='uvx --from" in content
+    assert "$LAUNCH sync" in content

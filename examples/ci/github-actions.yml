@@ -45,7 +45,8 @@ jobs:
             echo "no source changes; skipping review"
             exit 0
           fi
-          uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai summary --repo . --db .code-review-ai/index.db --files $files > impact.json
+          # CRAI_DIFF_BASE 让 summary 用 PR 目标分支做 diff 基准（默认 origin/main）
+          CRAI_DIFF_BASE="origin/${{ github.event.pull_request.base.ref }}" uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai summary --repo . --db .code-review-ai/index.db --files $files > impact.json
       - name: Review with Claude
         run: |
           if [ -f impact.json ]; then

@@ -35,8 +35,9 @@ code-review-ai:
         echo "no source changes; skipping review"
         exit 0
       fi
-      # 3) 汇总变更影响（变更函数 + 影响链 JSON）
-      uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai summary --repo . --db .code-review-ai/index.db --files $files > impact.json
+      # 3) 汇总变更影响（变更函数 + 影响链 JSON）；CRAI_DIFF_BASE 使 summary
+      #    与上面的 git diff 用同一个 MR 目标分支作为基准
+      CRAI_DIFF_BASE="${DIFF_BASE}" uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai summary --repo . --db .code-review-ai/index.db --files $files > impact.json
       # 4) 把影响链交给 LLM 评审，结果写入 review.md
       cat impact.json | claude -p "对以下代码变更影响做代码评审：按 error / warning / info 三级输出发现，每条给出文件、行号、问题描述与具体失败场景，用中文回答。" --output-format text > review.md
   artifacts:

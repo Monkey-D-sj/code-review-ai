@@ -4,6 +4,10 @@ The hooks call `code-review-ai sync` (nodes catch-up + flows + communities) so
 the index reflects the last commit exactly. Per-repo setup; repos without hooks
 still self-heal at startup via the flows_as_of_head check.
 
+The hook self-bootstraps: at runtime it prefers a PATH-installed `code-review-ai`
+and otherwise falls back to `uvx --from <source>`, so no global install is
+required. A custom `launch` is used verbatim instead.
+
 With `with_review`, the post-commit hook additionally summarizes the commit's
 change impact and hands it to an LLM (``claude -p`` by default), writing the
 report to ``.code-review-ai/last-review.md``. Review runs on post-commit only,
@@ -12,6 +16,8 @@ where the changed-file set is unambiguous; the other hooks always sync only.
 
 import re
 from pathlib import Path
+
+from code_review_ai.installer import DEFAULT_SOURCE
 
 HOOK_NAMES = ("post-commit", "post-merge", "post-checkout", "post-rewrite")
 
@@ -25,14 +31,15 @@ _REVIEW_PROMPT = (
 def install_hooks(repo: str, db: str, launch: str = "code-review-ai",
                   with_review: bool = False,
                   review_launch: str = "claude -p",
-                  review_out: str | None = None) -> list[str]:
+                  review_out: str | None = None,
+                  source: str = DEFAULT_SOURCE) -> list[str]:
     """Write the post-* hooks under <repo>/.git/hooks. Returns paths."""
     hooks_dir = _ensure_hooks_dir(repo)
     written: list[str] = []
     for name in HOOK_NAMES:
         review = name == "post-commit" and with_review
-        script = (_review_script(repo, db, launch, review_launch, review_out)
-                  if review else _sync_script(repo, db, launch))
+        script = (_review_script(repo, db, launch, review_launch, review_out, source)
+                  if review else _sync_script(repo, db, launch, source))
         path = hooks_dir / name
         path.write_text(script, encoding="utf-8")
         _make_executable(path)
@@ -53,18 +60,34 @@ def _make_executable(path: Path) -> None:
         pass
 
 
-def _sync_script(repo: str, db: str, launch: str) -> str:
+def _launcher_line(launch: str, source: str) -> str:
+    """Resolve the code-review-ai command at hook runtime. The default launch
+    prefers a PATH install and falls back to `uvx --from <source>` so the hook
+    works without a global install; a custom launch is used verbatim."""
+    if launch != "code-review-ai":
+        return f"LAUNCH='{launch}'\n"
+    return (
+        "if command -v code-review-ai >/dev/null 2>&1; then\n"
+        "  LAUNCH='code-review-ai'\n"
+        "else\n"
+        f"  LAUNCH='uvx --from {source} code-review-ai'\n"
+        "fi\n"
+    )
+
+
+def _sync_script(repo: str, db: str, launch: str, source: str) -> str:
     repo_abs = str(Path(repo).resolve())
     db_abs = str(Path(db).resolve()).replace("\\", "/")
     return (
         "#!/bin/sh\n"
         "# code-review-ai: rebuild flows/communities at commit time\n"
-        f"{launch} sync --repo '{repo_abs}' --db '{db_abs}'\n"
+        + _launcher_line(launch, source)
+        + f"$LAUNCH sync --repo '{repo_abs}' --db '{db_abs}'\n"
     )
 
 
 def _review_script(repo: str, db: str, launch: str, review_launch: str,
-                   review_out: str | None) -> str:
+                   review_out: str | None, source: str) -> str:
     repo_abs = str(Path(repo).resolve())
     db_abs = str(Path(db).resolve()).replace("\\", "/")
     out_abs = str(Path(review_out or Path(repo_abs) / ".code-review-ai" / "last-review.md")
@@ -72,13 +95,17 @@ def _review_script(repo: str, db: str, launch: str, review_launch: str,
     return (
         "#!/bin/sh\n"
         "# code-review-ai: rebuild index + review the commit's change impact\n"
-        f"{launch} sync --repo '{repo_abs}' --db '{db_abs}' >/dev/null 2>&1\n"
-        "files=$(git diff-tree --name-only --no-commit-id HEAD -r 2>/dev/null "
+        + _launcher_line(launch, source)
+        + f"$LAUNCH sync --repo '{repo_abs}' --db '{db_abs}' >/dev/null 2>&1\n"
+        + "files=$(git diff-tree --name-only --no-commit-id HEAD -r 2>/dev/null "
         f"| grep -E '{_SOURCE_SUFFIX_RE.pattern}' || true)\n"
-        '[ -z "$files" ] && exit 0\n'
-        f"summary=$({launch} summary --repo '{repo_abs}' --db '{db_abs}' "
-        "--files $files 2>/dev/null) || exit 0\n"
-        f"printf '%s' \"$summary\" | {review_launch} "
+        + '# root commit has no parent: nothing to diff against, skip\n'
+        + '[ -z "$files" ] && exit 0\n'
+        + "# CRAI_DIFF_BASE=HEAD^ diffs the commit itself, so the hook works\n"
+        + "# even before origin/main exists\n"
+        + f"summary=$(CRAI_DIFF_BASE=HEAD^ $LAUNCH summary --repo '{repo_abs}' "
+        f"--db '{db_abs}' --files $files 2>/dev/null) || exit 0\n"
+        + f"printf '%s' \"$summary\" | {review_launch} "
         f"'{_REVIEW_PROMPT}' --output-format text > '{out_abs}' 2>/dev/null || exit 0\n"
-        f"echo \"code-review-ai: review written to {out_abs}\"\n"
+        + f"echo \"code-review-ai: review written to {out_abs}\"\n"
     )
