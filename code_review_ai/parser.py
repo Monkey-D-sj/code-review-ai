@@ -133,6 +133,9 @@ LANG = {
             "enum_declaration": [("interfaces", "implements")],
             "record_declaration": [("interfaces", "implements")],
         },
+        "decorator_node": {"marker_annotation", "annotation"},
+        "annotations_in_modifiers": True,
+        "mockmvc_capture": True,
     },
 }
 
@@ -185,6 +188,8 @@ class ParsedNode:
     parent_qname: str | None
     language: str = "python"
     decorators: list[str] = field(default_factory=list)
+    mappings: list[tuple[str, str]] = field(default_factory=list)
+    mockmvc_requests: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -359,13 +364,35 @@ def _sig(source: bytes, node) -> str:
     return source[node.start_byte:end].decode("utf-8").strip()
 
 
+def _decorator_types(lang) -> set[str]:
+    """decorator_node as a set; a single-string config (Python/TS/JS) works too."""
+    node_type = lang.get("decorator_node")
+    if not node_type:
+        return set()
+    if isinstance(node_type, (set, tuple, frozenset)):
+        return set(node_type)
+    return {node_type}
+
+
+def _annotation_children(node, deco_types: set[str], lang) -> list:
+    """Annotation nodes decorating a def: direct children of the given types,
+    plus those nested in a ``modifiers`` child (tree-sitter-java nests Java
+    annotations there — not siblings, not direct children of the def)."""
+    found = [child for child in node.children if child.type in deco_types]
+    if lang.get("annotations_in_modifiers"):
+        for child in node.children:
+            if child.type == "modifiers":
+                found.extend(c for c in child.children if c.type in deco_types)
+    return found
+
+
 def _decorator_names(node, lang) -> list[str]:
-    """Collect decorator names from a node's direct ``decorator`` children.
+    """Collect decorator names from a node's annotation/decorator children.
     A lang without ``decorator_node`` configured is a no-op."""
-    deco_type = lang.get("decorator_node")
-    if not deco_type:
+    deco_types = _decorator_types(lang)
+    if not deco_types:
         return []
-    return [_decorator_name(c) for c in node.children if c.type == deco_type]
+    return [_decorator_name(c) for c in _annotation_children(node, deco_types, lang)]
 
 
 def _decorator_name(deco_node) -> str:
@@ -375,13 +402,66 @@ def _decorator_name(deco_node) -> str:
     match on the name a user would write."""
     for child in deco_node.children:
         if child.type in ("identifier", "attribute", "member_expression",
-                          "scoped_identifier"):
+                          "scoped_identifier", "type_identifier"):
             return child.text.decode("utf-8")
         if child.type in ("call", "call_expression"):
             func = child.child_by_field_name("function")
             if func is not None:
                 return func.text.decode("utf-8")
     return ""
+
+
+_MAPPING_METHODS = {
+    "RequestMapping": "ANY",
+    "GetMapping": "GET",
+    "PostMapping": "POST",
+    "PutMapping": "PUT",
+    "DeleteMapping": "DELETE",
+    "PatchMapping": "PATCH",
+}
+
+
+def _java_mappings(node, lang) -> list[tuple[str, str]]:
+    """Extract (http_method, path) pairs from Spring mapping annotations.
+
+    Reads a def's annotation nodes (including those in a modifiers child).
+    RequestMapping without an explicit method element maps to 'ANY'."""
+    out: list[tuple[str, str]] = []
+    for ann in _annotation_children(node, _decorator_types(lang), lang):
+        method = _MAPPING_METHODS.get(_decorator_name(ann))
+        if method is None:
+            continue
+        paths = _annotation_strings(ann)
+        if method == "ANY":
+            method = _request_mapping_method(ann) or "ANY"
+        for path in paths:
+            out.append((method, path))
+    return out
+
+
+def _annotation_strings(node) -> list[str]:
+    """Collect quoted string values in an annotation's arguments (descendants),
+    e.g. @GetMapping(\"/owners\") -> ['/owners']; { \"/a\", \"/b\" } -> both."""
+    return [s.text.decode("utf-8").strip("\"'")
+            for s in _collect_by_type(node, "string_literal")]
+
+
+def _collect_by_type(node, node_type: str) -> list:
+    out = []
+    for child in node.children:
+        if child.type == node_type:
+            out.append(child)
+        out.extend(_collect_by_type(child, node_type))
+    return out
+
+
+def _request_mapping_method(node) -> str | None:
+    """Extract the HTTP method from @RequestMapping(method=RequestMethod.GET)."""
+    for access in _collect_by_type(node, "field_access"):
+        text = access.text.decode("utf-8")
+        if text.startswith("RequestMethod."):
+            return text.split(".")[-1].upper()
+    return None
 
 
 def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang, output):
@@ -395,11 +475,11 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
     def node's own direct ``decorator`` children are collected too. A lang
     without ``decorator_node`` configured is a no-op.
     """
-    deco_type = lang.get("decorator_node")
+    deco_types = _decorator_types(lang)
     pending: list[str] = []
     for child in node.children:
         t = child.type
-        if deco_type and t == deco_type:
+        if deco_types and t in deco_types:
             pending.append(_decorator_name(child))
             continue
         if t in lang["def_nodes"]:
@@ -417,13 +497,15 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
             if kind == "function" and parent_kind == "class":
                 kind = "method"
             decorators = list(pending)
-            if deco_type:
+            if deco_types:
                 decorators.extend(_decorator_names(child, lang))
+            mappings = (_java_mappings(child, lang)
+                        if lang.get("annotations_in_modifiers") else [])
             output.append(ParsedNode(
                 qualified_name=qn, kind=kind, file_path="",
                 start_line=child.start_point[0] + 1, end_line=child.end_point[0] + 1,
                 signature=_sig(source, child), parent_qname=scope_qname,
-                decorators=decorators,
+                decorators=decorators, mappings=mappings,
             ))
             pending = []
             _walk_defs_typed(child, source, module_qname, qn, kind, lang, output)

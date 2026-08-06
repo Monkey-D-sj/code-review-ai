@@ -99,3 +99,28 @@ def test_extract_inherits_interface_extends_type_list():
     pf = _parse("com/foo/Auth.java")
     ih = {(i.relation, i.base_expr) for i in pf.inherits}
     assert ("extends", "Marker") in ih
+
+
+def test_java_annotations_capture_mappings(tmp_path):
+    src = tmp_path / "HomeController.java"
+    src.write_text(
+        "package com.example;\n"
+        "@Controller\n"
+        "class HomeController {\n"
+        "    @GetMapping(\"/owners\")\n"
+        "    public String list() { return null; }\n"
+        "    @GetMapping(\"/owners/{ownerId}\")\n"
+        "    public String show(int ownerId) { return null; }\n"
+        "    @RequestMapping(value=\"/r\", method=RequestMethod.POST)\n"
+        "    public String rm() { return null; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(src), str(tmp_path))
+    by = {n.qualified_name: n.mappings for n in pf.nodes}
+    assert by["com.example::HomeController.list"] == [("GET", "/owners")]
+    assert by["com.example::HomeController.show"] == [("GET", "/owners/{ownerId}")]
+    # RequestMapping 带 method 元素 -> 具体方法;无则 ANY
+    assert by["com.example::HomeController.rm"] == [("POST", "/r")]
+    cls = next(n for n in pf.nodes if n.qualified_name == "com.example::HomeController")
+    assert "Controller" in cls.decorators
