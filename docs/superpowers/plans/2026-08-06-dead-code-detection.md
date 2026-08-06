@@ -784,7 +784,7 @@ git commit -m "feat(mcp): expose find_dead_code tool"
 - Test: `tests/test_cli.py`
 
 **Interfaces:**
-- Consumes: Task 4 的 `find_dead_code(cfg, conn)`。
+- Consumes: Task 4 的 `find_dead_code(conn, cfg)`（签名是 `find_dead_code(conn, config)`，见 Task 4；本任务的 dispatch 用 `(conn, cfg)` 与 Task 5 的 `_find_dead_code(conn, config)` 一致）。
 - Produces: `dead-code [--format json|text]` 子命令；默认打印 JSON，`--format text` 打印紧凑表格。
 
 - [ ] **Step 1: 写失败测试**
@@ -840,7 +840,7 @@ from code_review_ai.deadcode import find_dead_code
 
 ```python
     elif args.cmd == "dead-code":
-        payload = find_dead_code(cfg, conn)
+        payload = find_dead_code(conn, cfg)  # 注意参数顺序：签名是 (conn, config)
         if args.format == "text":
             for s in payload["symbols"]:
                 print(f"{s['file']}:{s['line']}\t{s['kind']}\t{s['qname']}")
