@@ -1,0 +1,42 @@
+# code-review-ai - GitLab CI 测试选择模板（按影响选测试子集）
+#
+# 复制到真实项目根目录命名为 .gitlab-ci.yml（或合并进已有文件）。每次 MR：
+# 建索引 -> test-impact 找覆盖改动符号的测试 -> 只跑这些 pytest。
+# 无覆盖或查询出错回退全量。
+#
+# 前置：
+#   1. runner 能拉 docker 镜像（模板用 python:3.13-slim）
+#   2. 目标项目 .gitignore 加一行：.code-review-ai/
+#
+# 按需调整：git URL、源码后缀正则、回退策略
+
+stages:
+  - test
+
+affected-tests:
+  stage: test
+  image: python:3.13-slim
+  variables:
+    DIFF_BASE: "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-main}"
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+  script:
+    # 1) 建立调用图索引（增量，已最新则跳过）
+    - uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai sync --repo . --db .code-review-ai/index.db
+    # 2) 找出本次 MR 改动的源码文件
+    - files=$(git diff --name-only "${DIFF_BASE}...HEAD" 2>/dev/null | grep -E '\.(py|ts|tsx|js|mjs|cjs|jsx|vue)$' || true)
+    - |
+      if [ -z "$files" ]; then
+        echo "no source changes; skipping"; exit 0
+      fi
+      # 3) --format paths: 空格分隔的受影响测试文件；查询失败回退空 -> 全量
+      tests=$(CRAI_DIFF_BASE="${DIFF_BASE}" uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai test-impact --repo . --db .code-review-ai/index.db --files $files --format paths 2>/dev/null || true)
+      # 4) 只跑受影响测试；空则回退全量
+      if [ -z "$tests" ]; then
+        echo "no affected tests (or tia failed) -> full suite"; uv run pytest
+      else
+        echo "affected tests: $tests"; uv run pytest $tests
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"

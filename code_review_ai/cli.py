@@ -46,6 +46,19 @@ def _write_json(payload: dict, output_path: str | None) -> None:
         print(rendered)
 
 
+def _normalize_test_paths(files: list[str]) -> list[str]:
+    """Normalize test file paths for shell consumption: forward slashes and
+    no leading ``./`` so ``pytest $(test-impact --format paths)`` works on
+    Linux and Windows runners alike."""
+    normalized = []
+    for file_path in files:
+        path = file_path.replace("\\", "/")
+        if path.startswith("./"):
+            path = path[2:]
+        normalized.append(path)
+    return normalized
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="code-review-ai")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -59,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(s)
     s.add_argument("--symbols", nargs="*")
     s.add_argument("--files", nargs="*")
+    s.add_argument("--format", choices=["json", "paths"], default="json",
+                   help="output format: json (default) or paths "
+                        "(space-separated test files for `pytest $(...)`)")
     s = sub.add_parser("dead-code")
     _add_common(s)
     s.add_argument("--format", choices=["json", "text"], default="json",
@@ -172,7 +188,11 @@ def main(argv: list[str] | None = None) -> int:
         except RuntimeError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        print(json.dumps(get_test_impact(conn, changed)))
+        result = get_test_impact(conn, changed)
+        if args.format == "paths":
+            print(" ".join(_normalize_test_paths(result["test_files"])))
+        else:
+            print(json.dumps(result))
     elif args.cmd == "dead-code":
         payload = find_dead_code(conn, cfg)
         if args.format == "text":

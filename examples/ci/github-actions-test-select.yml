@@ -1,0 +1,61 @@
+# code-review-ai - GitHub Actions 测试选择模板（按影响选测试子集）
+#
+# 复制本文件到真实项目 .github/workflows/。每次 PR：建索引 -> test-impact
+# 找出覆盖改动符号的测试文件 -> 只跑这些 pytest。无覆盖或查询出错时回退全量。
+#
+# 前置：
+#   1. 目标项目 .gitignore 加一行：.code-review-ai/
+#   2. 项目用 pytest 跑测试（其他框架改最后一步命令即可）
+#
+# 按需调整：
+#   - 下方 git URL 改成你们的发布源（或内部 uv 源）
+#   - 源码后缀正则按语言增减
+#   - 回退策略：test_count=0 当前回退全量，想省时可改成直接 skip
+
+name: affected-tests
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # 完整历史做 diff
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Build code graph index
+        run: uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai sync --repo . --db .code-review-ai/index.db
+
+      - name: Resolve affected tests
+        id: tia
+        run: |
+          set -euo pipefail
+          base="origin/${{ github.event.pull_request.base.ref }}"
+          files=$(git diff --name-only "${base}...HEAD" | grep -E '\.(py|ts|tsx|js|mjs|cjs|jsx|vue)$' || true)
+          if [ -z "$files" ]; then
+            echo "no source changes; skipping"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # --format paths: 空格分隔的受影响测试文件；查询失败回退空 -> 全量
+          tests=$(CRAI_DIFF_BASE="$base" uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai test-impact --repo . --db .code-review-ai/index.db --files $files --format paths 2>/dev/null || true)
+          echo "tests=$tests" >> $GITHUB_OUTPUT
+          echo "skip=false" >> $GITHUB_OUTPUT
+
+      - name: Run tests
+        if: steps.tia.outputs.skip != 'true'
+        run: |
+          tests="${{ steps.tia.outputs.tests }}"
+          if [ -z "$tests" ]; then
+            echo "no affected tests (or tia failed) -> full suite"
+            uv run pytest
+          else
+            echo "affected tests: $tests"
+            uv run pytest $tests
+          fi

@@ -89,6 +89,30 @@ def test_cli_test_impact(tmp_path, capsys, monkeypatch):
     assert data["affected_tests"][0]["covers"] == ["prod::login"]
 
 
+def test_cli_test_impact_paths_format(tmp_path, capsys, monkeypatch):
+    """--format paths prints space-separated, shell-ready test files (forward
+    slashes, no ./ prefix) instead of JSON - for `pytest $(...)` in CI."""
+    import subprocess
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "prod.py").write_text(
+        "def login(user, pw):\n    return user\n", encoding="utf-8")
+    (tmp_path / "test_prod.py").write_text(
+        "from prod import login\n\ndef test_login():\n    login('u','p')\n",
+        encoding="utf-8")
+    for cmd in (["git", "init"], ["git", "add", "-A"], ["git", "commit", "-m", "x"]):
+        subprocess.run(cmd, cwd=tmp_path, check=True, capture_output=True)
+    db = str(tmp_path / "ti.db")
+    assert main(["rebuild", "--repo", str(tmp_path), "--db", db]) == 0
+    _ = capsys.readouterr()
+    code = main(["test-impact", "--symbols", "prod::login",
+                 "--repo", str(tmp_path), "--db", db, "--format", "paths"])
+    assert code == 0
+    out = capsys.readouterr().out.strip()
+    assert out.endswith("test_prod.py")
+    assert "\\" not in out
+    assert "test_prod::" not in out  # not JSON in paths mode
+
+
 def test_cli_update_and_sync(tmp_path, capsys):
     from conftest import FIXTURES as FIX
     from code_review_ai import cli
