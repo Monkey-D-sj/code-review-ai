@@ -149,10 +149,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "dead-code":
         payload = find_dead_code(conn, cfg)
         if args.format == "text":
-            for s in payload["symbols"]:
-                print(f"{s['file']}:{s['line']}\t{s['kind']}\t{s['qname']}")
-            for f in payload["files"]:
-                print(f"FILE\t{f['path']}\t{f['qname']}\t{f['symbol_count']} symbols")
+            for symbol in payload["symbols"]:
+                print(f"{symbol['file']}:{symbol['line']}\t{symbol['kind']}\t{symbol['qname']}")
+            for file_entry in payload["files"]:
+                print(f"FILE\t{file_entry['path']}\t{file_entry['qname']}"
+                      f"\t{file_entry['symbol_count']} symbols")
         else:
             print(json.dumps(payload))
     elif args.cmd == "summary":
