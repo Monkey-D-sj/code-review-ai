@@ -80,8 +80,8 @@ def test_install_hooks_review_captures_debug_log(tmp_path):
     (repo / ".git").mkdir(parents=True)
     written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
     content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
-    assert "--verbose" in content
-    assert '2> "$debug"' in content
+    assert "--output-format stream-json --verbose" in content
+    assert "extract-review" in content
     assert ".debug.log" in content
 
 

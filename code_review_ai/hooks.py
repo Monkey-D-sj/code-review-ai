@@ -31,15 +31,16 @@ _REVIEW_PROMPT = (
     "对以下代码变更影响做代码评审：按 error / warning / info 三级输出发现，"
     "每条给出文件、行号、问题描述与具体失败场景，用中文回答。"
 )
-# Per-platform review LLM invocation: (launch command, trailing flags, debug
-# flag). codex exec has no --output-format flag (plain text is the default),
-# reads stdin as prompt context, and already streams activity to stderr.
-# claude -p uses --output-format text for the answer and --verbose to dump
-# tool/skill/MCP activity to stderr — the debug log captures stderr, so one run
-# yields both the final review and the full flow.
+# Per-platform review LLM invocation: (launch command, args, answer mode).
+# Answer mode "extract" parses the final answer out of a stream-json debug log
+# via `code-review-ai extract-review`; "stdout" takes the review directly from
+# stdout. claude -p only exposes tool/skill/MCP activity through
+# --output-format stream-json (which --verbose is required alongside in --print
+# mode); codex exec prints the answer on stdout and already streams activity to
+# stderr, so it needs no extraction.
 _PLATFORM_REVIEW: dict[str, tuple[str, str, str]] = {
-    "claude-code": ("claude -p", "--output-format text", "--verbose"),
-    "codex": ("codex exec", "", ""),
+    "claude-code": ("claude -p", "--output-format stream-json --verbose", "extract"),
+    "codex": ("codex exec", "", "stdout"),
 }
 
 
@@ -59,16 +60,16 @@ def install_hooks(repo: str, db: str, launch: str = "code-review-ai",
     `review_launch` overrides the platform's command entirely."""
     if platform not in _PLATFORM_REVIEW:
         raise ValueError(f"unsupported review platform: {platform}")
-    review_cmd, review_tail, review_debug = _PLATFORM_REVIEW[platform]
+    review_cmd, review_args, answer_mode = _PLATFORM_REVIEW[platform]
     if review_launch is not None:
-        review_cmd, review_tail, review_debug = review_launch, "", ""
+        review_cmd, review_args, answer_mode = review_launch, "", "stdout"
     hooks_dir = _resolve_hooks_dir(repo)
     hooks_dir.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     for name in HOOK_NAMES:
         review = name == "post-commit" and with_review
-        script = (_review_script(repo, db, launch, review_cmd, review_tail,
-                                 review_debug, review_out, source)
+        script = (_review_script(repo, db, launch, review_cmd, review_args,
+                                 answer_mode, review_out, source)
                   if review else _sync_script(repo, db, launch, source))
         path = hooks_dir / name
         path.write_text(script, encoding="utf-8")
@@ -142,13 +143,16 @@ def _sync_script(repo: str, db: str, launch: str, source: str) -> str:
     )
 
 
-def _review_script(repo: str, db: str, launch: str, review_launch: str,
-                   review_tail: str, review_debug: str, review_out: str | None,
+def _review_script(repo: str, db: str, launch: str, review_cmd: str,
+                   review_args: str, answer_mode: str, review_out: str | None,
                    source: str) -> str:
     repo_abs = str(Path(repo).resolve())
     db_abs = str(Path(db).resolve()).replace("\\", "/")
     out_abs = str(Path(review_out or Path(repo_abs) / ".code-review-ai" / "last-review.md")
                   .resolve()).replace("\\", "/")
+    review_block = (_extract_review_block(review_cmd, review_args)
+                    if answer_mode == "extract"
+                    else _direct_review_block(review_cmd, review_args))
     return (
         "#!/bin/sh\n"
         "# code-review-ai: rebuild index + review the commit's change impact\n"
@@ -176,7 +180,7 @@ def _review_script(repo: str, db: str, launch: str, review_launch: str,
         + '  echo "code-review-ai: change summary failed; skipping review" >&2\n'
         + "  exit 0\n"
         + "fi\n"
-        + f'echo "code-review-ai: reviewing with {review_launch}..."\n'
+        + f'echo "code-review-ai: reviewing with {review_cmd}..."\n'
         + "# archive one copy per commit under reviews/<date>/<stamp>-<short-sha>.md;\n"
         + "# <out> stays a latest pointer for convenience\n"
         + "date_dir=$(date +%F)\n"
@@ -186,15 +190,43 @@ def _review_script(repo: str, db: str, launch: str, review_launch: str,
         + 'mkdir -p "$archive_dir"\n'
         + 'archive="$archive_dir/${stamp}-${short_sha}.md"\n'
         + 'debug="${archive}.debug.log"\n'
-        + f"printf '%s' \"$summary\" | {review_launch} "
-        f"'{_REVIEW_PROMPT}' {review_tail} {review_debug} > \"$archive\" 2> \"$debug\"\n"
-        + "review_status=$?\n"
-        + 'if [ "$review_status" -eq 0 ]; then\n'
+        + review_block
         + f"  cp \"$archive\" '{out_abs}'\n"
         + f"  cp \"$debug\" '{out_abs}.debug.log'\n"
         + '  echo "code-review-ai: review written to $archive (debug: $debug)"\n'
-        + "else\n"
-        + '  echo "code-review-ai: review command failed; no report written (debug: $debug)" >&2\n'
-        + "fi\n"
         + "exit 0\n"
+    )
+
+
+def _extract_review_block(review_cmd: str, review_args: str) -> str:
+    """claude: capture the full stream-json flow to $debug, then extract the
+    final answer into $archive via `code-review-ai extract-review`."""
+    return (
+        f"printf '%s' \"$summary\" | {review_cmd} "
+        f"'{_REVIEW_PROMPT}' {review_args} > \"$debug\" 2>/dev/null\n"
+        + "review_status=$?\n"
+        + 'if [ "$review_status" -eq 0 ]; then\n'
+        + "  $LAUNCH extract-review \"$debug\" \"$archive\"\n"
+        + "  extract_status=$?\n"
+        + '  if [ "$extract_status" -ne 0 ] || [ ! -s "$archive" ]; then\n'
+        + '    echo "code-review-ai: review produced no answer text (debug: $debug)" >&2\n'
+        + "    exit 0\n"
+        + "  fi\n"
+        + "else\n"
+        + '  echo "code-review-ai: review command failed (debug: $debug)" >&2\n'
+        + "  exit 0\n"
+        + "fi\n"
+    )
+
+
+def _direct_review_block(review_cmd: str, review_args: str) -> str:
+    """codex / custom launch: stdout is the answer, stderr the flow."""
+    return (
+        f"printf '%s' \"$summary\" | {review_cmd} "
+        f"'{_REVIEW_PROMPT}' {review_args} > \"$archive\" 2> \"$debug\"\n"
+        + "review_status=$?\n"
+        + 'if [ "$review_status" -ne 0 ]; then\n'
+        + '  echo "code-review-ai: review command failed (debug: $debug)" >&2\n'
+        + "  exit 0\n"
+        + "fi\n"
     )

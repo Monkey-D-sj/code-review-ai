@@ -114,6 +114,9 @@ def main(argv: list[str] | None = None) -> int:
     bp.add_argument("--cases", required=True)
     bp.add_argument("--top-k", type=int, default=10)
     bp.add_argument("-o", "--out")
+    xr = sub.add_parser("extract-review")
+    xr.add_argument("debug", help="claude stream-json transcript to read")
+    xr.add_argument("out", help="file to write the final answer to")
     ip = sub.add_parser("install")
     ip.add_argument("--platform", default="claude-code")
     ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
@@ -124,6 +127,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "install":
         return _run_install(args)
+    if args.cmd == "extract-review":
+        from code_review_ai.extract import extract_review
+        ok = extract_review(args.debug, args.out)
+        if ok:
+            print(f"extracted review to {args.out}")
+        else:
+            print("error: no answer text found in debug log", file=sys.stderr)
+        return 0 if ok else 1
 
     # Config comes from the current project (cwd), matching the MCP server;
     # --repo/--db only select what gets analyzed, not where config is read.
