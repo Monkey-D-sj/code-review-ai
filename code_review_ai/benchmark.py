@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from code_review_ai import qname
 from code_review_ai.config import Config
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import RebuildStats, rebuild
+from code_review_ai.parser import parse_file
 
 
 @dataclass(frozen=True)
@@ -105,6 +108,43 @@ def run_benchmark(config: Config, conn: sqlite3.Connection,
     }
 
 
+def _classify_golds(config: Config, case: BenchmarkCase) -> tuple[list[str], list[str]]:
+    """Split gold test files into (direct, co-change).
+
+    A gold is 'direct' when its source mentions (by name) a class defined in a
+    changed production file — a graph-independent proxy for 'this test
+    exercises the changed code'. Java same-package references need no import,
+    so a plain import check misses them; word-boundary text matching covers
+    imports, same-package refs, annotations, and static calls alike. Others are
+    commit-level co-change (changed in the same commit but with no static
+    reference to the changed classes)."""
+    changed_classes: set[str] = set()
+    for prod_file in case.changed_ranges:
+        try:
+            prod_pf = parse_file(os.path.join(config.repo_path, prod_file),
+                                 config.repo_path)
+        except (OSError, ValueError):
+            continue
+        for node in prod_pf.nodes:
+            if node.kind == "class":
+                changed_classes.add(qname.short(node.qualified_name))
+    patterns = [re.compile(rf"\b{re.escape(name)}\b") for name in changed_classes]
+    direct: list[str] = []
+    cochange: list[str] = []
+    for gold in case.gold_files:
+        try:
+            text = Path(os.path.join(config.repo_path, gold)).read_text(
+                encoding="utf-8", errors="replace")
+        except OSError:
+            cochange.append(gold)
+            continue
+        if any(pattern.search(text) for pattern in patterns):
+            direct.append(gold)
+        else:
+            cochange.append(gold)
+    return direct, cochange
+
+
 def _evaluate_case(config: Config, conn: sqlite3.Connection,
                    case: BenchmarkCase, top_k: int) -> dict:
     symbols = _case_symbols(config, conn, case)
@@ -115,6 +155,8 @@ def _evaluate_case(config: Config, conn: sqlite3.Connection,
     candidates = all_candidates[:top_k]
     test_score = _score_candidates(candidates, case.gold_files)
     all_test_score = _score_candidates(all_candidates, case.gold_files)
+    direct_golds, cochange_golds = _classify_golds(config, case)
+    direct_score = _score_candidates(all_candidates, direct_golds)
     found_count = sum(1 for impact in impacts if impact["found"])
     return {
         "id": case.case_id,
@@ -130,6 +172,9 @@ def _evaluate_case(config: Config, conn: sqlite3.Connection,
         "all_hits": all_test_score["hits"],
         "patch_file_recall_all": all_test_score["recall"],
         "patch_file_precision_all": all_test_score["precision"],
+        "direct_gold_files": direct_golds,
+        "cochange_gold_files": cochange_golds,
+        "direct_recall_all": direct_score["recall"],
         "symbol_found_rate": round(found_count / len(impacts), 4)
         if impacts else 0.0,
         "query_ms": elapsed_ms,
@@ -295,6 +340,9 @@ def _aggregate(results: list[dict]) -> dict:
         "macro_patch_file_precision_all": round(sum(
             result["patch_file_precision_all"] for result in results
         ) / case_count, 4),
+        "macro_direct_test_file_recall_all": _direct_recall_mean(results),
+        "cochange_gold_count": sum(
+            len(result["cochange_gold_files"]) for result in results),
         "mean_all_candidate_files": round(sum(
             result["all_candidate_files_count"] for result in results
         ) / case_count, 2),
@@ -316,6 +364,15 @@ def _aggregate(results: list[dict]) -> dict:
         "mean_production_all_candidate_files": _fold_mean(
             production_folds, "all_candidate_files_count"),
     }
+
+
+def _direct_recall_mean(results: list[dict]) -> float | None:
+    """Macro direct-test recall over cases that have at least one direct gold."""
+    with_direct = [result for result in results if result["direct_gold_files"]]
+    if not with_direct:
+        return None
+    return round(sum(result["direct_recall_all"]
+                     for result in with_direct) / len(with_direct), 4)
 
 
 def _fold_mean(folds: list[dict], key: str) -> float | None:

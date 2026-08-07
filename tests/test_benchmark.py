@@ -66,6 +66,25 @@ def test_combined_suite_adds_fastapi_history_cases():
     assert all(case.base_commit and case.changed_ranges for case in fastapi_cases)
 
 
+def test_extended_suite_adds_spring_petclinic_history_cases():
+    root = Path(__file__).parents[1]
+    java_cases = load_cases(
+        str(root / "benchmarks" / "spring-petclinic-history-10.json")
+    )
+    combined = load_cases(str(root / "benchmarks" / "historical-suite-50.json"))
+    assert len(java_cases) == 10
+    assert len(combined) == 50
+    assert {case.repo for case in java_cases} == {
+        "spring-projects/spring-petclinic"
+    }
+    assert all(case.base_commit and case.changed_ranges for case in java_cases)
+    assert all(
+        file_path.endswith(".java")
+        for case in java_cases
+        for file_path in (*case.changed_ranges, *case.gold_files)
+    )
+
+
 def test_run_benchmark_reports_recall_and_index_metrics(tmp_path):
     config = _config(tmp_path)
     conn = connect(config.db_path)
@@ -143,3 +162,42 @@ def test_run_benchmark_rejects_empty_cases(tmp_path):
     init_schema(conn)
     with pytest.raises(ValueError, match="at least one"):
         run_benchmark(config, conn, [])
+
+
+def test_classify_golds_direct_vs_cochange(tmp_path):
+    from code_review_ai.benchmark import BenchmarkCase, _classify_golds
+    prod = tmp_path / "prod"
+    test = tmp_path / "test"
+    prod.mkdir(); test.mkdir()
+    (prod / "Service.java").write_text(
+        "package com.p;\nclass Service {}\n", encoding="utf-8")
+    (test / "ServiceTests.java").write_text(
+        "package com.t;\nimport com.p.Service;\nclass ServiceTests {}\n",
+        encoding="utf-8")
+    (test / "OtherTests.java").write_text(
+        "package com.t;\nclass OtherTests {}\n", encoding="utf-8")
+    config = load_config(str(tmp_path))
+    config.repo_path = str(tmp_path)
+    case = BenchmarkCase("x", [], {"prod/Service.java": [(1, 2)]},
+                         ["test/ServiceTests.java", "test/OtherTests.java"])
+    direct, cochange = _classify_golds(config, case)
+    assert direct == ["test/ServiceTests.java"]     # 导入改动文件里的类
+    assert cochange == ["test/OtherTests.java"]      # 无引用 -> 提交级 co-change
+
+
+def test_run_benchmark_reports_direct_recall_keys(tmp_path):
+    from code_review_ai.benchmark import BenchmarkCase
+    config = _config(tmp_path)
+    conn = connect(config.db_path)
+    init_schema(conn)
+    cases = load_cases(str(_manifest(tmp_path, [{
+        "id": "login-change",
+        "changed_symbols": [Q("auth", "login")],
+        "gold_files": ["auth.py", "app.py"],
+    }])))
+    report = run_benchmark(config, conn, cases, top_k=5)
+    agg = report["aggregate"]
+    assert "macro_direct_test_file_recall_all" in agg
+    assert "cochange_gold_count" in agg
+    assert "direct_gold_files" in report["cases"][0]
+    assert "cochange_gold_files" in report["cases"][0]

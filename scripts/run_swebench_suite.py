@@ -75,6 +75,9 @@ def _summary(results: list[dict], top_k: int, dataset_name: str) -> dict:
             "macro_test_file_precision_at_k": mean("patch_file_precision_at_k"),
             "macro_test_file_recall_all": mean("patch_file_recall_all"),
             "macro_test_file_precision_all": mean("patch_file_precision_all"),
+            "macro_direct_test_file_recall_all": _direct_recall_mean(results),
+            "cochange_gold_count": sum(
+                len(result["cochange_gold_files"]) for result in results),
             "mean_all_candidate_files": mean("all_candidate_files_count"),
             "symbol_found_rate": mean("symbol_found_rate"),
             "mean_query_ms": mean("query_ms"),
@@ -108,6 +111,15 @@ def _fold_mean(folds: list[dict], key: str) -> float | None:
     if not folds:
         return None
     return round(sum(fold[key] for fold in folds) / len(folds), 4)
+
+
+def _direct_recall_mean(results: list[dict]) -> float | None:
+    """Macro direct-test recall over cases that have at least one direct gold."""
+    with_direct = [result for result in results if result["direct_gold_files"]]
+    if not with_direct:
+        return None
+    return round(sum(result["direct_recall_all"]
+                     for result in with_direct) / len(with_direct), 4)
 
 
 def main() -> int:

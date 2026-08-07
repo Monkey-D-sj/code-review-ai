@@ -260,3 +260,32 @@ per-case 关键变化：
 - `e0db9b184e` 的 `ClinicServiceTests`/`PetClinicConcurrencyTests`：改动在 PetController 校验逻辑，这两个 test 直连 Repository/Service 层，与改动符号无静态调用链（co-change）；
 - `1cad4124b7` 的 `ClinicServiceTests`：只调 `findById`/`findPetTypes`，改动的是 `findByLastName`/`findAll`（co-change）；
 - `40a41375e6`：提交级噪声，无调用关系。
+
+## 评测口径拆分（2026-08-07）
+
+实现 P2「拆分评测口径」(`code_review_ai/benchmark.py` 的 `_classify_golds`):给每个 gold 文件打 **direct / co-change** 标签,聚合同时报告两个 recall。
+
+- **direct gold** = 测试源码以词边界**提及**(引用)改动生产文件里定义的类(图无关判据;Java 同包引用不需要 import,故用文本匹配而非 import 检查)。
+- **co-change gold** = 同一 commit 改动、但测试源码未引用任何改动类(提交级噪声)。
+
+同一 10 条 case 的两种口径:
+
+| 指标 | 数值 |
+|---|---:|
+| macro_test_file_recall_all(原始,co-change 口径) | 78.33% |
+| **macro_direct_test_file_recall_all**(仅 direct gold) | **94.44%** |
+| cochange_gold_count | 3 / 15 |
+
+per-case 归因(只列 direct 部分):
+
+| 提交 | direct_recall | direct gold 命中情况 |
+|---|---:|---|
+| bb37aad8c3 | 100% | OwnerControllerTests ✓ |
+| e0db9b184e | 100% | PetControllerTests ✓;Concurrency/ClinicServiceTests 为 co-change |
+| 753d35c2f8 | 100% | VisitControllerTests ✓ |
+| 142321aa3e | 100% | 3 个 gold 全命中 |
+| 40a41375e6 | — | 唯一 gold 是 co-change(无 direct) |
+| 1cad4124b7 | 50% | OwnerControllerTests ✓;ClinicServiceTests 引用 OwnerRepository 但只调 `findById`/`findPetTypes`,改动的是 `findByLastName`/`findAll`——符号级不相关 |
+| 50866def72 | 100% | PetControllerTests ✓ |
+
+**结论**:resolver 在「真正引用改动代码」的 gold 上 Recall@All 达 **94.44%**——几乎到顶。原始 78.33% 与 94.44% 的差距主要来自 3 个 co-change 噪声 gold + `1cad4124b7` 的 ClinicServiceTests(文本引用改动类但符号级不相关)。剩余可提升空间集中在「文本引用 → 符号级调用」的语义缺口,而非图覆盖。
