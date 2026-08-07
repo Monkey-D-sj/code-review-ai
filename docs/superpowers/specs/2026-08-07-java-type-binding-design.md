@@ -63,6 +63,12 @@ def _var_types_map(parsed_files) -> dict[str, dict[str, str]]   # 汇总全局�
 - 新增夹具或在 tmp_path 内联:controller 构造器注入字段 + 测试 `@Autowired` 字段直连 repository,断言 resolved 边。
 - **验收**:重跑 `scripts/run_swebench_suite.py --cases benchmarks/spring-petclinic-history-10.json`,对比 `macro_test_file_recall_all`(58.33%)、`macro_related_production_file_recall_all`(17.19%)、resolved-call rate(7.85%)与 `e0db9b184e`/`1cad4124b7` per-case。
 
+## 实现备注(与设计文档的偏离)
+
+- **字段/方法在 `body` 成员里**:tree-sitter-java 0.23.5 把 class 成员(字段/方法)放在 `class_body`/`interface_body`/`enum_body`(四种声明的 `body` 字段)内,不是 class_declaration 的直接子节点;`_java_class_var_types` 遍历 `body` 成员。
+- **类型绑定的附带效果**:app.java 夹具里 `UserService svc = new UserService(...); svc.authenticate()` 原来断言 dynamic,现经局部变量类型绑定正确 resolved(`test_local_var_method_stays_dynamic` 更新为 `test_local_var_method_resolves_via_declared_type`)。
+- **基准结果**:Test Recall@All 58.33% → **65%**;Production Recall@All 17.19% → **34.9%**;resolved-call rate 7.85% → **10.53%**;`142321aa3e` 33%→100%。详见 `benchmarks/SPRING_PETCLINIC_RECALL_ANALYSIS.md`「类型绑定后结果」。
+
 ## 非目标(本次不做)
 
 - Spring DI/Repository 接口实现边、`@Autowired` 字段语义单独成边——P0 后续。
