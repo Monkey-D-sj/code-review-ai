@@ -32,8 +32,16 @@ class RebuildStats:
 
 
 def _parse_files(files: list[str], repo: str) -> list[ParsedFile]:
-    """Parse every file in the repo."""
-    return [parse_file(os.path.join(repo, f), repo) for f in files]
+    """Parse every file in the repo, skipping any that are tracked by git but
+    no longer exist on disk (a deletion is handled by the incremental path;
+    a full rebuild must not crash on it)."""
+    parsed: list[ParsedFile] = []
+    for rel in files:
+        abs_path = os.path.join(repo, rel)
+        if not os.path.isfile(abs_path):
+            continue
+        parsed.append(parse_file(abs_path, repo))
+    return parsed
 
 
 def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
