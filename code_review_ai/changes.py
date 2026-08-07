@@ -272,14 +272,17 @@ def _symbols_summary(config: Config, conn, symbols: list[str]) -> dict:
 
 def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
                          files: list[str] | None = None) -> dict:
-    """Change summary + changed functions + uncovered changes. With
-    `symbols`, resolve each qname from the graph; otherwise compute from the
-    git diff of `files` (or the whole tree) against a resolved base
+    """Change summary + changed functions + uncovered changes + deletions.
+    With `symbols`, resolve each qname from the graph; otherwise compute from
+    the git diff of `files` (or the whole tree) against a resolved base
     (diff_base, else the branch's upstream, else HEAD^). `uncovered_changes`
     lists files whose changes no function/class covers — module-level hunks,
     unsupported extensions, binary and deleted files — so the review sees
-    what the graph cannot attribute. Returns {"summary", "changed_functions",
-    "uncovered_changes"}.
+    what the graph cannot attribute. Deleted files/functions that were
+    tombstoned on the incremental update appear in `delete_change` (with
+    one-hop upstream) and are suppressed from `uncovered_changes`; deletions
+    without a tombstone fall back to uncovered. Returns {"summary",
+    "changed_functions", "uncovered_changes", "delete_change"}.
     Raises RuntimeError if the git diff fails (e.g. no commits at all)."""
     if symbols is not None:
         return _symbols_summary(config, conn, symbols)
