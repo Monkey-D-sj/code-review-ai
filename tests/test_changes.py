@@ -199,6 +199,8 @@ def test_build_change_summary_symbols_path(tmp_path):
     assert record["file"] == "auth.py"
     assert record["start_line"] == 6
     assert record["end_line"] == 7
+    assert out["uncovered_changes"] == []
+    assert out["summary"]["uncovered_changes"] == 0
 
 
 def test_git_diff_per_hunk_shape_and_deleted(tmp_path):

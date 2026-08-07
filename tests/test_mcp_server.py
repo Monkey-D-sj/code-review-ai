@@ -94,7 +94,7 @@ def test_get_change_summary_tool(tmp_path):
     tools = server._tool_manager._tools
     assert "get_change_summary" in tools
     data = json.loads(tools["get_change_summary"].fn(symbols=[Q("auth", "login")]))
-    assert set(data) == {"summary", "changed_functions"}
+    assert set(data) == {"summary", "changed_functions", "uncovered_changes"}
     assert data["summary"]["changed_functions"] == 1
     record = data["changed_functions"][0]
     assert record["qname"] == Q("auth", "login")

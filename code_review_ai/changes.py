@@ -208,8 +208,10 @@ def _symbols_summary(config: Config, conn, symbols: list[str]) -> dict:
         records.append({"qname": symbol, "kind": row["kind"], "file": rel,
                         "start_line": row["start_line"], "end_line": row["end_line"]})
     return {"summary": {"files_changed": len(files), "lines_added": 0,
-                        "lines_removed": 0, "changed_functions": len(symbols)},
-            "changed_functions": records}
+                        "lines_removed": 0, "changed_functions": len(symbols),
+                        "uncovered_changes": 0},
+            "changed_functions": records,
+            "uncovered_changes": []}
 
 
 def build_change_summary(config: Config, conn, symbols: list[str] | None = None,

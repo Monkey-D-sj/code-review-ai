@@ -28,7 +28,7 @@ def test_cli_summary(tmp_path, capsys):
                  "--repo", FIX, "--db", str(tmp_path / "c.db")])
     assert code == 0
     data = json.loads(capsys.readouterr().out)
-    assert set(data) == {"summary", "changed_functions"}
+    assert set(data) == {"summary", "changed_functions", "uncovered_changes"}
     assert data["summary"]["changed_functions"] == 1
     assert data["changed_functions"][0]["qname"] == Q("auth", "login")
 
