@@ -90,3 +90,14 @@ def test_init_schema_migrates_decorators_column(tmp_path):
         "SELECT decorators FROM nodes WHERE qualified_name='mod::old'"
     ).fetchone()
     assert row["decorators"] is None
+
+
+def test_init_schema_creates_tombstones_table(tmp_path):
+    conn = connect(str(tmp_path / "t.db"))
+    init_schema(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(tombstones)")}
+    assert {"qname", "kind", "file_path", "start_line", "end_line",
+            "signature", "is_test", "decorators", "deleted_at_head",
+            "file_deleted", "upstream_json"} <= cols
+    assert conn.execute("SELECT COUNT(*) FROM tombstones").fetchone()[0] == 0
+    init_schema(conn)  # 幂等

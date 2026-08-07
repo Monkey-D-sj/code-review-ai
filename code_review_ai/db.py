@@ -74,10 +74,27 @@ CREATE TABLE IF NOT EXISTS files (
     size INTEGER,
     file_hash TEXT
 );
+CREATE TABLE IF NOT EXISTS tombstones (
+    id INTEGER PRIMARY KEY,
+    qname TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    language TEXT,
+    file_path TEXT NOT NULL,
+    start_line INTEGER,
+    end_line INTEGER,
+    signature TEXT,
+    is_test INTEGER NOT NULL DEFAULT 0,
+    decorators TEXT,
+    deleted_at_head TEXT,
+    file_deleted INTEGER NOT NULL DEFAULT 0,
+    upstream_json TEXT NOT NULL DEFAULT '[]'
+);
 CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
 CREATE INDEX IF NOT EXISTS idx_memberships_node ON flow_memberships(node_id);
 CREATE INDEX IF NOT EXISTS idx_community_memberships_node ON community_memberships(node_id);
+CREATE INDEX IF NOT EXISTS idx_tombstones_file ON tombstones(file_path);
+CREATE INDEX IF NOT EXISTS idx_tombstones_qname ON tombstones(qname);
 """
 
 
