@@ -1,3 +1,5 @@
+import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -116,6 +118,7 @@ def _resolve_diff_base(config: Config) -> str:
 def _diff_coverage(config: Config, diff_ranges: dict[str, list[tuple[int, int]]],
                    numstat: dict[str, tuple[int, int]], deleted: set[str],
                    kinds: tuple[str, ...] = ("function", "method", "class"),
+                   covered_files: set[str] | None = None,
                    ) -> tuple[list[dict], list[dict]]:
     """Split a diff into function-level records and uncovered hunks.
 
@@ -124,18 +127,24 @@ def _diff_coverage(config: Config, diff_ranges: dict[str, list[tuple[int, int]]]
     (unsupported extension, module-level change, binary, deleted) becomes an
     uncovered_changes entry — {file, hunks: [{start, count}], deleted?} — so
     no change silently disappears. Returns (records, uncovered_changes).
+    `covered_files` is the set of files whose deletions delete_change reports;
+    a deleted or empty-hunk file in it is suppressed instead of double
+    reporting it as uncovered.
     """
+    covered_files = covered_files or set()
     repo = config.repo_path
     records: list[dict] = []
     uncovered: list[dict] = []
     for rel in dict.fromkeys([*numstat, *diff_ranges]):
         if rel in deleted:
-            uncovered.append({"file": rel, "hunks": [], "deleted": True})
+            if rel not in covered_files:
+                uncovered.append({"file": rel, "hunks": [], "deleted": True})
             continue
         hunks = diff_ranges.get(rel)
         if not hunks:
             # in the diff but no line hunks — binary / rename
-            uncovered.append({"file": rel, "hunks": []})
+            if rel not in covered_files:
+                uncovered.append({"file": rel, "hunks": []})
             continue
         path = f"{repo}/{rel}"
         try:
@@ -159,6 +168,52 @@ def _diff_coverage(config: Config, diff_ranges: dict[str, list[tuple[int, int]]]
             uncovered.append({"file": rel,
                               "hunks": [{"start": s, "count": c} for s, c in uncovered_hunks]})
     return records, uncovered
+
+
+def _delete_change(config: Config, conn, deleted_files: set[str],
+                   numstat: dict[str, tuple[int, int]],
+                   ) -> tuple[list[dict], set[str]]:
+    """Deleted-function records for the current diff, from tombstones.
+
+    Candidate files: deleted files + surviving files that removed lines.
+    Tombstones are filtered to qnames no longer in the live graph (a tombstone
+    whose qname was re-added isn't a current deletion), deduped per
+    (file_path, qname) keeping the latest, and each becomes one delete_change
+    record with its one-hop upstream. Returns (records, covered_files);
+    covered_files is the set of files whose deletions delete_change reports so
+    _diff_coverage suppresses their uncovered entries instead of double
+    reporting them."""
+    live = {r["qualified_name"]
+            for r in conn.execute("SELECT qualified_name FROM nodes")}
+    records: list[dict] = []
+    covered: set[str] = set()
+    candidates = set(deleted_files) | {
+        rel for rel, (_, removed) in numstat.items() if removed > 0}
+    for rel in sorted(candidates):
+        abs_path = os.path.join(config.repo_path, rel)
+        rows = conn.execute(
+            "SELECT * FROM tombstones WHERE file_path=?", (abs_path,)).fetchall()
+        latest: dict = {}
+        for row in rows:
+            if row["qname"] in live:
+                continue
+            key = (row["file_path"], row["qname"])
+            if key not in latest or row["id"] > latest[key]["id"]:
+                latest[key] = row
+        file_records = [{
+            "qname": row["qname"], "kind": row["kind"], "file": rel,
+            "file_deleted": bool(row["file_deleted"]),
+            "start_line": row["start_line"], "end_line": row["end_line"],
+            "signature": row["signature"], "is_test": row["is_test"],
+            "upstream": [{"source": u["source"], "kind": u["kind"],
+                          "file": _relative_to_repo(config, u["file"])}
+                         for u in json.loads(row["upstream_json"] or "[]")],
+        } for row in latest.values()]
+        if file_records:
+            file_records.sort(key=lambda r: r["start_line"] or 0)
+            records.extend(file_records)
+            covered.add(rel)
+    return records, covered
 
 
 def _changed_functions(config: Config, diff_ranges: dict[str, list[tuple[int, int]]],
@@ -209,9 +264,10 @@ def _symbols_summary(config: Config, conn, symbols: list[str]) -> dict:
                         "start_line": row["start_line"], "end_line": row["end_line"]})
     return {"summary": {"files_changed": len(files), "lines_added": 0,
                         "lines_removed": 0, "changed_functions": len(symbols),
-                        "uncovered_changes": 0},
+                        "uncovered_changes": 0, "delete_change": 0},
             "changed_functions": records,
-            "uncovered_changes": []}
+            "uncovered_changes": [],
+            "delete_change": []}
 
 
 def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
@@ -230,11 +286,15 @@ def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
     base = _resolve_diff_base(config)
     diff, deleted = _git_diff(base, files, config.repo_path)
     numstat = _git_numstat(base, files, config.repo_path)
-    functions, uncovered = _diff_coverage(config, diff, numstat, deleted)
+    delete_change, covered_files = _delete_change(config, conn, deleted, numstat)
+    functions, uncovered = _diff_coverage(config, diff, numstat, deleted,
+                                          covered_files=covered_files)
     return {"summary": {"files_changed": len(numstat),
                         "lines_added": sum(added for added, _ in numstat.values()),
                         "lines_removed": sum(removed for _, removed in numstat.values()),
                         "changed_functions": len(functions),
-                        "uncovered_changes": len(uncovered)},
+                        "uncovered_changes": len(uncovered),
+                        "delete_change": len(delete_change)},
             "changed_functions": functions,
-            "uncovered_changes": uncovered}
+            "uncovered_changes": uncovered,
+            "delete_change": delete_change}

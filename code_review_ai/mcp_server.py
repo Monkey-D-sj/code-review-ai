@@ -81,13 +81,14 @@ def create_server(config: Config):
     def get_change_summary(symbols: list[str] | None = None,
                            files: list[str] | None = None) -> str:
         """Change summary: from the git diff (diff_base) compute `summary`
-        (diff stats incl. uncovered_changes count) + `changed_functions`
-        (changed function/method/class detail) + `uncovered_changes` (files
-        whose changes no function/class covers — module-level hunks,
-        unsupported extensions, binary and deleted files — so the review
-        knows what the graph cannot attribute). Pass explicit `symbols` to
-        resolve those qnames from the graph instead of the diff. Returns a
-        JSON object."""
+        (diff stats incl. uncovered_changes + delete_change counts) +
+        `changed_functions` (changed function/method/class detail) +
+        `uncovered_changes` (files whose changes no function/class covers —
+        module-level hunks, unsupported extensions, binary, and deleted files
+        without a tombstone) + `delete_change` (deleted functions/modules with
+        their one-hop upstream, from tombstones written at update time). Pass
+        explicit `symbols` to resolve those qnames from the graph instead of
+        the diff. Returns a JSON object."""
         return json.dumps(build_change_summary(config, conn,
                                                symbols=symbols, files=files))
 

@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 
@@ -177,11 +178,12 @@ def test_build_change_summary_diff_path(tmp_path, monkeypatch):
     out = build_change_summary(cfg, _conn(tmp_path))
     assert out["summary"] == {"files_changed": 2, "lines_added": 10,
                               "lines_removed": 2, "changed_functions": 1,
-                              "uncovered_changes": 1}
+                              "uncovered_changes": 1, "delete_change": 0}
     assert out["changed_functions"] == [
         {"qname": Q("auth", "login"), "kind": "function",
          "file": "auth.py", "start_line": 6, "end_line": 7}]
     assert out["uncovered_changes"] == [{"file": "logo.png", "hunks": []}]
+    assert out["delete_change"] == []
 
 
 def test_build_change_summary_symbols_path(tmp_path):
@@ -201,6 +203,8 @@ def test_build_change_summary_symbols_path(tmp_path):
     assert record["end_line"] == 7
     assert out["uncovered_changes"] == []
     assert out["summary"]["uncovered_changes"] == 0
+    assert out["delete_change"] == []
+    assert out["summary"]["delete_change"] == 0
 
 
 def test_git_diff_per_hunk_shape_and_deleted(tmp_path):
@@ -291,3 +295,80 @@ def test_uncovered_invariant(tmp_path, monkeypatch):
     covered = {r["file"] for r in out["changed_functions"]}
     uncovered = {u["file"] for u in out["uncovered_changes"]}
     assert covered | uncovered == {"auth.py", "logo.png"}
+
+
+def _seed_tombstone(conn, qname, kind, rel_file, file_deleted, upstream):
+    conn.execute(
+        "INSERT INTO tombstones(qname,kind,file_path,file_deleted,upstream_json)"
+        " VALUES(?,?,?,?,?)",
+        (qname, kind, os.path.join(FIX, rel_file),
+         1 if file_deleted else 0, json.dumps(upstream)))
+
+
+def test_delete_change_from_tombstone_deleted_file(tmp_path, monkeypatch):
+    cfg = load_config(FIX)
+    cfg.repo_path = FIX       # tombstone file_path is seeded absolute (os.path.join(FIX, ...))
+    import code_review_ai.changes as ch
+    conn = _conn(tmp_path)
+    _seed_tombstone(conn, "auth", "module", "auth.py", True,
+                    [{"source": "app", "kind": "import",
+                      "file": os.path.join(FIX, "app.py")}])
+    _seed_tombstone(conn, "auth::login", "function", "auth.py", True,
+                    [{"source": "app::main", "kind": "call",
+                      "file": os.path.join(FIX, "app.py")}])
+    conn.execute("DELETE FROM nodes WHERE file_path LIKE '%auth.py'")  # watcher 已清
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({}, {"auth.py"}))
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files, cwd=None: {"auth.py": (0, 3)})
+    out = build_change_summary(cfg, conn)
+    assert out["summary"]["delete_change"] == 2
+    by_qname = {r["qname"]: r for r in out["delete_change"]}
+    assert set(by_qname) == {"auth", "auth::login"}
+    assert by_qname["auth"]["kind"] == "module"
+    assert by_qname["auth"]["file_deleted"] is True
+    assert by_qname["auth"]["file"] == "auth.py"
+    assert by_qname["auth"]["upstream"] == [
+        {"source": "app", "kind": "import", "file": "app.py"}]
+    assert by_qname["auth::login"]["upstream"] == [
+        {"source": "app::main", "kind": "call", "file": "app.py"}]
+    assert out["uncovered_changes"] == []   # 被 delete_change 覆盖，不进 uncovered
+
+
+def test_delete_change_from_tombstone_surviving_file(tmp_path, monkeypatch):
+    cfg = load_config(FIX)
+    cfg.repo_path = FIX       # tombstone file_path is seeded absolute (os.path.join(FIX, ...))
+    import code_review_ai.changes as ch
+    conn = _conn(tmp_path)
+    _seed_tombstone(conn, "auth::login", "function", "auth.py", False,
+                    [{"source": "app::main", "kind": "call",
+                      "file": os.path.join(FIX, "app.py")}])
+    conn.execute("DELETE FROM nodes WHERE qualified_name='auth::login'")
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({}, set()))  # 纯删除 -> 无 hunk
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files, cwd=None: {"auth.py": (0, 2)})
+    out = build_change_summary(cfg, conn)
+    assert out["summary"]["delete_change"] == 1
+    record = out["delete_change"][0]
+    assert record["qname"] == "auth::login"
+    assert record["file_deleted"] is False
+    assert record["file"] == "auth.py"
+    assert out["uncovered_changes"] == []   # 空 hunk uncovered 条目被抑制
+
+
+def test_delete_change_ignores_reaadded_qname(tmp_path, monkeypatch):
+    cfg = load_config(FIX)
+    cfg.repo_path = FIX       # tombstone file_path is seeded absolute (os.path.join(FIX, ...))
+    import code_review_ai.changes as ch
+    conn = _conn(tmp_path)
+    _seed_tombstone(conn, "auth::login", "function", "auth.py", False, [])
+    # qname 已重新加入活图 -> 该 tombstone 不是当前删除
+    conn.execute("INSERT INTO nodes(qualified_name,kind) VALUES('auth::login','function')")
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({}, set()))
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files, cwd=None: {"auth.py": (0, 2)})
+    out = build_change_summary(cfg, conn)
+    assert out["delete_change"] == []       # qname 仍在活图 -> 不是当前删除
+    assert out["uncovered_changes"] == [{"file": "auth.py", "hunks": []}]
