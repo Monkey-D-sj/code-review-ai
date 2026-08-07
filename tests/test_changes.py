@@ -86,7 +86,7 @@ def test_files_mode_uses_git_diff(tmp_path, monkeypatch):
     # stub git diff to report a hunk on lines 5-6 of auth.py
     import code_review_ai.changes as ch
 
-    monkeypatch.setattr(ch, "_git_diff", lambda base, files, cwd=None: {"auth.py": [(5, 6)]})
+    monkeypatch.setattr(ch, "_git_diff", lambda base, files, cwd=None: ({"auth.py": [(5, 6)]}, set()))
     out = detect_changed_symbols(cfg, files=["auth.py"])
     # authenticate() spans lines 2-3 in fixture; login() lines 6-7 -> line 6 hits login
     assert Q("auth","login") in out
@@ -109,7 +109,7 @@ def test_deleted_symbol_reported(tmp_path, monkeypatch):
     cfg = load_config(FIX)
     import code_review_ai.changes as ch
 
-    monkeypatch.setattr(ch, "_git_diff", lambda base, files, cwd=None: {"auth.py": [(2, 3)]})
+    monkeypatch.setattr(ch, "_git_diff", lambda base, files, cwd=None: ({"auth.py": [(2, 3)]}, set()))
     out = detect_changed_symbols(cfg, files=["auth.py"])
     assert Q("auth","authenticate",Q("auth","UserService")) in out
 
@@ -150,7 +150,7 @@ def test_changed_functions_includes_class():
 def test_detect_changed_symbols_still_excludes_classes(monkeypatch):
     cfg = load_config(FIX)
     import code_review_ai.changes as ch
-    monkeypatch.setattr(ch, "_git_diff", lambda base, files, cwd=None: {"auth.py": [(1, 3)]})
+    monkeypatch.setattr(ch, "_git_diff", lambda base, files, cwd=None: ({"auth.py": [(1, 3)]}, set()))
     out = detect_changed_symbols(cfg, files=["auth.py"])
     assert Q("auth", "UserService") not in out               # class excluded
     assert Q("auth", "authenticate", Q("auth", "UserService")) in out  # method kept
@@ -170,7 +170,7 @@ def test_changed_functions_skips_unsupported_files(monkeypatch):
 def test_build_change_summary_diff_path(tmp_path, monkeypatch):
     cfg = load_config(FIX)
     import code_review_ai.changes as ch
-    monkeypatch.setattr(ch, "_git_diff", lambda base, files, cwd=None: {"auth.py": [(6, 7)]})
+    monkeypatch.setattr(ch, "_git_diff", lambda base, files, cwd=None: ({"auth.py": [(6, 7)]}, set()))
     monkeypatch.setattr(ch, "_git_numstat",
                         lambda base, files, cwd=None: {"auth.py": (10, 2), "logo.png": (0, 0)})
     out = build_change_summary(cfg, _conn(tmp_path))
@@ -196,3 +196,16 @@ def test_build_change_summary_symbols_path(tmp_path):
     assert record["file"] == "auth.py"
     assert record["start_line"] == 6
     assert record["end_line"] == 7
+
+
+def test_git_diff_per_hunk_shape_and_deleted(tmp_path):
+    """_git_diff returns per-hunk (start, count) and flags deleted files."""
+    repo = _git_repo(tmp_path)
+    _commit(repo, "a.py", "x = 1\ny = 2\nz = 3\n")
+    _commit(repo, "b.py", "keep = True\n")
+    (repo / "b.py").unlink()                                          # tracked deletion
+    (repo / "a.py").write_text("x = 1\ny = 2\nz = 3\nw = 4\n", encoding="utf-8")
+    import code_review_ai.changes as ch
+    ranges, deleted = ch._git_diff("HEAD", None, str(repo))
+    assert "b.py" in deleted
+    assert ranges["a.py"] == [(4, 1)]   # +4,1 hunk: new-side start=4, count=1

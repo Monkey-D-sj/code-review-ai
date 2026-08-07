@@ -20,8 +20,13 @@ def current_head(config: Config) -> str | None:
 
 
 def _git_diff(base: str, files: list[str] | None,
-              cwd: str | None = None) -> dict[str, list[tuple[int, int]]]:
-    """Return {file_path: [(start, end), ...]} changed line ranges (added/removed)."""
+              cwd: str | None = None) -> tuple[dict[str, list[tuple[int, int]]], set[str]]:
+    """Return ({file: [(start, count), ...]}, deleted_files).
+
+    Each hunk is git's new-side ``+b,m`` (start, count) — position and size
+    together. deleted_files is the set of pure deletions (``+++ /dev/null``),
+    which produce no + hunks and so would otherwise be invisible.
+    """
     args = ["git", "diff", "--unified=0", base]
     if files:
         args += ["--"] + files
@@ -35,24 +40,35 @@ def _git_diff(base: str, files: list[str] | None,
             f"git diff failed (exit {out.returncode}): {out.stderr.strip()}"
         )
     ranges: dict[str, list[tuple[int, int]]] = {}
-    cur_file = None
+    deleted: set[str] = set()
+    cur_file: str | None = None
+    cur_a: str | None = None
     for line in out.stdout.splitlines():
-        m = re.match(r"^\+\+\+ b/(.+)$", line)
-        if m:
-            cur_file = m.group(1)
+        a = re.match(r"^--- a/(.+)$", line)
+        if a:
+            cur_a = a.group(1)
+            continue
+        b = re.match(r"^\+\+\+ b/(.+)$", line)
+        if b:
+            cur_file = b.group(1)
             ranges.setdefault(cur_file, [])
+            continue
+        if re.match(r"^\+\+\+ (?:b/)?/dev/null$", line) and cur_a:
+            deleted.add(cur_a)
+            cur_file = None
             continue
         h = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
         if h and cur_file:
             start = int(h.group(1))
             count = int(h.group(2)) if h.group(2) else 1
             if count > 0:
-                ranges[cur_file].append((start, start + count - 1))
-    return ranges
+                ranges[cur_file].append((start, count))
+    return ranges, deleted
 
 
-def _overlaps(start: int, end: int, ranges: list[tuple[int, int]]) -> bool:
-    return any(not (end < s or start > e) for s, e in ranges)
+def _overlaps(start: int, end: int, hunks: list[tuple[int, int]]) -> bool:
+    """True if node range [start, end] overlaps any hunk (start, count)."""
+    return any(not (end < s or start > s + c - 1) for s, c in hunks)
 
 
 def _git_numstat(base: str, files: list[str] | None = None,
@@ -134,7 +150,7 @@ def detect_changed_symbols(config: Config,
     callers surface the misconfiguration instead of returning an empty list."""
     if symbols is not None:
         return list(symbols)
-    diff = _git_diff(_resolve_diff_base(config), files, config.repo_path)
+    diff, _ = _git_diff(_resolve_diff_base(config), files, config.repo_path)
     return [record["qname"] for record in _changed_functions(
         config, diff, kinds=("function", "method"))]
 
@@ -177,7 +193,7 @@ def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
     if symbols is not None:
         return _symbols_summary(config, conn, symbols)
     base = _resolve_diff_base(config)
-    diff = _git_diff(base, files, config.repo_path)
+    diff, _deleted = _git_diff(base, files, config.repo_path)
     numstat = _git_numstat(base, files, config.repo_path)
     functions = _changed_functions(config, diff)
     return {"summary": {"files_changed": len(numstat),
