@@ -236,3 +236,27 @@ PetClinic 索引里新增 **51 条**进入 Repository 方法的 resolved 边（`
 - `1cad4124b7` / `e0db9b184e`：Controller → Service → Repository 的业务链已有 51 条 Repository 边，但 Service 层的字段/构造器注入绑定、以及「测试直连 Service」到「Controller 经 Service」的连通仍需 Spring Bean/DI 语义（P0）；
 - `50866def72`：改动在实体/Validator，Controller test 经 `@Valid`/Validator 语义链（P1）才可达；
 - `40a41375e6`：提交级噪声，静态图无法召回。
+
+## 类级 @RequestMapping 前缀后结果（2026-08-07）
+
+实现类级 `@RequestMapping` 前缀合并（`docs/superpowers/specs/2026-08-07-class-level-requestmapping-prefix-design.md`）后重跑：
+
+| 指标 | 类型绑定后 | 前缀合并后 | 变化 |
+|---|---:|---:|---:|
+| Test Recall@10 / @All | 65.00% | **78.33%** | +13.33pp |
+| Test Precision@10 | 11.03% | **15.32%** | +4.29pp |
+| Production Recall@All | 34.90% | **30.21%** | -4.69pp |
+
+per-case 关键变化：
+
+- `50866def72` pet validation：0% → **100%**（PetController 的 `/owners/{ownerId}/pets/new` 路由拼上前缀后命中 `PetControllerTests`）；
+- `e0db9b184e` unique pet names：0% → **33.33%**（`PetControllerTests` 命中；`ClinicServiceTests`/`PetClinicConcurrencyTests` 仍是提交级 co-change，非静态可达）；
+- 其余 case 不变。10 个 case 中 **8 个**至少命中一个 gold test。
+
+**Production Recall 小幅回退（34.90% → 30.21%）**：来自单个生产文件 fold（`1cad4124b7` 第 3 个 fold，1.0 → 0.5）。原因是新增的 PetController route 边改变了该 fold 的候选集合（cand 5 → 4），一个 gold 生产文件被挤出。这是「加边改变候选构成」的副作用，不是前缀逻辑错误（拼接后的路由是准确的）。Test 主指标净提升 +13pp。
+
+**剩余零/部分命中归因**：
+
+- `e0db9b184e` 的 `ClinicServiceTests`/`PetClinicConcurrencyTests`：改动在 PetController 校验逻辑，这两个 test 直连 Repository/Service 层，与改动符号无静态调用链（co-change）；
+- `1cad4124b7` 的 `ClinicServiceTests`：只调 `findById`/`findPetTypes`，改动的是 `findByLastName`/`findAll`（co-change）；
+- `40a41375e6`：提交级噪声，无调用关系。
