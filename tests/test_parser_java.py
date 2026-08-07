@@ -101,6 +101,25 @@ def test_extract_inherits_interface_extends_type_list():
     assert ("extends", "Marker") in ih
 
 
+def test_java_class_level_requestmapping_prefix(tmp_path):
+    src = tmp_path / "PetController.java"
+    src.write_text(
+        "package com.example;\n"
+        "@RequestMapping(\"/owners/{ownerId}\")\n"
+        "class PetController {\n"
+        "    @GetMapping(\"/pets/new\")\n"
+        "    public String initCreationForm() { return null; }\n"
+        "    @PostMapping(\"/pets/new\")\n"
+        "    public String processCreationForm() { return null; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(src), str(tmp_path))
+    by = {n.qualified_name: n.mappings for n in pf.nodes}
+    assert by["com.example::PetController.initCreationForm"] == [("GET", "/owners/{ownerId}/pets/new")]
+    assert by["com.example::PetController.processCreationForm"] == [("POST", "/owners/{ownerId}/pets/new")]
+
+
 def test_java_var_types_collected(tmp_path):
     src = tmp_path / "OwnerController.java"
     src.write_text(

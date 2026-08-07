@@ -449,6 +449,54 @@ def _java_locals(node, scope) -> None:
         _java_locals(child, scope)
 
 
+def _collect_java_mappings(root, module_qname, lang) -> dict[str, list[tuple[str, str]]]:
+    """Class-prefixed Spring mappings per method qname.
+
+    PetController uses a class-level @RequestMapping(\"/owners/{ownerId}\") plus
+    method-level @GetMapping(\"/pets/new\"); the full route is the concatenation.
+    Computed in a dedicated pass because it needs the enclosing class context."""
+    out: dict[str, list[tuple[str, str]]] = {}
+    class_defs = lang.get("class_def_nodes")
+    for child in root.children:
+        if class_defs and child.type in class_defs:
+            _java_class_mappings(child, module_qname, lang, out)
+    return out
+
+
+def _java_class_mappings(node, module_qname, lang, out) -> None:
+    body = node.child_by_field_name("body")
+    members = body.children if body is not None else []
+    prefix_paths: list[str] = []
+    for ann in _annotation_children(node, _decorator_types(lang), lang):
+        if _decorator_name(ann) == "RequestMapping":
+            prefix_paths.extend(_annotation_strings(ann))
+    cls_name_node = node.child_by_field_name("name")
+    cls_qname = (qname.join(module_qname, cls_name_node.text.decode("utf-8"))
+                 if cls_name_node is not None else None)
+    for member in members:
+        if member.type not in ("method_declaration", "constructor_declaration"):
+            continue
+        method_name = member.child_by_field_name("name")
+        if method_name is None:
+            continue
+        method_qn = qname.join(module_qname, method_name.text.decode("utf-8"), cls_qname)
+        mappings = _java_mappings(member, lang)
+        if prefix_paths:
+            mappings = [(method, _join_mapping_path(prefix, path))
+                        for method, path in mappings
+                        for prefix in prefix_paths]
+        if mappings:
+            out[method_qn] = mappings
+
+
+def _join_mapping_path(prefix: str, path: str) -> str:
+    if not prefix or prefix == "/":
+        return path
+    if path.startswith("/"):
+        return prefix.rstrip("/") + path
+    return prefix.rstrip("/") + "/" + path
+
+
 def _sig(source: bytes, node) -> str:
     body = node.child_by_field_name("body")
     end = body.start_byte if body else node.end_byte
@@ -590,13 +638,11 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
             decorators = list(pending)
             if deco_types:
                 decorators.extend(_decorator_names(child, lang))
-            mappings = (_java_mappings(child, lang)
-                        if lang.get("annotations_in_modifiers") else [])
             output.append(ParsedNode(
                 qualified_name=qn, kind=kind, file_path="",
                 start_line=child.start_point[0] + 1, end_line=child.end_point[0] + 1,
                 signature=_sig(source, child), parent_qname=scope_qname,
-                decorators=decorators, mappings=mappings,
+                decorators=decorators,
             ))
             pending = []
             _walk_defs_typed(child, source, module_qname, qn, kind, lang, output)
@@ -731,6 +777,10 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     _walk_inherits(root, module_qname, lang, pf.inherits)
     if lang_name == "java":
         pf.var_types = _collect_java_var_types(root, module_qname, lang)
+        mappings = _collect_java_mappings(root, module_qname, lang)
+        for n in pf.nodes:
+            if n.qualified_name in mappings:
+                n.mappings = mappings[n.qualified_name]
 
     # Dedup nodes — keep first occurrence of each qualified_name (inner
     # functions with the same name can appear in nested scopes).

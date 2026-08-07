@@ -52,3 +52,36 @@ def test_path_normalization_and_mismatch(tmp_path):
     assert _segments_match(["owners", "1"], ["owners", "{ownerId}"]) is True
     assert _segments_match(["owners"], ["owners", "new"]) is False
     assert _segments_match(["owners", "1", "edit"], ["owners", "1"]) is False
+
+
+def test_route_edges_with_class_prefix(tmp_path):
+    ctrl = tmp_path / "PetController.java"
+    ctrl.write_text(
+        "package com.example;\n"
+        "@RequestMapping(\"/owners/{ownerId}\")\n"
+        "class PetController {\n"
+        "    @GetMapping(\"/pets/new\")\n"
+        "    public String initCreationForm() { return null; }\n"
+        "    @PostMapping(\"/pets/new\")\n"
+        "    public String processCreationForm() { return null; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    test = tmp_path / "PetControllerTests.java"
+    test.write_text(
+        "package com.example;\n"
+        "class PetControllerTests {\n"
+        "    void newForm() { mockMvc.perform(get(\"/owners/7/pets/new\")); }\n"
+        "    void create() { mockMvc.perform(post(\"/owners/7/pets/new\")); }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    files = [parse_file(str(ctrl), str(tmp_path)),
+             parse_file(str(test), str(tmp_path))]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert ("com.example::PetControllerTests.newForm",
+            "com.example::PetController.initCreationForm", "resolved") in by
+    assert ("com.example::PetControllerTests.create",
+            "com.example::PetController.processCreationForm", "resolved") in by
