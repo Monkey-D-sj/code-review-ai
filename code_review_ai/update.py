@@ -127,8 +127,63 @@ def _classify_hint(config, conn, changed_paths: list[str]):
     return changed, added, deleted
 
 
+def _tombstone_upstream(conn, qname: str, deleted_qnames: set[str]) -> list[dict]:
+    """One-hop upstream (call/inherits/import) of a deleted qname, excluding
+    sources being deleted in this same batch. Runs before the delete loop so
+    the edges are still the resolved pre-deletion state."""
+    rows = conn.execute(
+        "SELECT source, kind, file_path FROM edges "
+        "WHERE target=? AND kind IN ('call','inherits','import')",
+        (qname,)).fetchall()
+    return [{"source": r["source"], "kind": r["kind"], "file": r["file_path"]}
+            for r in rows if r["source"] not in deleted_qnames]
+
+
+def _collect_tombstones(conn, repo, parsed, changed_set: set[str],
+                        deleted_set: set[str], config) -> list[tuple]:
+    """Tombstone rows for deletions in this batch, captured BEFORE the delete
+    loop (edges still resolved). Whole-file deletions tombstone every old node
+    (file_deleted=1); deletions inside a re-parsed surviving file are the
+    old−new qname delta (file_deleted=0). Returns rows in _insert_tombstones
+    column order."""
+    parsed_qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
+    deleted_qnames: set[str] = set()
+    pending: list[tuple] = []   # (old_node_row, file_deleted)
+    for rel in sorted(changed_set | deleted_set):
+        abs_path = os.path.join(repo, rel)
+        rows = conn.execute(
+            "SELECT * FROM nodes WHERE file_path=?", (abs_path,)).fetchall()
+        if rel in deleted_set:
+            pending.extend((r, 1) for r in rows)
+            deleted_qnames.update(r["qualified_name"] for r in rows)
+        else:
+            delta = [r for r in rows if r["qualified_name"] not in parsed_qnames]
+            pending.extend((r, 0) for r in delta)
+            deleted_qnames.update(r["qualified_name"] for r in delta)
+    head = current_head(config)
+    out: list[tuple] = []
+    for row, file_deleted in pending:
+        upstream = _tombstone_upstream(conn, row["qualified_name"],
+                                       deleted_qnames)
+        out.append((row["qualified_name"], row["kind"], row["language"],
+                    row["file_path"], row["start_line"], row["end_line"],
+                    row["signature"], row["is_test"], row["decorators"],
+                    head, file_deleted, json.dumps(upstream)))
+    return out
+
+
+def _insert_tombstones(conn, rows: list[tuple]) -> None:
+    conn.executemany(
+        "INSERT INTO tombstones(qname,kind,language,file_path,start_line,"
+        "end_line,signature,is_test,decorators,deleted_at_head,file_deleted,"
+        "upstream_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+
 def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
                              deleted_set: set[str], config) -> tuple[int, int]:
+    tombstone_rows = _collect_tombstones(
+        conn, repo, parsed, changed_set, deleted_set, config)
+    _insert_tombstones(conn, tombstone_rows)
     touch = [os.path.join(repo, rel) for rel in changed_set | deleted_set]
     removed_ids: list[int] = []
     for abs_path in touch:

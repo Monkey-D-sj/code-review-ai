@@ -363,3 +363,85 @@ def test_decorators_persisted_on_full_and_incremental(tmp_path):
         "SELECT decorators FROM nodes WHERE qualified_name='web::index'"
     ).fetchone()
     assert json.loads(row["decorators"]) == ["app.route", "cache"]
+
+
+def test_update_deletes_file_writes_tombstones(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    # app.py 已调用 auth.login（call 边）且 import auth（import 边）
+    (repo / "auth.py").unlink()
+    upd.update_nodes_edges(cfg, conn, ["auth.py"])
+    rows = conn.execute(
+        "SELECT qname,kind,file_deleted FROM tombstones "
+        "WHERE file_path LIKE '%auth.py'").fetchall()
+    assert {r["qname"] for r in rows} == {
+        "auth", "auth::login", "auth::UserService",
+        "auth::UserService.authenticate"}
+    assert all(r["file_deleted"] == 1 for r in rows)
+    login_up = json.loads(conn.execute(
+        "SELECT upstream_json FROM tombstones WHERE qname='auth::login'"
+    ).fetchone()[0])
+    assert any(u["source"] == "app::main" and u["kind"] == "call"
+               for u in login_up)
+    mod_up = json.loads(conn.execute(
+        "SELECT upstream_json FROM tombstones WHERE qname='auth'"
+    ).fetchone()[0])
+    assert any(u["source"] == "app" and u["kind"] == "import" for u in mod_up)
+    # 节点与边已清（原行为不变）
+    assert conn.execute(
+        "SELECT COUNT(*) FROM nodes WHERE file_path LIKE '%auth.py'"
+    ).fetchone()[0] == 0
+
+
+def test_update_deletes_function_in_surviving_file_writes_tombstone(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    # 移除 login()，保留 UserService
+    (repo / "auth.py").write_text(
+        "class UserService:\n    def authenticate(self, user, pw) -> bool:\n"
+        "        return check(pw)\n", encoding="utf-8")
+    upd.update_nodes_edges(cfg, conn, ["auth.py"])
+    row = conn.execute(
+        "SELECT * FROM tombstones WHERE qname='auth::login'").fetchone()
+    assert row is not None and row["file_deleted"] == 0
+    upstream = json.loads(row["upstream_json"])
+    assert any(u["source"] == "app::main" and u["kind"] == "call"
+               for u in upstream)
+    assert conn.execute(
+        "SELECT COUNT(*) FROM nodes WHERE qualified_name='auth::UserService'"
+    ).fetchone()[0] == 1
+    assert conn.execute(
+        "SELECT COUNT(*) FROM nodes WHERE qualified_name='auth::login'"
+    ).fetchone()[0] == 0
+
+
+def test_tombstones_survive_rebuild(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    (repo / "auth.py").unlink()
+    upd.update_nodes_edges(cfg, conn, ["auth.py"])
+    before = conn.execute("SELECT COUNT(*) FROM tombstones").fetchone()[0]
+    assert before > 0
+    from code_review_ai.indexer import rebuild
+    rebuild(cfg, conn)
+    after = conn.execute("SELECT COUNT(*) FROM tombstones").fetchone()[0]
+    assert after == before          # 全量重建不清 tombstone
+
+
+def test_tombstone_upstream_excludes_same_batch_sources(tmp_path):
+    repo, cfg = _git_repo(tmp_path)
+    (repo / "mod.py").write_text(
+        "def inner():\n    pass\n\n\ndef outer():\n    inner()\n",
+        encoding="utf-8")
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    (repo / "mod.py").unlink()
+    upd.update_nodes_edges(cfg, conn, ["mod.py"])
+    inner = conn.execute(
+        "SELECT upstream_json FROM tombstones WHERE qname='mod::inner'"
+    ).fetchone()
+    assert inner is not None
+    assert json.loads(inner[0]) == []   # mod::outer 同批被删，排除
