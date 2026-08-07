@@ -18,6 +18,7 @@ benchmark-results/
 
 # Generated exports
 *.html
+*.debug.log
 
 hmg-ai-agent-platform-frontend
 hmg-ai-agent-platform-backend
