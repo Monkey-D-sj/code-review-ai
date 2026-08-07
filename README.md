@@ -134,22 +134,28 @@ per case. Use `--limit 1` for a smoke test. The committed manifest can be
 regenerated from Hugging Face rows JSON with
 `scripts/generate_swebench_manifest.py`; raw dataset files are not vendored.
 
-### FastAPI historical suite
+### FastAPI and Spring Boot historical suites
 
 FastAPI is not part of classic SWE-bench Verified, so its cases are labelled
 separately instead of being presented as Verified samples.
 `benchmarks/fastapi-history-10.json` contains 10 commits from the official
 FastAPI repository that changed both production Python and tests. Cases cover
 routing, applications, SSE, compatibility, encoding, dependencies/OpenAPI,
-headers, and responses. `benchmarks/historical-suite-40.json` combines these
-with the 30 Verified cases.
+headers, and responses.
+
+`benchmarks/spring-petclinic-history-10.json` adds 10 Java commits from the
+official Spring PetClinic repository. They cover Spring MVC controllers,
+repositories, validators, entities, and JUnit tests. The production files are
+under `src/main/java/`; the retrieval targets are the corresponding changed
+files under `src/test/java/`. `benchmarks/historical-suite-50.json` combines
+both history subsets with the 30 Verified cases.
 
 ```bash
 uv run python scripts/run_swebench_suite.py \
-  --cases benchmarks/historical-suite-40.json \
-  --dataset-name "SWE-bench Verified + FastAPI Git history" \
+  --cases benchmarks/historical-suite-50.json \
+  --dataset-name "SWE-bench Verified + FastAPI + Spring PetClinic Git history" \
   --cache-dir .benchmark-cache --top-k 10 \
-  --out benchmark-results/historical-suite-40.json
+  --out benchmark-results/historical-suite-50.json
 ```
 
 Regenerate the FastAPI subset from an official local clone with:
@@ -158,6 +164,20 @@ Regenerate the FastAPI subset from an official local clone with:
 uv run python scripts/generate_git_history_manifest.py \
   --repo-path ../fastapi --count 10 \
   --out benchmarks/fastapi-history-10.json
+```
+
+Regenerate the Spring PetClinic subset from an official local clone with:
+
+```bash
+uv run python scripts/generate_git_history_manifest.py \
+  --repo-path ../spring-petclinic \
+  --repo spring-projects/spring-petclinic \
+  --production-prefix src/main/java/ --test-prefix src/test/java/ \
+  --suffix .java --count 10 --scan 3000 --prefer-recent \
+  --max-gold-files 5 --max-production-files 5 \
+  --exclude-subject upgrade --exclude-subject migrate \
+  --exclude-subject copyright --exclude-subject formatting \
+  --out benchmarks/spring-petclinic-history-10.json
 ```
 
 For commits changing two or more production files, the same run also performs
@@ -204,19 +224,38 @@ uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai \
 Writes the usual post-* sync hooks plus a review-enabled `post-commit`: it syncs
 the index, summarizes the commit's change impact (`summary --files <changed>`
 diffed against `HEAD^`, i.e. the commit itself, so it works before `origin/main`
-exists), pipes that JSON into `claude -p`, and writes the report to
-`.code-review-ai/last-review.md`. Tune the LLM command, output path, and fallback
+exists), pipes that JSON into the review LLM, and writes the report to
+`.code-review-ai/last-review.md`. Each review is also archived under
+`.code-review-ai/reviews/<date>/<date>-<time>-<short-sha>.md` (with a concise
+`.debug.log` trace — one line per tool/skill/MCP call plus its result — and,
+for claude-code, a `.debug.jsonl` raw `stream-json` transcript for deeper
+dives), so history is kept and `last-review.md` always points at the newest.
+The review prompt steers the LLM to prefer code-review-ai's MCP tools
+(`get_impact` / `get_change_summary` / `search_symbol` / `query_graph`) and the
+`code-review` skills over raw `git diff`/`grep`, and the headless run
+pre-authorizes those tools so they don't fail on permission prompts. The LLM
+platform is selectable — `claude-code` (default, runs `claude -p
+--output-format stream-json --verbose`, extracting the answer from the
+transcript) or `codex` (runs `codex exec --full-auto`, which takes the summary
+on stdin as prompt context). Tune the platform, output path, and fallback
 source:
 
 ```bash
 code-review-ai install-hooks --review \
-  --review-launch "claude -p" \
+  --platform codex \
   --review-out .code-review-ai/last-review.md \
   --from git+https://github.com/Monkey-D-sj/code-review-ai
 ```
 
+`--review-launch "your command"` overrides the platform's review command
+entirely (e.g. `--review-launch "codex exec"`).
+
 `--review` only affects the post-commit hook; post-merge / post-checkout /
 post-rewrite still sync only.
+
+Hooks land wherever git actually reads them: `core.hooksPath` if set, else
+`.git/hooks`. Under husky the hooks go to `.husky/` (its `core.hooksPath` points
+at the auto-generated `.husky/_` shim dir, which sources the `.husky/*` files).
 
 ### Review each MR/PR in CI
 

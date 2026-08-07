@@ -1,5 +1,5 @@
 from code_review_ai.parser import parse_file
-from code_review_ai.resolver import resolve_calls
+from code_review_ai.resolver import resolve_calls, resolve_edges
 
 from conftest import FIXTURES as FIX, Q
 
@@ -46,8 +46,10 @@ def test_reexport_through_package_init(tmp_path):
     consumer.write_text(
         "from pkg import Session\n"
         "import pkg as p\n"
-        "a = Session()\n"
-        "b = p.Session()\n",
+        "def use_import():\n"
+        "    return Session()\n"      # from pkg import Session
+        "def use_alias():\n"
+        "    return p.Session()\n",   # import pkg as p
         encoding="utf-8",
     )
     files = [parse_file(str(pkg / "__init__.py"), str(tmp_path)),
@@ -57,10 +59,12 @@ def test_reexport_through_package_init(tmp_path):
     edges = resolve_calls(files, qnames)
     by = {(e.source, e.target, e.resolution) for e in edges}
     # both `Session()` (from pkg import) and `p.Session()` (import pkg as p)
-    # must resolve to the real class through the package __init__ re-export
-    assert ("consumer", "pkg.impl::Session", "resolved") in by
-    # There are exactly TWO such call sites (a = Session(); b = p.Session()).
-    # A set-membership assert would pass if one path regressed, so pin the count.
+    # must resolve to the real class through the package __init__ re-export.
+    # The two call sites live in distinct functions so they stay separate
+    # edges after per-(source,target,kind) dedup.
+    assert (Q("consumer", "use_import"), "pkg.impl::Session", "resolved") in by
+    assert (Q("consumer", "use_alias"), "pkg.impl::Session", "resolved") in by
+    # Pin the count: a set-membership assert would pass if one path regressed.
     resolved_to_session = [edge for edge in edges
                            if edge.target == "pkg.impl::Session"
                            and edge.resolution == "resolved"]
@@ -84,6 +88,33 @@ def test_constructor_links_to_init(tmp_path):
     assert ("svc", "svc::Service.__init__", "call", "resolved") in by  # to __init__
 
 
+def test_resolve_dedups_repeated_calls_same_target(tmp_path):
+    """A function calling the same target N times yields one graph edge, not N.
+
+    Repeated calls within one function carry no topological meaning for
+    impact/flow queries; the first occurrence's call_line is retained and no
+    call_count is kept.
+    """
+    src = tmp_path / "rep.py"
+    src.write_text(
+        "def helper():\n"
+        "    pass\n"
+        "def caller():\n"
+        "    helper()\n"      # line 4 - first occurrence
+        "    helper()\n"      # line 5 - duplicate
+        "    helper()\n",     # line 6 - duplicate
+        encoding="utf-8",
+    )
+    files = [parse_file(str(src), str(tmp_path))]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_calls(files, qnames)
+    rep = [e for e in edges if e.source == Q("rep", "caller")
+           and e.target == Q("rep", "helper")]
+    assert len(rep) == 1
+    assert rep[0].call_line == 4
+    assert rep[0].resolution == "resolved"
+
+
 def test_src_layout_test_reaches_changed_symbol(tmp_path):
     pkg = tmp_path / "src" / "app"
     pkg.mkdir(parents=True)
@@ -105,3 +136,70 @@ def test_src_layout_test_reaches_changed_symbol(tmp_path):
     by = {(edge.source, edge.target, edge.resolution) for edge in edges}
     # test function is a resolved caller of the real symbol behind `from app import login`
     assert ("tests.test_app::test_login", "app.service::login", "resolved") in by
+
+
+# ── path-alias (tsconfig @/* -> src/*) resolution ─────────────────────
+
+
+def _alias_fixture(tmp_path):
+    """A Vite-style TS layout: hook module + .ts and .vue pages that import it
+    through the `@/` alias (mirrors hmg-ai-agent-platform-frontend)."""
+    hook = tmp_path / "src" / "hooks" / "useSelectOptions.ts"
+    hook.parent.mkdir(parents=True)
+    hook.write_text(
+        "export function useSelectOptions() {}\n"
+        "export function load() { useSelectOptions(); }\n",
+        encoding="utf-8",
+    )
+    page = tmp_path / "src" / "views" / "policy" / "index.ts"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        'import { useSelectOptions } from "@/hooks/useSelectOptions";\n'
+        "useSelectOptions();\n",
+        encoding="utf-8",
+    )
+    vue = tmp_path / "src" / "views" / "policy" / "page.vue"
+    vue.write_text(
+        "<template><div/></template>\n"
+        '<script setup lang="ts">\n'
+        'import { useSelectOptions } from "@/hooks/useSelectOptions";\n'
+        "useSelectOptions();\n"
+        "</script>\n",
+        encoding="utf-8",
+    )
+    return [parse_file(str(p), str(tmp_path)) for p in (hook, page, vue)]
+
+
+def test_ts_alias_imports_resolve_with_path_aliases(tmp_path):
+    files = _alias_fixture(tmp_path)
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames, {"@/": "src/"})
+    by = {(e.source, e.target, e.kind, e.resolution) for e in edges}
+    # import edges: both the .ts and the .vue page reach the hook module via @/
+    assert ("views.policy.index", "hooks.useSelectOptions", "import", "resolved") in by
+    assert ("views.policy.page", "hooks.useSelectOptions", "import", "resolved") in by
+    # call edges resolve to the real function in the hook module (top-level call
+    # source is the module qname)
+    assert ("views.policy.index",
+            Q("hooks.useSelectOptions", "useSelectOptions"), "call", "resolved") in by
+    assert ("views.policy.page",
+            Q("hooks.useSelectOptions", "useSelectOptions"), "call", "resolved") in by
+    # same-module call inside the hook still resolves
+    assert (Q("hooks.useSelectOptions", "load"),
+            Q("hooks.useSelectOptions", "useSelectOptions"), "call", "resolved") in by
+
+
+def test_ts_alias_without_path_aliases_stays_unresolved(tmp_path):
+    """Regression guard: the debug-log bug — without aliases the @/ imports and
+    the page -> hook calls must remain unresolved, not silently disappear."""
+    files = _alias_fixture(tmp_path)
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames)  # no path_aliases
+    by = {(e.source, e.target, e.kind, e.resolution) for e in edges}
+    # raw alias specifier kept on the unresolved import edge
+    assert ("views.policy.index", "@/hooks/useSelectOptions", "import", "unresolved") in by
+    # no resolved call into the hook from the pages
+    assert not any(e.source == "views.policy.index" and e.kind == "call"
+                   and e.resolution == "resolved" for e in edges)
+    assert not any(e.source == "views.policy.page" and e.kind == "call"
+                   and e.resolution == "resolved" for e in edges)

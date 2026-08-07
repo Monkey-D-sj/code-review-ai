@@ -39,10 +39,9 @@ def _export_graph(db_path: str, out_path: str, max_nodes: int) -> None:
 
     qnames = {r["qualified_name"] for r in rows}
     edges = conn.execute("""
-        SELECT source, target, COUNT(*) AS weight
+        SELECT DISTINCT source, target
         FROM edges
         WHERE resolution = 'resolved' AND source IN ({}) AND target IN ({})
-        GROUP BY source, target
     """.format(
         ",".join(f"'{q}'" for q in qnames),
         ",".join(f"'{q}'" for q in qnames),
@@ -55,8 +54,7 @@ def _export_graph(db_path: str, out_path: str, max_nodes: int) -> None:
                    "kind": r["kind"], "file": r["file_path"],
                    "line": r["start_line"], "degree": r["degree"]}
                   for r in rows]
-    edges_json = [{"source": e["source"], "target": e["target"],
-                   "weight": e["weight"]} for e in edges]
+    edges_json = [{"source": e["source"], "target": e["target"]} for e in edges]
 
     html = _GRAPH_TEMPLATE.replace("__DATA__", json.dumps(
         {"nodes": nodes_json, "edges": edges_json}, ensure_ascii=False))

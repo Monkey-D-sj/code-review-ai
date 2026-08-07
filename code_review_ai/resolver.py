@@ -3,7 +3,8 @@ from code_review_ai import qname
 from dataclasses import dataclass
 
 from code_review_ai.parser import (ParsedFile, RawCall, CALL_SIMPLE,
-                                   CALL_ATTRIBUTE, CALL_CONSTRUCT)
+                                   CALL_ATTRIBUTE, CALL_CONSTRUCT,
+                                   SOURCE_SUFFIXES)
 
 
 @dataclass
@@ -34,8 +35,17 @@ def _module_symbols(parsed_files: list[ParsedFile]) -> dict:
     return out
 
 
-def _import_map(pf: ParsedFile) -> dict:
-    """local_name -> (module, imported_name_or_None, is_star)."""
+def _import_map(pf: ParsedFile, path_aliases: dict[str, str] | None = None,
+                existing: set[str] | None = None) -> dict:
+    """local_name -> (module, imported_name_or_None, is_star).
+
+    The module string is canonicalized through path_aliases when it resolves to
+    a real module qname (so `@/x` -> `x` consistently across call resolution and
+    re-export traversal); otherwise the raw specifier is kept.
+    """
+    if path_aliases and existing is not None:
+        return {i.local_name: (_module_of(i.module, path_aliases, existing),
+                               i.imported_name, i.is_star) for i in pf.imports}
     return {i.local_name: (i.module, i.imported_name, i.is_star) for i in pf.imports}
 
 
@@ -43,27 +53,92 @@ def _exists(qname: str, existing: set[str]) -> bool:
     return qname in existing
 
 
-def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str]) -> list[Edge]:
+def _alias_replaced(spec: str, path_aliases: dict[str, str] | None) -> tuple[bool, str]:
+    """(matched, spec) — when `spec` starts with a configured alias prefix,
+    replace it (e.g. with {"@/": "src/"}, "@/hooks/x" -> "src/hooks/x") and
+    return True. Otherwise return (False, spec) unchanged, so relative/bare
+    imports keep their exact pre-existing resolution behavior."""
+    for prefix, target in (path_aliases or {}).items():
+        if spec.startswith(prefix):
+            return True, target.rstrip("/") + "/" + spec[len(prefix):]
+    return False, spec
+
+
+def _spec_to_module(spec: str, path_aliases: dict[str, str] | None,
+                    existing: set[str]) -> str | None:
+    """Resolve an alias-prefixed import specifier to an existing module qname,
+    or None.
+
+    Only specifiers that actually match an alias prefix are re-derived, so
+    relative/bare imports are left untouched. The alias target is converted to
+    a module qname the same way parser._module_qname derives one from a
+    repo-relative path (strip a known source suffix, drop a leading ``src/``,
+    join with dots). Returns None when the alias target has no module in the
+    graph, so callers keep the raw specifier on their unresolved edges.
+    """
+    matched, norm = _alias_replaced(spec, path_aliases)
+    if not matched or "::" in norm:
+        return None
+    parts = [part for part in norm.split("/") if part not in ("", ".")]
+    if not parts or not parts[-1]:
+        return None
+    last = parts[-1]
+    for ext in SOURCE_SUFFIXES:
+        if last.endswith(ext):
+            parts[-1] = last[: -len(ext)]
+            break
+    if parts and parts[0] == "src":
+        parts = parts[1:]
+    candidate = ".".join(parts)
+    return candidate if candidate in existing else None
+
+
+def _module_of(spec: str, path_aliases: dict[str, str] | None,
+               existing: set[str]) -> str:
+    """Canonical module qname for an import specifier, or the raw specifier."""
+    return _spec_to_module(spec, path_aliases, existing) or spec
+
+
+def _dedup_append(edges: list[Edge], seen: set[tuple[str, str, str]],
+                  edge: Edge) -> None:
+    """Keep one edge per (source, target, kind).
+
+    A function calling the same target N times produces N raw calls but one
+    graph edge - the repeated call count carries no topological meaning for
+    impact/flow queries. The first occurrence's call_line is retained.
+    """
+    key = (edge.source, edge.target, edge.kind)
+    if key in seen:
+        return
+    seen.add(key)
+    edges.append(edge)
+
+
+def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
+                  path_aliases: dict[str, str] | None = None) -> list[Edge]:
     mod_syms = _module_symbols(parsed_files)
-    all_import_maps = {pf.module_qname: _import_map(pf) for pf in parsed_files}
+    all_import_maps = {pf.module_qname: _import_map(pf, path_aliases, existing_qnames)
+                       for pf in parsed_files}
     var_types = {qn: types for pf in parsed_files
                  for qn, types in pf.var_types.items()}
     class_qnames = {n.qualified_name for f in parsed_files for n in f.nodes if n.kind == "class"}
     edges: list[Edge] = []
+    seen: set[tuple[str, str, str]] = set()
     for pf in parsed_files:
         local = mod_syms.get(pf.module_qname, {})
-        imports = _import_map(pf)
+        imports = _import_map(pf, path_aliases, existing_qnames)
         for c in pf.raw_calls:
             edge = _resolve_one(c, local, imports, existing_qnames, all_import_maps,
                                 mod_syms=mod_syms, source_module=pf.module_qname,
-                                var_types=var_types)
-            edges.append(edge)
+                                var_types=var_types, path_aliases=path_aliases)
+            _dedup_append(edges, seen, edge)
             if edge.resolution == "resolved" and edge.target in class_qnames:
                 init_qn = qname.join(qname.module(edge.target), "__init__", edge.target)
                 if init_qn in existing_qnames:
-                    edges.append(Edge(source=edge.source, target=init_qn, kind="call",
-                                      file_path=edge.file_path, call_line=edge.call_line,
-                                      resolution="resolved"))
+                    _dedup_append(edges, seen, Edge(
+                        source=edge.source, target=init_qn, kind="call",
+                        file_path=edge.file_path, call_line=edge.call_line,
+                        resolution="resolved"))
     return edges
 
 
@@ -71,7 +146,8 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                  existing: set[str], all_import_maps: dict,
                  mod_syms: dict | None = None,
                  source_module: str | None = None,
-                 var_types: dict | None = None) -> Edge:
+                 var_types: dict | None = None,
+                 path_aliases: dict[str, str] | None = None) -> Edge:
     base = Edge(source=c.source_qname, target=c.target_expr, kind="call",
                 file_path=c.file_path, call_line=c.call_line, resolution="unresolved")
     if c.language == "java":
@@ -83,6 +159,7 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
             return _resolved(base, local[name], existing)
         if name in imports:
             mod, imp_name, _star = imports[name]
+            mod = _module_of(mod, path_aliases, existing)  # alias @/x -> real module
             if imp_name:  # from m import name
                 tgt = qname.join(mod, imp_name)
                 if tgt not in existing:
@@ -95,6 +172,7 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
         rest = c.target_expr[len(head) + 1:]
         if head in imports:
             mod, imp_name, _ = imports[head]
+            mod = _module_of(mod, path_aliases, existing)  # alias @/x -> real module
             if imp_name is None:  # import m / import m as head -> m.rest
                 tgt = qname.join(mod, rest)
                 if tgt not in existing:
@@ -288,7 +366,8 @@ def _build_contains(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
     return edges
 
 
-def _build_imports(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
+def _build_imports(parsed: list[ParsedFile], qnames: set[str],
+                   path_aliases: dict[str, str] | None = None) -> list[Edge]:
     """IMPORT edges: module → imported_module."""
     edges: list[Edge] = []
     for pf in parsed:
@@ -298,10 +377,16 @@ def _build_imports(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
             if imp.is_star or "::" in imp.module:
                 continue
             tgt = imp.module
+            resolved = tgt in qnames
+            if not resolved:  # alias @/x -> real module qname
+                cand = _spec_to_module(tgt, path_aliases, qnames)
+                if cand is not None:
+                    tgt = cand
+                    resolved = True
             edges.append(Edge(
                 source=pf.module_qname, target=tgt, kind="import",
                 file_path=pf.file_path, call_line=0,
-                resolution="resolved" if tgt in qnames else "unresolved",
+                resolution="resolved" if resolved else "unresolved",
             ))
     return edges
 
@@ -327,15 +412,16 @@ def _build_inherits(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
 
 
 def resolve_edges(parsed: list[ParsedFile],
-                  existing_qnames: set[str]) -> list[Edge]:
+                  existing_qnames: set[str],
+                  path_aliases: dict[str, str] | None = None) -> list[Edge]:
     """Resolve all edges — call, contains, import, inherits — from parsed files.
 
     This is the single entry point for edge generation. Indexer calls this
     once and gets the complete edge list.
     """
-    edges = resolve_calls(parsed, existing_qnames)
+    edges = resolve_calls(parsed, existing_qnames, path_aliases)
     edges.extend(_build_contains(parsed, existing_qnames))
-    edges.extend(_build_imports(parsed, existing_qnames))
+    edges.extend(_build_imports(parsed, existing_qnames, path_aliases))
     edges.extend(_build_inherits(parsed, existing_qnames))
     from code_review_ai.java_routing import build_route_edges
     edges.extend(build_route_edges(parsed, existing_qnames))

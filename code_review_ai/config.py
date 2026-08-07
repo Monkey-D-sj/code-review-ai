@@ -21,6 +21,7 @@ DEFAULTS = dict(
     test_names=["test_*"],
     community_detection=False,
     community_weight="plain",
+    path_aliases={},  # import specifier prefix -> repo-relative dir, e.g. {"@/": "src/"}
     external_service_url="http://localhost:3000",
 )
 
@@ -38,6 +39,7 @@ class Config:
     test_names: list[str]
     community_detection: bool
     community_weight: str
+    path_aliases: dict[str, str]
     external_service_url: str
 
 
@@ -48,6 +50,114 @@ def _load_toml(repo_path: str) -> dict:
             data = tomllib.loads(p.read_text(encoding="utf-8"))
             return data.get("tool", {}).get("code-review-ai", {})
     return {}
+
+
+def _jsonc_clean(text: str) -> str:
+    """Strip // and /* */ comments and trailing commas from a JSONC document
+    (what tsconfig.json actually is), leaving string literals untouched.
+
+    Comments are replaced with spaces so line numbers survive for later parse
+    errors; a trailing comma before } or ] is dropped. Strict json.loads fails
+    on real-world tsconfig files, which are JSONC, not JSON.
+    """
+    def _no_comments(src: str) -> str:
+        out: list[str] = []
+        i, n = 0, len(src)
+        in_string = False
+        while i < n:
+            c, nxt = src[i], src[i + 1] if i + 1 < n else ""
+            if in_string:
+                out.append(c)
+                if c == "\\" and nxt:
+                    out.append(nxt)
+                    i += 2
+                    continue
+                if c == '"':
+                    in_string = False
+                i += 1
+                continue
+            if c == '"':
+                in_string = True
+                out.append(c)
+                i += 1
+                continue
+            if c == "/" and nxt == "/":
+                while i < n and src[i] != "\n":
+                    out.append(" ")
+                    i += 1
+                continue
+            if c == "/" and nxt == "*":
+                out.append(" ")
+                i += 2
+                while i + 1 < n and not (src[i] == "*" and src[i + 1] == "/"):
+                    out.append(" " if src[i] != "\n" else "\n")
+                    i += 1
+                i += 2
+                out.append(" ")
+                continue
+            out.append(c)
+            i += 1
+        return "".join(out)
+
+    cleaned = _no_comments(text)
+    out: list[str] = []
+    i, n = 0, len(cleaned)
+    in_string = False
+    while i < n:
+        c = cleaned[i]
+        if in_string:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(cleaned[i + 1])
+                i += 2
+                continue
+            if c == '"':
+                in_string = False
+            i += 1
+            continue
+        if c == '"':
+            in_string = True
+            out.append(c)
+            i += 1
+            continue
+        if c == ",":
+            j = i + 1
+            while j < n and cleaned[j] in " \t\n\r":
+                j += 1
+            if j < n and cleaned[j] in "}]":
+                i += 1  # trailing comma — drop
+                continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _tsconfig_path_aliases(repo_path: str) -> dict:
+    """Path aliases from <repo>/tsconfig.json compilerOptions.paths.
+
+    Each `@/* -> src/*` entry becomes a prefix -> dir alias ({"@/": "src/"}),
+    so import specifiers like `@/hooks/useSelectOptions` can be resolved to the
+    module qname the graph derives from `src/hooks/useSelectOptions.ts`.
+    Missing/unreadable tsconfig (e.g. pure Python repos) yields {}.
+    """
+    ts = Path(repo_path) / "tsconfig.json"
+    if not ts.exists():
+        return {}
+    try:
+        data = json.loads(_jsonc_clean(ts.read_text(encoding="utf-8")))
+    except (ValueError, OSError):
+        return {}
+    paths = (data.get("compilerOptions") or {}).get("paths") or {}
+    out: dict = {}
+    for key, targets in paths.items():
+        if not targets:
+            continue
+        prefix = key.rstrip("*")          # "@/*" -> "@/"
+        target = targets[0].rstrip("*").lstrip("./")  # "src/*" -> "src/"
+        if not prefix or not target:
+            continue
+        out[prefix] = target
+    return out
 
 
 def load_config(repo_path: str = ".") -> Config:
@@ -63,14 +173,19 @@ def load_config(repo_path: str = ".") -> Config:
                 raw[key] = int(env)
             elif isinstance(DEFAULTS[key], list):
                 raw[key] = env.split(",")
+            elif isinstance(DEFAULTS[key], dict):
+                raw[key] = json.loads(env)
             else:
                 raw[key] = env
+    # Toolchain auto-detection: tsconfig.json paths, explicit config wins.
+    raw["path_aliases"] = {**_tsconfig_path_aliases(raw["repo_path"]),
+                           **(raw["path_aliases"] or {})}
     return Config(**raw)
 
 
 _CONFIG_HASH_KEYS = ("diff_base", "entry_names", "entry_decorators", "exclude",
                      "test_globs", "test_names",
-                     "community_detection", "community_weight")
+                     "community_detection", "community_weight", "path_aliases")
 
 
 def config_hash(config: Config) -> str:
