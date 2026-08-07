@@ -46,6 +46,8 @@ def _exists(qname: str, existing: set[str]) -> bool:
 def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str]) -> list[Edge]:
     mod_syms = _module_symbols(parsed_files)
     all_import_maps = {pf.module_qname: _import_map(pf) for pf in parsed_files}
+    var_types = {qn: types for pf in parsed_files
+                 for qn, types in pf.var_types.items()}
     class_qnames = {n.qualified_name for f in parsed_files for n in f.nodes if n.kind == "class"}
     edges: list[Edge] = []
     for pf in parsed_files:
@@ -53,7 +55,8 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str]) -> 
         imports = _import_map(pf)
         for c in pf.raw_calls:
             edge = _resolve_one(c, local, imports, existing_qnames, all_import_maps,
-                                mod_syms=mod_syms, source_module=pf.module_qname)
+                                mod_syms=mod_syms, source_module=pf.module_qname,
+                                var_types=var_types)
             edges.append(edge)
             if edge.resolution == "resolved" and edge.target in class_qnames:
                 init_qn = qname.join(qname.module(edge.target), "__init__", edge.target)
@@ -67,11 +70,13 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str]) -> 
 def _resolve_one(c: RawCall, local: dict, imports: dict,
                  existing: set[str], all_import_maps: dict,
                  mod_syms: dict | None = None,
-                 source_module: str | None = None) -> Edge:
+                 source_module: str | None = None,
+                 var_types: dict | None = None) -> Edge:
     base = Edge(source=c.source_qname, target=c.target_expr, kind="call",
                 file_path=c.file_path, call_line=c.call_line, resolution="unresolved")
     if c.language == "java":
-        return _resolve_java(c, local, imports, existing, mod_syms, source_module, base)
+        return _resolve_java(c, local, imports, existing, mod_syms,
+                             source_module, base, var_types)
     if c.call_form == CALL_SIMPLE:
         name = c.target_expr
         if name in local:
@@ -178,9 +183,22 @@ def _resolve_java_dotted(expr: str, mod_syms: dict, existing: set[str]) -> str |
     return None
 
 
+def _resolve_java_type(type_name: str, source_module: str | None,
+                       imports: dict, mod_syms: dict | None) -> str | None:
+    """Resolve a Java type name to a class qname: same-package class, then import."""
+    if mod_syms and source_module:
+        same_pkg = mod_syms.get(source_module, {})
+        if type_name in same_pkg:
+            return same_pkg[type_name]
+    if type_name in imports:
+        mod, imported, _star = imports[type_name]
+        return _join_target(mod, imported) if imported else mod
+    return None
+
+
 def _resolve_java(c, local: dict, imports: dict, existing: set[str],
                   mod_syms: dict | None, source_module: str | None,
-                  base: Edge) -> Edge:
+                  base: Edge, var_types: dict | None = None) -> Edge:
     """Java-aware call resolution: simple / attribute / construct forms."""
     if c.call_form == CALL_SIMPLE:
         name = c.target_expr
@@ -202,10 +220,24 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
                 return _resolved(base, target, existing)
         return base
     if c.call_form == CALL_ATTRIBUTE:
-        head, sep, rest = c.target_expr.partition(".")
+        expr = c.target_expr
+        if expr.startswith("this."):
+            expr = expr[len("this."):]
+        head, sep, rest = expr.partition(".")
         if not sep:
             base.resolution = "dynamic"
             return base
+        # Java receiver type binding: bare identifier whose declared type we know
+        if var_types:
+            scope_types = var_types.get(c.source_qname, {})
+            receiver_type = scope_types.get(head)
+            if receiver_type:
+                class_qn = _resolve_java_type(
+                    receiver_type, source_module, imports, mod_syms)
+                if class_qn:
+                    target = _join_target(class_qn, rest)
+                    if target in existing:
+                        return _resolved(base, target, existing)
         if head in imports:
             mod, imported, _star = imports[head]
             if imported:
