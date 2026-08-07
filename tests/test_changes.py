@@ -170,15 +170,18 @@ def test_changed_functions_skips_unsupported_files(monkeypatch):
 def test_build_change_summary_diff_path(tmp_path, monkeypatch):
     cfg = load_config(FIX)
     import code_review_ai.changes as ch
-    monkeypatch.setattr(ch, "_git_diff", lambda base, files, cwd=None: ({"auth.py": [(6, 7)]}, set()))
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({"auth.py": [(6, 7)]}, set()))
     monkeypatch.setattr(ch, "_git_numstat",
                         lambda base, files, cwd=None: {"auth.py": (10, 2), "logo.png": (0, 0)})
     out = build_change_summary(cfg, _conn(tmp_path))
     assert out["summary"] == {"files_changed": 2, "lines_added": 10,
-                              "lines_removed": 2, "changed_functions": 1}
+                              "lines_removed": 2, "changed_functions": 1,
+                              "uncovered_changes": 1}
     assert out["changed_functions"] == [
         {"qname": Q("auth", "login"), "kind": "function",
          "file": "auth.py", "start_line": 6, "end_line": 7}]
+    assert out["uncovered_changes"] == [{"file": "logo.png", "hunks": []}]
 
 
 def test_build_change_summary_symbols_path(tmp_path):
@@ -209,3 +212,80 @@ def test_git_diff_per_hunk_shape_and_deleted(tmp_path):
     ranges, deleted = ch._git_diff("HEAD", None, str(repo))
     assert "b.py" in deleted
     assert ranges["a.py"] == [(4, 1)]   # +4,1 hunk: new-side start=4, count=1
+
+
+def test_uncovered_unsupported_extension(tmp_path, monkeypatch):
+    cfg = load_config(FIX)
+    import code_review_ai.changes as ch
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({"README.md": [(1, 5)]}, set()))
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files, cwd=None: {"README.md": (5, 0)})
+    out = build_change_summary(cfg, _conn(tmp_path))
+    assert out["summary"]["uncovered_changes"] == 1
+    assert out["uncovered_changes"] == [
+        {"file": "README.md", "hunks": [{"start": 1, "count": 5}]}]
+
+
+def test_uncovered_module_level_hunk(tmp_path, monkeypatch):
+    """Fixture line 5 is blank module-level — outside UserService(1-3)/login(6-7)."""
+    cfg = load_config(FIX)
+    import code_review_ai.changes as ch
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({"auth.py": [(5, 1)]}, set()))
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files, cwd=None: {"auth.py": (1, 0)})
+    out = build_change_summary(cfg, _conn(tmp_path))
+    assert out["changed_functions"] == []
+    assert out["uncovered_changes"] == [
+        {"file": "auth.py", "hunks": [{"start": 5, "count": 1}]}]
+
+
+def test_partial_coverage_splits_hunks(tmp_path, monkeypatch):
+    """One file, two hunks: line 6 (inside login) covered, line 4 (module) not."""
+    cfg = load_config(FIX)
+    import code_review_ai.changes as ch
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({"auth.py": [(6, 1), (4, 1)]}, set()))
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files, cwd=None: {"auth.py": (2, 0)})
+    out = build_change_summary(cfg, _conn(tmp_path))
+    assert [r["qname"] for r in out["changed_functions"]] == [Q("auth", "login")]
+    assert out["uncovered_changes"] == [
+        {"file": "auth.py", "hunks": [{"start": 4, "count": 1}]}]
+
+
+def test_binary_file_uncovered(tmp_path, monkeypatch):
+    cfg = load_config(FIX)
+    import code_review_ai.changes as ch
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({}, set()))
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files, cwd=None: {"logo.png": (0, 0)})
+    out = build_change_summary(cfg, _conn(tmp_path))
+    assert out["uncovered_changes"] == [{"file": "logo.png", "hunks": []}]
+
+
+def test_deleted_file_uncovered(tmp_path, monkeypatch):
+    cfg = load_config(FIX)
+    import code_review_ai.changes as ch
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({}, {"foo.py"}))
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files, cwd=None: {"foo.py": (0, 3)})
+    out = build_change_summary(cfg, _conn(tmp_path))
+    assert out["uncovered_changes"] == [{"file": "foo.py", "hunks": [], "deleted": True}]
+
+
+def test_uncovered_invariant(tmp_path, monkeypatch):
+    """No changed file silently drops: every numstat file is covered or listed."""
+    cfg = load_config(FIX)
+    import code_review_ai.changes as ch
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({"auth.py": [(6, 1), (4, 1)]}, set()))
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files, cwd=None: {"auth.py": (2, 0), "logo.png": (0, 0)})
+    out = build_change_summary(cfg, _conn(tmp_path))
+    covered = {r["file"] for r in out["changed_functions"]}
+    uncovered = {u["file"] for u in out["uncovered_changes"]}
+    assert covered | uncovered == {"auth.py", "logo.png"}

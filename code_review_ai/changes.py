@@ -113,30 +113,59 @@ def _resolve_diff_base(config: Config) -> str:
     return config.diff_base
 
 
-def _changed_functions(config: Config, diff_ranges: dict[str, list[tuple[int, int]]],
-                       kinds: tuple[str, ...] = ("function", "method", "class")) -> list[dict]:
-    """Rich records for nodes overlapping changed line ranges.
+def _diff_coverage(config: Config, diff_ranges: dict[str, list[tuple[int, int]]],
+                   numstat: dict[str, tuple[int, int]], deleted: set[str],
+                   kinds: tuple[str, ...] = ("function", "method", "class"),
+                   ) -> tuple[list[dict], list[dict]]:
+    """Split a diff into function-level records and uncovered hunks.
 
-    Returns [{qname, kind, file, start_line, end_line}] with repo-relative file.
+    Every changed file (numstat ∪ diff_ranges) is accounted for: hunks that
+    overlap a function/method/class node become records; everything else
+    (unsupported extension, module-level change, binary, deleted) becomes an
+    uncovered_changes entry — {file, hunks: [{start, count}], deleted?} — so
+    no change silently disappears. Returns (records, uncovered_changes).
     """
     repo = config.repo_path
-    out: list[dict] = []
-    for rel, ranges in diff_ranges.items():
+    records: list[dict] = []
+    uncovered: list[dict] = []
+    for rel in dict.fromkeys([*numstat, *diff_ranges]):
+        if rel in deleted:
+            uncovered.append({"file": rel, "hunks": [], "deleted": True})
+            continue
+        hunks = diff_ranges.get(rel)
+        if not hunks:
+            # in the diff but no line hunks — binary / rename
+            uncovered.append({"file": rel, "hunks": []})
+            continue
         path = f"{repo}/{rel}"
         try:
             pf = parse_file(path, repo)
         except (OSError, ValueError):
             # OSError: file gone from disk. ValueError: unsupported extension
-            # (e.g. *.md in the diff) — not source, nothing to report.
+            # (e.g. *.md in the diff) — nothing to attribute, hunks stay raw.
+            uncovered.append({"file": rel,
+                              "hunks": [{"start": s, "count": c} for s, c in hunks]})
             continue
-        for node in pf.nodes:
-            if node.kind not in kinds:
-                continue
-            if _overlaps(node.start_line, node.end_line, ranges):
-                out.append({"qname": node.qualified_name, "kind": node.kind,
-                            "file": rel, "start_line": node.start_line,
-                            "end_line": node.end_line})
-    return out
+        changed = [n for n in pf.nodes
+                   if n.kind in kinds and _overlaps(n.start_line, n.end_line, hunks)]
+        for n in changed:
+            records.append({"qname": n.qualified_name, "kind": n.kind,
+                            "file": rel, "start_line": n.start_line,
+                            "end_line": n.end_line})
+        uncovered_hunks = [h for h in hunks
+                           if not any(_overlaps(n.start_line, n.end_line, [h])
+                                      for n in changed)]
+        if uncovered_hunks:
+            uncovered.append({"file": rel,
+                              "hunks": [{"start": s, "count": c} for s, c in uncovered_hunks]})
+    return records, uncovered
+
+
+def _changed_functions(config: Config, diff_ranges: dict[str, list[tuple[int, int]]],
+                       kinds: tuple[str, ...] = ("function", "method", "class")) -> list[dict]:
+    """Backward-compat wrapper: function/method/class records only."""
+    records, _ = _diff_coverage(config, diff_ranges, {}, set(), kinds=kinds)
+    return records
 
 
 def detect_changed_symbols(config: Config,
@@ -185,19 +214,25 @@ def _symbols_summary(config: Config, conn, symbols: list[str]) -> dict:
 
 def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
                          files: list[str] | None = None) -> dict:
-    """Change summary + changed functions. With `symbols`, resolve each qname
-    from the graph; otherwise compute from the git diff of `files` (or the whole
-    tree) against a resolved base (diff_base, else the branch's upstream, else
-    HEAD^). Returns {"summary", "changed_functions"}.
+    """Change summary + changed functions + uncovered changes. With
+    `symbols`, resolve each qname from the graph; otherwise compute from the
+    git diff of `files` (or the whole tree) against a resolved base
+    (diff_base, else the branch's upstream, else HEAD^). `uncovered_changes`
+    lists files whose changes no function/class covers — module-level hunks,
+    unsupported extensions, binary and deleted files — so the review sees
+    what the graph cannot attribute. Returns {"summary", "changed_functions",
+    "uncovered_changes"}.
     Raises RuntimeError if the git diff fails (e.g. no commits at all)."""
     if symbols is not None:
         return _symbols_summary(config, conn, symbols)
     base = _resolve_diff_base(config)
-    diff, _deleted = _git_diff(base, files, config.repo_path)
+    diff, deleted = _git_diff(base, files, config.repo_path)
     numstat = _git_numstat(base, files, config.repo_path)
-    functions = _changed_functions(config, diff)
+    functions, uncovered = _diff_coverage(config, diff, numstat, deleted)
     return {"summary": {"files_changed": len(numstat),
                         "lines_added": sum(added for added, _ in numstat.values()),
                         "lines_removed": sum(removed for _, removed in numstat.values()),
-                        "changed_functions": len(functions)},
-            "changed_functions": functions}
+                        "changed_functions": len(functions),
+                        "uncovered_changes": len(uncovered)},
+            "changed_functions": functions,
+            "uncovered_changes": uncovered}
