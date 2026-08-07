@@ -201,3 +201,27 @@ def test_run_benchmark_reports_direct_recall_keys(tmp_path):
     assert "cochange_gold_count" in agg
     assert "direct_gold_files" in report["cases"][0]
     assert "cochange_gold_files" in report["cases"][0]
+
+
+def test_benchmark_includes_test_nodes_in_candidates(tmp_path):
+    """Python test files tagged is_test=1 (test_globs) must stay in benchmark
+    candidates — regression for the tests='exclude' default zeroing recall."""
+    import subprocess
+    from code_review_ai.benchmark import BenchmarkCase
+    (tmp_path / "svc.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    tdir = tmp_path / "tests"
+    tdir.mkdir()
+    (tdir / "test_svc.py").write_text(
+        "from svc import run\n\ndef test_run():\n    assert run() == 1\n",
+        encoding="utf-8")
+    for cmd in (["git", "init"], ["git", "add", "-A"], ["git", "commit", "-m", "x"]):
+        subprocess.run(cmd, cwd=tmp_path, check=True, capture_output=True)
+    config = load_config(str(tmp_path))
+    config.repo_path = str(tmp_path)
+    config.db_path = str(tmp_path / "b.db")
+    config.community_detection = False
+    conn = connect(config.db_path)
+    init_schema(conn)
+    case = BenchmarkCase("x", ["svc::run"], {}, ["tests/test_svc.py"])
+    report = run_benchmark(config, conn, [case], top_k=5)
+    assert report["cases"][0]["patch_file_recall_all"] == 1.0

@@ -249,8 +249,15 @@ def _score_candidates(candidates: list[str], gold_files: list[str]) -> dict:
 
 
 def _all_impacts(conn: sqlite3.Connection, symbols: list[str]) -> list[dict]:
+    """Impact with every node retained (tests='include').
+
+    The default 'exclude' filter drops is_test=1 nodes from upstream/downstream,
+    which would zero out test-file recall once Python test files are tagged as
+    tests (test_globs). The benchmark measures whether gold test files are
+    retrieved, so tests must be included."""
     node_count = conn.execute("SELECT COUNT(*) AS count FROM nodes").fetchone()["count"]
-    return get_impact(conn, symbols, max_nodes_per_direction=max(node_count, 1))
+    return get_impact(conn, symbols, max_nodes_per_direction=max(node_count, 1),
+                      tests="include")
 
 
 def _overlaps_any(start: int, end: int,
