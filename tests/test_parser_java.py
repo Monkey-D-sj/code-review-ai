@@ -101,6 +101,36 @@ def test_extract_inherits_interface_extends_type_list():
     assert ("extends", "Marker") in ih
 
 
+def test_java_var_types_collected(tmp_path):
+    src = tmp_path / "OwnerController.java"
+    src.write_text(
+        "package com.example;\n"
+        "class OwnerController {\n"
+        "    private final OwnerRepository owners;\n"
+        "    private String a, b;\n"
+        "    public OwnerController(OwnerRepository clinicService) {\n"
+        "        this.owners = clinicService;\n"
+        "    }\n"
+        "    public String show(int ownerId, Model model) {\n"
+        "        Owner owner = new Owner();\n"
+        "        var repo = owners;\n"
+        "        return owners.findByLastName(ownerId, model);\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(src), str(tmp_path))
+    show = pf.var_types["com.example::OwnerController.show"]
+    assert show["owners"] == "OwnerRepository"            # 类字段
+    assert show["a"] == "String" and show["b"] == "String"  # 多 declarator
+    assert show["model"] == "Model"                        # 参数
+    assert show["owner"] == "Owner"                        # 局部变量
+    assert "ownerId" not in show                           # 基元类型跳过
+    assert "repo" not in show                              # var 跳过
+    ctor = pf.var_types["com.example::OwnerController.OwnerController"]
+    assert ctor["clinicService"] == "OwnerRepository"      # 构造器参数
+
+
 def test_java_mockmvc_request_capture(tmp_path):
     src = tmp_path / "HomeControllerTests.java"
     src.write_text(

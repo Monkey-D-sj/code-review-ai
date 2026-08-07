@@ -234,6 +234,7 @@ class ParsedFile:
     raw_calls: list[RawCall] = field(default_factory=list)
     imports: list[ImportEntry] = field(default_factory=list)
     inherits: list[RawInherit] = field(default_factory=list)
+    var_types: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def list_source_files(repo_path: str, extensions: list[str] | None = None) -> list[str]:
@@ -356,6 +357,96 @@ def _java_path_module(file_path: str, repo_root: str) -> str:
     if parts and parts[0] == "src":
         parts = parts[1:]
     return ".".join(parts)
+
+
+def _type_base_name(type_node) -> str | None:
+    """Base type identifier of a Java type node; None for primitives and `var`.
+
+    ``List<Owner>`` -> ``List``; ``int`` / ``boolean`` -> None (no class);
+    ``var`` (Java 10 inference) -> None."""
+    if type_node is None:
+        return None
+    if type_node.type == "type_identifier":
+        text = type_node.text.decode("utf-8")
+        return None if text == "var" else text
+    for child in type_node.children:
+        found = _type_base_name(child)
+        if found is not None:
+            return found
+    return None
+
+
+def _collect_java_var_types(root, module_qname, lang) -> dict[str, dict[str, str]]:
+    """Build {method_qname: {var_name: base_type}} for Java receiver binding."""
+    out: dict[str, dict[str, str]] = {}
+    class_defs = lang.get("class_def_nodes")
+    for child in root.children:
+        if class_defs and child.type in class_defs:
+            _java_class_var_types(child, module_qname, lang, out)
+    return out
+
+
+def _java_class_var_types(node, module_qname, lang, out) -> None:
+    """Collect a class's fields and per-method params/locals into out.
+
+    Fields and methods live inside the class's ``body`` member
+    (class_body/interface_body/enum_body), not as direct children."""
+    body = node.child_by_field_name("body")
+    members = body.children if body is not None else []
+    fields: dict[str, str] = {}
+    for member in members:
+        if member.type != "field_declaration":
+            continue
+        type_name = _type_base_name(member.child_by_field_name("type"))
+        if type_name is None:
+            continue
+        for decl in member.children:
+            if decl.type == "variable_declarator":
+                name_node = decl.child_by_field_name("name")
+                if name_node is not None:
+                    fields[name_node.text.decode("utf-8")] = type_name
+    cls_name_node = node.child_by_field_name("name")
+    cls_qname = (qname.join(module_qname, cls_name_node.text.decode("utf-8"))
+                 if cls_name_node is not None else None)
+    for member in members:
+        if member.type not in ("method_declaration", "constructor_declaration"):
+            continue
+        method_name = member.child_by_field_name("name")
+        if method_name is None:
+            continue
+        method_qn = qname.join(module_qname, method_name.text.decode("utf-8"), cls_qname)
+        scope: dict[str, str] = dict(fields)
+        _java_params(member, scope)
+        _java_locals(member, scope)
+        out[method_qn] = scope
+
+
+def _java_params(node, scope) -> None:
+    params_node = node.child_by_field_name("parameters")
+    if params_node is None:
+        return
+    for param in params_node.children:
+        if param.type != "formal_parameter":
+            continue
+        type_name = _type_base_name(param.child_by_field_name("type"))
+        name_node = param.child_by_field_name("name")
+        if type_name is not None and name_node is not None:
+            scope[name_node.text.decode("utf-8")] = type_name
+
+
+def _java_locals(node, scope) -> None:
+    """Collect local_variable_declaration names in a method body (recursive)."""
+    for child in node.children:
+        if child.type == "local_variable_declaration":
+            type_name = _type_base_name(child.child_by_field_name("type"))
+            if type_name is None:
+                continue
+            for decl in child.children:
+                if decl.type == "variable_declarator":
+                    name_node = decl.child_by_field_name("name")
+                    if name_node is not None:
+                        scope[name_node.text.decode("utf-8")] = type_name
+        _java_locals(child, scope)
 
 
 def _sig(source: bytes, node) -> str:
@@ -638,6 +729,8 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     pf.imports = _extract_imports(root, module_qname, lang, lang_name, file_path)
     # handle inheritance
     _walk_inherits(root, module_qname, lang, pf.inherits)
+    if lang_name == "java":
+        pf.var_types = _collect_java_var_types(root, module_qname, lang)
 
     # Dedup nodes — keep first occurrence of each qualified_name (inner
     # functions with the same name can appear in nested scopes).
