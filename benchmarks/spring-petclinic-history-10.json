@@ -1,0 +1,415 @@
+[
+  {
+    "id": "spring-projects__spring-petclinic-bb37aad8c3",
+    "repo": "spring-projects/spring-petclinic",
+    "base_commit": "0f6e8614047bd74cf6223b4d8a858d2ed2824f8a",
+    "source_commit": "bb37aad8c332264723817d855e8b3b96b7c392bc",
+    "created_at": "2026-07-30",
+    "subject": "fix: normalize whitespace in owner search",
+    "changed_ranges": {
+      "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java": [
+        [
+          101,
+          101
+        ]
+      ]
+    },
+    "gold_files": [
+      "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+    ]
+  },
+  {
+    "id": "spring-projects__spring-petclinic-e0db9b184e",
+    "repo": "spring-projects/spring-petclinic",
+    "base_commit": "51045d1648dad955df586150c1a1a6e22ef400c2",
+    "source_commit": "e0db9b184e028d41bcb626f3cbf03a942f67e104",
+    "created_at": "2026-07-16",
+    "subject": "Enforce unique pet names per owner",
+    "changed_ranges": {
+      "src/main/java/org/springframework/samples/petclinic/owner/PetController.java": [
+        [
+          22,
+          22
+        ],
+        [
+          123,
+          124
+        ],
+        [
+          157,
+          157
+        ],
+        [
+          180,
+          180
+        ]
+      ]
+    },
+    "gold_files": [
+      "src/test/java/org/springframework/samples/petclinic/PetClinicConcurrencyTests.java",
+      "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java",
+      "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+    ]
+  },
+  {
+    "id": "spring-projects__spring-petclinic-753d35c2f8",
+    "repo": "spring-projects/spring-petclinic",
+    "base_commit": "3c06fbfc1e42eb40802e0d0ca989bc9226755804",
+    "source_commit": "753d35c2f84432d88c0f3b61c9302a16069b78dd",
+    "created_at": "2026-06-01",
+    "subject": "Validate future visit dates",
+    "changed_ranges": {
+      "src/main/java/org/springframework/samples/petclinic/owner/Visit.java": [
+        [
+          46,
+          46
+        ],
+        [
+          49,
+          49
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/VisitController.java": [
+        [
+          17,
+          17
+        ],
+        [
+          81,
+          81
+        ],
+        [
+          93,
+          93
+        ]
+      ]
+    },
+    "gold_files": [
+      "src/test/java/org/springframework/samples/petclinic/owner/VisitControllerTests.java"
+    ]
+  },
+  {
+    "id": "spring-projects__spring-petclinic-142321aa3e",
+    "repo": "spring-projects/spring-petclinic",
+    "base_commit": "b21890c126176dad14e7985575dbb78e2c6fcf6d",
+    "source_commit": "142321aa3ed056eeda0662c1987b76db25b3d736",
+    "created_at": "2025-06-05",
+    "subject": "Extracted findPetTypes",
+    "changed_ranges": {
+      "src/main/java/org/springframework/samples/petclinic/owner/OwnerRepository.java": [
+        [
+          28,
+          28
+        ],
+        [
+          41,
+          47
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/PetController.java": [
+        [
+          51,
+          51
+        ],
+        [
+          52,
+          52
+        ],
+        [
+          57,
+          57
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/PetTypeFormatter.java": [
+        [
+          38,
+          38
+        ],
+        [
+          40,
+          41
+        ],
+        [
+          51,
+          51
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/PetTypeRepository.java": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    "gold_files": [
+      "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java",
+      "src/test/java/org/springframework/samples/petclinic/owner/PetTypeFormatterTests.java",
+      "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+    ]
+  },
+  {
+    "id": "spring-projects__spring-petclinic-40a41375e6",
+    "repo": "spring-projects/spring-petclinic",
+    "base_commit": "214a8fb87f5fb7124010b31f04f9591b9a0aa9e4",
+    "source_commit": "40a41375e6b55d5cf246c483d63fa9380ccb9ff1",
+    "created_at": "2024-11-28",
+    "subject": "Add new test file -<modify>: remove `@Transactional`. -<add>: create unit-test file related to `PetValidator`. -<refactor>: move pet objects initialization to `@BeforeEach` setup.",
+    "changed_ranges": {
+      "src/main/java/org/springframework/samples/petclinic/owner/OwnerRepository.java": [
+        [
+          47,
+          47
+        ]
+      ]
+    },
+    "gold_files": [
+      "src/test/java/org/springframework/samples/petclinic/owner/PetValidatorTests.java"
+    ]
+  },
+  {
+    "id": "spring-projects__spring-petclinic-1cad4124b7",
+    "repo": "spring-projects/spring-petclinic",
+    "base_commit": "668629d5bda4e6a87fb43425c7eb95ffa19b47c7",
+    "source_commit": "1cad4124b7685d3e66ac376f44874a3d5319cb06",
+    "created_at": "2024-11-11",
+    "subject": "Refactor code logic <refactor>: remove useless logic cod. <refactor>: detele useless annotation which is provided by Jpa. <refactor>: refactor implement of `findByLastName`, use Jpa to simplify query.",
+    "changed_ranges": {
+      "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java": [
+        [
+          130,
+          130
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/OwnerRepository.java": [
+        [
+          22,
+          22
+        ],
+        [
+          28,
+          28
+        ],
+        [
+          60,
+          62
+        ],
+        [
+          82,
+          83
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/PetController.java": [
+        [
+          65,
+          67
+        ],
+        [
+          82,
+          84
+        ],
+        [
+          102,
+          102
+        ],
+        [
+          129,
+          129
+        ]
+      ]
+    },
+    "gold_files": [
+      "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+      "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+    ]
+  },
+  {
+    "id": "spring-projects__spring-petclinic-50866def72",
+    "repo": "spring-projects/spring-petclinic",
+    "base_commit": "14af47d4e5b4e12e0ca28e5c2c8437528546c25d",
+    "source_commit": "50866def72014963764577e1f737cdd6b9f9f691",
+    "created_at": "2024-11-07",
+    "subject": "Refactor the logic and add unit test -<add>: add `@NotBlank` validation to pet's name. -<refactor>: delete useless code and add unit test to check duplicate Pet name validation logic. -<modify>: add `Id` to pet in unit test. -<refactor>: classify unit test.",
+    "changed_ranges": {
+      "src/main/java/org/springframework/samples/petclinic/model/NamedEntity.java": [
+        [
+          19,
+          19
+        ],
+        [
+          31,
+          31
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/PetController.java": [
+        [
+          102,
+          102
+        ],
+        [
+          104,
+          104
+        ],
+        [
+          106,
+          106
+        ],
+        [
+          113,
+          113
+        ],
+        [
+          115,
+          115
+        ],
+        [
+          118,
+          118
+        ],
+        [
+          125,
+          128
+        ],
+        [
+          133,
+          133
+        ],
+        [
+          140,
+          140
+        ],
+        [
+          152,
+          152
+        ]
+      ]
+    },
+    "gold_files": [
+      "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java"
+    ]
+  },
+  {
+    "id": "spring-projects__spring-petclinic-14af47d4e5",
+    "repo": "spring-projects/spring-petclinic",
+    "base_commit": "fdc40a7048843bc900d5a1b56a60350dffc93c9b",
+    "source_commit": "14af47d4e5b4e12e0ca28e5c2c8437528546c25d",
+    "created_at": "2024-11-06",
+    "subject": "Refactor: - <optimize>: delete logic `add owner to model` because of the comment `@ModelAttribute(\"owner\")`. - <fix>: add logical judgment in ordet to avoid `owner` from `form` and `ownerId` from `url` mismatch.",
+    "changed_ranges": {
+      "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java": [
+        [
+          19,
+          19
+        ],
+        [
+          67,
+          69
+        ],
+        [
+          132,
+          134
+        ],
+        [
+          145,
+          145
+        ]
+      ]
+    },
+    "gold_files": [
+      "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+    ]
+  },
+  {
+    "id": "spring-projects__spring-petclinic-405cdc635b",
+    "repo": "spring-projects/spring-petclinic",
+    "base_commit": "c7bc8b1ae618bf63ba097c1ff8e0ea5235baadb4",
+    "source_commit": "405cdc635b10770a2f5ed70be973cdf905cfa736",
+    "created_at": "2024-05-16",
+    "subject": "Add user friendly error message",
+    "changed_ranges": {
+      "src/main/java/org/springframework/samples/petclinic/owner/Owner.java": [
+        [
+          33,
+          33
+        ],
+        [
+          59,
+          59
+        ]
+      ]
+    },
+    "gold_files": [
+      "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+    ]
+  },
+  {
+    "id": "spring-projects__spring-petclinic-4926e29270",
+    "repo": "spring-projects/spring-petclinic",
+    "base_commit": "0a529015bc7933bcd724a5ae92605f0e9ee0e3f7",
+    "source_commit": "4926e292700f79260a58d6faf55b232ce075b70e",
+    "created_at": "2023-08-24",
+    "subject": "Change validation annotations and whitespace handling",
+    "changed_ranges": {
+      "src/main/java/org/springframework/samples/petclinic/model/Person.java": [
+        [
+          20,
+          20
+        ],
+        [
+          31,
+          31
+        ],
+        [
+          35,
+          35
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/Owner.java": [
+        [
+          34,
+          34
+        ],
+        [
+          50,
+          50
+        ],
+        [
+          54,
+          54
+        ],
+        [
+          58,
+          58
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/PetController.java": [
+        [
+          98,
+          98
+        ],
+        [
+          130,
+          130
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/PetValidator.java": [
+        [
+          41,
+          41
+        ]
+      ],
+      "src/main/java/org/springframework/samples/petclinic/owner/Visit.java": [
+        [
+          26,
+          26
+        ],
+        [
+          42,
+          42
+        ]
+      ]
+    },
+    "gold_files": [
+      "src/test/java/org/springframework/samples/petclinic/model/ValidatorTests.java"
+    ]
+  }
+]

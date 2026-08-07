@@ -1,12 +1,14 @@
 # Historical change retrieval baseline
 
-Date: 2026-08-05
+Date: 2026-08-06
 
-The 40-case suite combines two explicitly labelled sources:
+The 50-case suite combines three explicitly labelled sources:
 
 - 30 SWE-bench Verified cases from Flask, Requests, pytest, and Xarray;
 - 10 commits mined from the official FastAPI Git history because FastAPI is
   not part of classic SWE-bench Verified.
+- 10 commits mined from the official Spring PetClinic Git history as the Java
+  and Spring Boot subset.
 
 Every repository is indexed at its pinned pre-fix `base_commit`. Production
 patch ranges are change seeds, while test files changed by the real fix are
@@ -19,7 +21,8 @@ retrieval targets. Tests are included in indexing.
 | pytest-dev/pytest | SWE-bench Verified | 11 | 9.09% | 9.09% |
 | pydata/xarray | SWE-bench Verified | 10 | 20.0% | 90.0% |
 | fastapi/fastapi | Official Git history | 10 | 10.0% | 30.0% |
-| **Overall (macro)** | **Combined** | **40** | **27.5%** | **50.0%** |
+| spring-projects/spring-petclinic | Official Git history | 10 | 23.33% | 23.33% |
+| **Overall (macro)** | **Combined** | **50** | **26.67%** | **44.67%** |
 
 Multi-production-file leave-one-out results:
 
@@ -28,9 +31,16 @@ Multi-production-file leave-one-out results:
 | pytest-dev/pytest | 2 | 4 | 25.0% | 50.0% |
 | pydata/xarray | 5 | 10 | 50.0% | 100.0% |
 | fastapi/fastapi | 4 | 11 | 21.21% | 51.52% |
-| **Overall (macro-fold)** | **11** | **25** | **33.33%** | **70.67%** |
+| spring-projects/spring-petclinic | 5 | 16 | 10.94% | 10.94% |
+| **Overall (macro-fold)** | **16** | **41** | **24.59%** | **47.36%** |
 
-Unified current-code results:
+The Spring PetClinic subset was run independently with the same evaluator and
+current code. Its symbol found rate was 100%, mean index time was 332.9 ms,
+mean query time was 1.53 ms, and mean resolved-call rate was 5.65%. The overall
+rows above are case/fold-weighted macro metrics from the fixed 40-case baseline
+and this fixed 10-case Java run.
+
+Original 40-case current-code diagnostics:
 
 - Symbol found rate: 97.5%
 - Macro test-file Precision@10 / Precision@All: 3.18% / 2.91%
