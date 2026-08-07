@@ -92,8 +92,7 @@ def test_resolve_dedups_repeated_calls_same_target(tmp_path):
     """A function calling the same target N times yields one graph edge, not N.
 
     Repeated calls within one function carry no topological meaning for
-    impact/flow queries; the first occurrence's call_line is retained and no
-    call_count is kept.
+    impact/flow queries; no call_count is kept.
     """
     src = tmp_path / "rep.py"
     src.write_text(
@@ -111,7 +110,6 @@ def test_resolve_dedups_repeated_calls_same_target(tmp_path):
     rep = [e for e in edges if e.source == Q("rep", "caller")
            and e.target == Q("rep", "helper")]
     assert len(rep) == 1
-    assert rep[0].call_line == 4
     assert rep[0].resolution == "resolved"
 
 

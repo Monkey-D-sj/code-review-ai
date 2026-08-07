@@ -204,11 +204,9 @@ class RawCall:
     target_expr: str
     call_form: str
     file_path: str
-    call_line: int
     language: str = "python"
 
 
-@dataclass
 @dataclass
 class RawInherit:
     """A class inheritance relationship extracted from AST."""
@@ -802,8 +800,6 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     for c in pf.raw_calls:
         c.file_path = file_path
         c.language = lang_name
-        if line_offset:
-            c.call_line += line_offset
 
     # Attach captured MockMvc requests to the methods that made them
     mockmvc_map: dict[str, list[tuple[str, str]]] = {}
@@ -911,7 +907,7 @@ def _walk_calls(node, module_qname, cur_scope, lang, out,
                 out.append(RawCall(
                     source_qname=cur_scope or module_qname,
                     target_expr=expr, call_form=form,
-                    file_path="", call_line=child.start_point[0] + 1,
+                    file_path="",
                 ))
             if mockmvc_requests is not None and lang.get("mockmvc_capture"):
                 request = _mockmvc_request(child, lang)

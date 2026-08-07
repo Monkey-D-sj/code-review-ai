@@ -185,9 +185,9 @@ def _insert_nodes(conn, parsed, config, skip_qnames=frozenset()) -> int:
 
 def _insert_edges(conn, edges) -> None:
     conn.executemany(
-        "INSERT INTO edges(source,target,kind,file_path,call_line,resolution)"
-        " VALUES(?,?,?,?,?,?)",
-        [(e.source, e.target, e.kind, e.file_path, e.call_line, e.resolution)
+        "INSERT INTO edges(source,target,kind,file_path,resolution)"
+        " VALUES(?,?,?,?,?)",
+        [(e.source, e.target, e.kind, e.file_path, e.resolution)
          for e in edges])
 
 

@@ -36,7 +36,7 @@ def build_route_edges(parsed_files: list[ParsedFile],
                         seen.add(key)
                         edges.append(Edge(
                             source=test_qn, target=ctrl_qn, kind="call",
-                            file_path=test_file, call_line=0,
+                            file_path=test_file,
                             resolution="resolved" if ctrl_qn in existing_qnames
                             else "unresolved",
                         ))

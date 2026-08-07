@@ -26,12 +26,12 @@ def _seed(tmp_path) -> str:
         ],
     )
     conn.executemany(
-        "INSERT INTO edges(source, target, kind, file_path, call_line, resolution)"
-        " VALUES(?,?,?,?,?,?)",
+        "INSERT INTO edges(source, target, kind, file_path, resolution)"
+        " VALUES(?,?,?,?,?)",
         [
-            ("m::A", "m::B", "import", "m.py", 4, "resolved"),
-            ("m::C", "n::F", "call", "m.py", 14, "resolved"),
-            ("m::C", "m::D", "call", "m.py", 15, "resolved"),
+            ("m::A", "m::B", "import", "m.py", "resolved"),
+            ("m::C", "n::F", "call", "m.py", "resolved"),
+            ("m::C", "m::D", "call", "m.py", "resolved"),
         ],
     )
     conn.executemany(

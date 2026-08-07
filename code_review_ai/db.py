@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Bumped whenever the schema or its meaning changes in a way that makes an
 # older index.db incompatible; indexers check this before rebuilding.
-INDEX_VERSION = 4
+INDEX_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (
@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS edges (
     target TEXT,
     kind TEXT,
     file_path TEXT,
-    call_line INTEGER,
     resolution TEXT
 );
 CREATE TABLE IF NOT EXISTS flows (
@@ -99,6 +98,7 @@ def connect(db_path: str) -> sqlite3.Connection:
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _migrate_nodes(conn)
+    _migrate_edges(conn)
 
 
 def _migrate_nodes(conn: sqlite3.Connection) -> None:
@@ -117,6 +117,19 @@ def _migrate_nodes(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE nodes ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0")
     if "decorators" not in cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN decorators TEXT")
+
+
+def _migrate_edges(conn: sqlite3.Connection) -> None:
+    """Drop the unused call_line column from pre-existing DBs.
+
+    CREATE TABLE IF NOT EXISTS won't alter an existing table, so an older
+    index.db keeps the call_line column even though nothing writes or reads
+    it anymore. Edge identity is (source, target, kind); the call site line
+    number carried no topological meaning and was never consumed by any query.
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(edges)")}
+    if "call_line" in cols:
+        conn.execute("ALTER TABLE edges DROP COLUMN call_line")
 
 
 @contextmanager

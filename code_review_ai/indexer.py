@@ -130,9 +130,9 @@ def _write_nodes(conn, parsed, config) -> dict[str, int]:
 
 def _write_edges(conn, edges) -> None:
     conn.executemany(
-        "INSERT INTO edges(source,target,kind,file_path,call_line,resolution)"
-        " VALUES(?,?,?,?,?,?)",
-        [(e.source, e.target, e.kind, e.file_path, e.call_line, e.resolution)
+        "INSERT INTO edges(source,target,kind,file_path,resolution)"
+        " VALUES(?,?,?,?,?)",
+        [(e.source, e.target, e.kind, e.file_path, e.resolution)
          for e in edges],
     )
 

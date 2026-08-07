@@ -32,8 +32,8 @@ def _insert_node(conn, qualified_name, kind="function", file_path="x.py"):
 
 def _insert_edge(conn, source, target, kind="call", resolution="resolved"):
     conn.execute(
-        "INSERT INTO edges(source,target,kind,file_path,call_line,resolution) "
-        "VALUES (?,?,?,?,0,?)",
+        "INSERT INTO edges(source,target,kind,file_path,resolution) "
+        "VALUES (?,?,?,?,?)",
         (source, target, kind, "x.py", resolution))
 
 

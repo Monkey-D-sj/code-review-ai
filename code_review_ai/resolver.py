@@ -19,7 +19,6 @@ class Edge:
     target: str
     kind: str
     file_path: str
-    call_line: int
     resolution: str
 
 
@@ -105,7 +104,7 @@ def _dedup_append(edges: list[Edge], seen: set[tuple[str, str, str]],
 
     A function calling the same target N times produces N raw calls but one
     graph edge - the repeated call count carries no topological meaning for
-    impact/flow queries. The first occurrence's call_line is retained.
+    impact/flow queries.
     """
     key = (edge.source, edge.target, edge.kind)
     if key in seen:
@@ -137,7 +136,7 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                 if init_qn in existing_qnames:
                     _dedup_append(edges, seen, Edge(
                         source=edge.source, target=init_qn, kind="call",
-                        file_path=edge.file_path, call_line=edge.call_line,
+                        file_path=edge.file_path,
                         resolution="resolved"))
     return edges
 
@@ -149,7 +148,7 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                  var_types: dict | None = None,
                  path_aliases: dict[str, str] | None = None) -> Edge:
     base = Edge(source=c.source_qname, target=c.target_expr, kind="call",
-                file_path=c.file_path, call_line=c.call_line, resolution="unresolved")
+                file_path=c.file_path, resolution="unresolved")
     if c.language == "java":
         return _resolve_java(c, local, imports, existing, mod_syms,
                              source_module, base, var_types)
@@ -360,7 +359,7 @@ def _build_contains(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
             if n.parent_qname:
                 edges.append(Edge(
                     source=n.parent_qname, target=n.qualified_name,
-                    kind="contains", file_path=n.file_path, call_line=0,
+                    kind="contains", file_path=n.file_path,
                     resolution="resolved" if n.parent_qname in qnames else "unresolved",
                 ))
     return edges
@@ -385,7 +384,7 @@ def _build_imports(parsed: list[ParsedFile], qnames: set[str],
                     resolved = True
             edges.append(Edge(
                 source=pf.module_qname, target=tgt, kind="import",
-                file_path=pf.file_path, call_line=0,
+                file_path=pf.file_path,
                 resolution="resolved" if resolved else "unresolved",
             ))
     return edges
@@ -405,7 +404,7 @@ def _build_inherits(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
                     resolved = True
             edges.append(Edge(
                 source=ih.class_qname, target=tgt, kind=ih.relation,
-                file_path=pf.file_path, call_line=0,
+                file_path=pf.file_path,
                 resolution="resolved" if resolved else "unresolved",
             ))
     return edges
