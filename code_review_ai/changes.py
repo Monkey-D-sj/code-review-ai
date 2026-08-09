@@ -239,6 +239,42 @@ def detect_changed_symbols(config: Config,
         config, diff, kinds=("function", "method"))]
 
 
+def assess_symbol_risk(conn, symbol: str, deleted: bool = False) -> int:
+    """0-100 blast-radius score for one changed symbol (spec 2026-08-09).
+
+    deleted -> 90; any cross-module resolved caller -> min(100, 60+10*n);
+    same-module callers only -> min(59, 30+5*n); resolved leaf -> 10;
+    unresolved (not in graph) -> 50. Cross-module means the caller node's
+    file_path differs from the target's (module == file in this graph).
+    """
+    if deleted:
+        return 90
+    target = conn.execute(
+        "SELECT file_path FROM nodes WHERE qualified_name=?", (symbol,)).fetchone()
+    if target is None:
+        return 50
+    target_file = target["file_path"]
+    incoming = conn.execute(
+        "SELECT DISTINCT source FROM edges WHERE target=? AND resolution='resolved'",
+        (symbol,)).fetchall()
+    cross = same = 0
+    for edge in incoming:
+        source = conn.execute(
+            "SELECT file_path FROM nodes WHERE qualified_name=?",
+            (edge["source"],)).fetchone()
+        if source is None:
+            continue
+        if source["file_path"] != target_file:
+            cross += 1
+        else:
+            same += 1
+    if cross:
+        return min(100, 60 + 10 * cross)
+    if same:
+        return min(59, 30 + 5 * same)
+    return 10
+
+
 def _relative_to_repo(config: Config, file_path: str) -> str:
     try:
         return Path(file_path).resolve().relative_to(Path(config.repo_path).resolve()).as_posix()

@@ -372,3 +372,45 @@ def test_delete_change_ignores_reaadded_qname(tmp_path, monkeypatch):
     out = build_change_summary(cfg, conn)
     assert out["delete_change"] == []       # qname 仍在活图 -> 不是当前删除
     assert out["uncovered_changes"] == [{"file": "auth.py", "hunks": []}]
+
+
+def _seed_risk_graph(conn):
+    """a.py::target 有同模块+跨模块 caller; a.py::leaf 只有同模块 caller;
+    b.py::external 无 caller。"""
+    for qname, kind, file_path in [
+            ("a::target", "function", "a.py"),
+            ("a::leaf", "function", "a.py"),
+            ("a::caller", "function", "a.py"),
+            ("b::external", "function", "b.py"),
+    ]:
+        conn.execute("INSERT INTO nodes(qualified_name, kind, file_path) "
+                     "VALUES(?,?,?)", (qname, kind, file_path))
+    for source, target in [("a::caller", "a::target"),  # 同模块
+                           ("b::external", "a::target"),  # 跨模块
+                           ("a::caller", "a::leaf")]:    # 同模块
+        conn.execute("INSERT INTO edges(source, target, kind, resolution) "
+                     "VALUES(?,?,?,?)", (source, target, "call", "resolved"))
+
+
+def test_assess_symbol_risk_rules(tmp_path):
+    from code_review_ai.changes import assess_symbol_risk
+    conn = _conn(tmp_path)
+    _seed_risk_graph(conn)
+    assert assess_symbol_risk(conn, "a::target") == 70      # 跨模块入边 -> 60+10
+    assert assess_symbol_risk(conn, "a::leaf") == 35        # 同模块入边 -> 30+5
+    assert assess_symbol_risk(conn, "b::external") == 10    # 叶子
+    assert assess_symbol_risk(conn, "nope::missing") == 50  # 未解析
+    assert assess_symbol_risk(conn, "a::target", deleted=True) == 90  # 删除
+
+
+def test_assess_symbol_risk_caps_cross_module(tmp_path):
+    from code_review_ai.changes import assess_symbol_risk
+    conn = _conn(tmp_path)
+    conn.execute("INSERT INTO nodes(qualified_name, kind, file_path) "
+                 "VALUES('a::hub','function','a.py')")
+    for index in range(1, 6):  # 5 个跨模块 caller -> 60+50=110 -> 截断 100
+        conn.execute("INSERT INTO nodes(qualified_name, kind, file_path) "
+                     "VALUES(?,?,?)", (f"b::c{index}", "function", "b.py"))
+        conn.execute("INSERT INTO edges(source, target, kind, resolution) "
+                     "VALUES(?,?,?,?)", (f"b::c{index}", "a::hub", "call", "resolved"))
+    assert assess_symbol_risk(conn, "a::hub") == 100
