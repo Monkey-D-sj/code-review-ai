@@ -254,6 +254,8 @@ def assess_symbol_risk(conn, symbol: str, deleted: bool = False) -> int:
         "SELECT file_path FROM nodes WHERE qualified_name=?", (symbol,)).fetchone()
     if target is None:
         return 50
+    if target["file_path"] is None:
+        return 50
     target_file = target["file_path"]
     incoming = conn.execute(
         "SELECT DISTINCT source FROM edges WHERE target=? AND resolution='resolved'",

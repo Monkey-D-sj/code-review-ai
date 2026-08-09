@@ -201,6 +201,8 @@ def test_build_change_summary_symbols_path(tmp_path):
     assert record["file"] == "auth.py"
     assert record["start_line"] == 6
     assert record["end_line"] == 7
+    assert isinstance(record["risk"], int)
+    assert 0 <= record["risk"] <= 100
     assert out["uncovered_changes"] == []
     assert out["summary"]["uncovered_changes"] == 0
     assert out["delete_change"] == []
@@ -326,12 +328,14 @@ def test_delete_change_from_tombstone_deleted_file(tmp_path, monkeypatch):
     by_qname = {r["qname"]: r for r in out["delete_change"]}
     assert set(by_qname) == {"auth", "auth::login"}
     assert by_qname["auth"]["kind"] == "module"
+    assert by_qname["auth"]["risk"] == 90
     assert by_qname["auth"]["file_deleted"] is True
     assert by_qname["auth"]["file"] == "auth.py"
     assert by_qname["auth"]["upstream"] == [
         {"source": "app", "kind": "import", "file": "app.py"}]
     assert by_qname["auth::login"]["upstream"] == [
         {"source": "app::main", "kind": "call", "file": "app.py"}]
+    assert by_qname["auth::login"]["risk"] == 90
     assert out["uncovered_changes"] == []   # 被 delete_change 覆盖，不进 uncovered
 
 
@@ -352,6 +356,7 @@ def test_delete_change_from_tombstone_surviving_file(tmp_path, monkeypatch):
     assert out["summary"]["delete_change"] == 1
     record = out["delete_change"][0]
     assert record["qname"] == "auth::login"
+    assert record["risk"] == 90
     assert record["file_deleted"] is False
     assert record["file"] == "auth.py"
     assert out["uncovered_changes"] == []   # 空 hunk uncovered 条目被抑制
