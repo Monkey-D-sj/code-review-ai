@@ -5,6 +5,16 @@ import sys
 
 from code_review_ai.changes import build_change_summary, detect_changed_symbols
 from code_review_ai.benchmark import load_cases, run_benchmark
+from code_review_ai.agent_eval import (MODES, load_agent_cases,
+                                       preflight_agent_eval,
+                                       parse_agent_command, run_agent_eval,
+                                       select_agent_cases)
+from code_review_ai.full_agent_eval import (FULL_EVAL_MODES,
+                                            load_full_agent_cases,
+                                            preflight_full_agent_eval,
+                                            rescore_full_agent_report,
+                                            run_full_agent_eval,
+                                            select_full_agent_cases)
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.graph import query_graph
@@ -130,6 +140,49 @@ def main(argv: list[str] | None = None) -> int:
     bp.add_argument("--cases", required=True)
     bp.add_argument("--top-k", type=int, default=10)
     bp.add_argument("-o", "--out")
+    ae = sub.add_parser("agent-eval")
+    _add_common(ae)
+    ae.add_argument("--cases", required=True)
+    ae.add_argument("--case-ids", nargs="+",
+                    help="run only the selected case ids")
+    ae.add_argument("--agent-command",
+                    help="command that reads the eval prompt from stdin and "
+                         "writes the required JSON object to stdout")
+    ae.add_argument("--dry-run", action="store_true",
+                    help="build contexts and validate symbols without calling an agent")
+    ae.add_argument("--modes", nargs="+", choices=MODES, default=list(MODES))
+    ae.add_argument("--repetitions", type=int, default=1)
+    ae.add_argument("--workers", type=int, default=1,
+                    help="concurrent agent processes (default: 1)")
+    ae.add_argument("--timeout", type=int, default=300)
+    ae.add_argument("--runs-dir", default=".code-review-ai/agent-eval")
+    ae.add_argument("-o", "--out")
+    rc = sub.add_parser("agent-eval-route-check")
+    _add_common(rc)
+    rc.add_argument("--cases", required=True)
+    rc.add_argument("--runs-dir", required=True)
+    rc.add_argument("-o", "--out")
+    aa = sub.add_parser("agent-eval-analyze")
+    aa.add_argument("--report", required=True)
+    aa.add_argument("-o", "--out")
+    fe = sub.add_parser("full-agent-eval")
+    fe.add_argument("--cases", required=True)
+    fe.add_argument("--case-ids", nargs="+")
+    fe.add_argument("--repos-dir", default=".code-review-ai/external-repos")
+    fe.add_argument("--work-dir", default=".code-review-ai/full-agent-eval")
+    fe.add_argument("--agent-command")
+    fe.add_argument("--dry-run", action="store_true")
+    fe.add_argument("--modes", nargs="+", choices=FULL_EVAL_MODES,
+                    default=list(FULL_EVAL_MODES))
+    fe.add_argument("--repetitions", type=int, default=1)
+    fe.add_argument("--workers", type=int, default=1)
+    fe.add_argument("--timeout", type=int, default=600)
+    fe.add_argument("-o", "--out")
+    fr = sub.add_parser("full-agent-eval-rescore")
+    fr.add_argument("--report", required=True)
+    fr.add_argument("--cases", required=True)
+    fr.add_argument("--transcripts", required=True)
+    fr.add_argument("-o", "--out")
     xr = sub.add_parser("extract-review")
     xr.add_argument("debug", help="claude stream-json transcript to read")
     xr.add_argument("out", help="file to write the final answer to")
@@ -162,6 +215,45 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("error: no tool calls found in debug log", file=sys.stderr)
         return 0 if count else 1
+    if args.cmd == "agent-eval-analyze":
+        from code_review_ai.agent_eval_analysis import analyze_file
+        try:
+            payload = analyze_file(args.report, args.out)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        if not args.out:
+            _write_json(payload, None)
+        return 0
+    if args.cmd == "full-agent-eval":
+        try:
+            cases = select_full_agent_cases(
+                load_full_agent_cases(args.cases), args.case_ids)
+            if args.dry_run:
+                payload = preflight_full_agent_eval(
+                    cases, args.repos_dir, args.work_dir)
+            else:
+                if not args.agent_command:
+                    raise ValueError("--agent-command is required unless --dry-run")
+                payload = run_full_agent_eval(
+                    cases, args.repos_dir, args.work_dir,
+                    parse_agent_command(args.agent_command),
+                    modes=tuple(args.modes), repetitions=args.repetitions,
+                    timeout_seconds=args.timeout, workers=args.workers)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_json(payload, args.out)
+        return 0
+    if args.cmd == "full-agent-eval-rescore":
+        try:
+            payload = rescore_full_agent_report(
+                args.report, load_full_agent_cases(args.cases), args.transcripts)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_json(payload, args.out)
+        return 0
 
     # Config comes from the current project (cwd), matching the MCP server;
     # --repo/--db only select what gets analyzed, not where config is read.
@@ -169,6 +261,18 @@ def main(argv: list[str] | None = None) -> int:
     cfg.repo_path = args.repo
     cfg.db_path = args.db
     conn = _conn(args.db)
+
+    if args.cmd == "agent-eval-route-check":
+        from code_review_ai.agent_eval_analysis import route_check_analysis
+        try:
+            rebuild(cfg, conn)
+            cases = load_agent_cases(args.cases)
+            payload = route_check_analysis(conn, cases, args.runs_dir)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_json(payload, args.out)
+        return 0
 
     if args.cmd == "rebuild":
         stats = rebuild(cfg, conn)
@@ -253,6 +357,25 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "benchmark":
         try:
             payload = run_benchmark(cfg, conn, load_cases(args.cases), args.top_k)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_json(payload, args.out)
+    elif args.cmd == "agent-eval":
+        try:
+            cases = select_agent_cases(load_agent_cases(args.cases), args.case_ids)
+            if args.dry_run:
+                payload = preflight_agent_eval(cfg, conn, cases,
+                                               modes=tuple(args.modes))
+            else:
+                if not args.agent_command:
+                    raise ValueError("--agent-command is required unless --dry-run")
+                payload = run_agent_eval(
+                    cfg, conn, cases, parse_agent_command(args.agent_command),
+                    args.runs_dir, modes=tuple(args.modes),
+                    repetitions=args.repetitions,
+                    timeout_seconds=args.timeout, workers=args.workers,
+                )
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
