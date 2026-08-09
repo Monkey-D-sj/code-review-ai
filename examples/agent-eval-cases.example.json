@@ -1,0 +1,17 @@
+[
+  {
+    "id": "authentication-bypass",
+    "prompt": "Review this authentication change and report concrete regressions.",
+    "diff": "diff --git a/auth.py b/auth.py\n@@ -10,2 +10,2 @@\n-    return verify_password(password)\n+    return True",
+    "changed_symbols": ["auth::login"],
+    "gold_findings": [
+      {
+        "id": "password-check-bypassed",
+        "file": "auth.py",
+        "line_start": 10,
+        "line_end": 12,
+        "keywords": ["password", "authentication", "bypass"]
+      }
+    ]
+  }
+]

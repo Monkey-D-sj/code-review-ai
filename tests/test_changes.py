@@ -181,7 +181,7 @@ def test_build_change_summary_diff_path(tmp_path, monkeypatch):
                               "uncovered_changes": 1, "delete_change": 0}
     assert out["changed_functions"] == [
         {"qname": Q("auth", "login"), "kind": "function",
-         "file": "auth.py", "start_line": 6, "end_line": 7}]
+         "file": "auth.py", "start_line": 6, "end_line": 7, "risk": 50}]
     assert out["uncovered_changes"] == [{"file": "logo.png", "hunks": []}]
     assert out["delete_change"] == []
 
@@ -201,6 +201,8 @@ def test_build_change_summary_symbols_path(tmp_path):
     assert record["file"] == "auth.py"
     assert record["start_line"] == 6
     assert record["end_line"] == 7
+    assert isinstance(record["risk"], int)
+    assert 0 <= record["risk"] <= 100
     assert out["uncovered_changes"] == []
     assert out["summary"]["uncovered_changes"] == 0
     assert out["delete_change"] == []
@@ -326,12 +328,14 @@ def test_delete_change_from_tombstone_deleted_file(tmp_path, monkeypatch):
     by_qname = {r["qname"]: r for r in out["delete_change"]}
     assert set(by_qname) == {"auth", "auth::login"}
     assert by_qname["auth"]["kind"] == "module"
+    assert by_qname["auth"]["risk"] == 90
     assert by_qname["auth"]["file_deleted"] is True
     assert by_qname["auth"]["file"] == "auth.py"
     assert by_qname["auth"]["upstream"] == [
         {"source": "app", "kind": "import", "file": "app.py"}]
     assert by_qname["auth::login"]["upstream"] == [
         {"source": "app::main", "kind": "call", "file": "app.py"}]
+    assert by_qname["auth::login"]["risk"] == 90
     assert out["uncovered_changes"] == []   # 被 delete_change 覆盖，不进 uncovered
 
 
@@ -352,6 +356,7 @@ def test_delete_change_from_tombstone_surviving_file(tmp_path, monkeypatch):
     assert out["summary"]["delete_change"] == 1
     record = out["delete_change"][0]
     assert record["qname"] == "auth::login"
+    assert record["risk"] == 90
     assert record["file_deleted"] is False
     assert record["file"] == "auth.py"
     assert out["uncovered_changes"] == []   # 空 hunk uncovered 条目被抑制
@@ -372,3 +377,45 @@ def test_delete_change_ignores_reaadded_qname(tmp_path, monkeypatch):
     out = build_change_summary(cfg, conn)
     assert out["delete_change"] == []       # qname 仍在活图 -> 不是当前删除
     assert out["uncovered_changes"] == [{"file": "auth.py", "hunks": []}]
+
+
+def _seed_risk_graph(conn):
+    """a.py::target 有同模块+跨模块 caller; a.py::leaf 只有同模块 caller;
+    b.py::external 无 caller。"""
+    for qname, kind, file_path in [
+            ("a::target", "function", "a.py"),
+            ("a::leaf", "function", "a.py"),
+            ("a::caller", "function", "a.py"),
+            ("b::external", "function", "b.py"),
+    ]:
+        conn.execute("INSERT INTO nodes(qualified_name, kind, file_path) "
+                     "VALUES(?,?,?)", (qname, kind, file_path))
+    for source, target in [("a::caller", "a::target"),  # 同模块
+                           ("b::external", "a::target"),  # 跨模块
+                           ("a::caller", "a::leaf")]:    # 同模块
+        conn.execute("INSERT INTO edges(source, target, kind, resolution) "
+                     "VALUES(?,?,?,?)", (source, target, "call", "resolved"))
+
+
+def test_assess_symbol_risk_rules(tmp_path):
+    from code_review_ai.changes import assess_symbol_risk
+    conn = _conn(tmp_path)
+    _seed_risk_graph(conn)
+    assert assess_symbol_risk(conn, "a::target") == 70      # 跨模块入边 -> 60+10
+    assert assess_symbol_risk(conn, "a::leaf") == 35        # 同模块入边 -> 30+5
+    assert assess_symbol_risk(conn, "b::external") == 10    # 叶子
+    assert assess_symbol_risk(conn, "nope::missing") == 50  # 未解析
+    assert assess_symbol_risk(conn, "a::target", deleted=True) == 90  # 删除
+
+
+def test_assess_symbol_risk_caps_cross_module(tmp_path):
+    from code_review_ai.changes import assess_symbol_risk
+    conn = _conn(tmp_path)
+    conn.execute("INSERT INTO nodes(qualified_name, kind, file_path) "
+                 "VALUES('a::hub','function','a.py')")
+    for index in range(1, 6):  # 5 个跨模块 caller -> 60+50=110 -> 截断 100
+        conn.execute("INSERT INTO nodes(qualified_name, kind, file_path) "
+                     "VALUES(?,?,?)", (f"b::c{index}", "function", "b.py"))
+        conn.execute("INSERT INTO edges(source, target, kind, resolution) "
+                     "VALUES(?,?,?,?)", (f"b::c{index}", "a::hub", "call", "resolved"))
+    assert assess_symbol_risk(conn, "a::hub") == 100

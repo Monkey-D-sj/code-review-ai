@@ -65,6 +65,37 @@ def test_cli_benchmark_writes_report(tmp_path):
     assert report["aggregate"]["macro_patch_file_recall_at_k"] == 1.0
 
 
+def test_cli_agent_eval_dispatches_and_writes_report(tmp_path, monkeypatch):
+    cases = tmp_path / "agent-cases.json"
+    cases.write_text(json.dumps([{
+        "id": "login-review",
+        "prompt": "Review login.",
+        "changed_symbols": [Q("auth", "login")],
+        "gold_findings": [{"id": "bug", "file": "auth.py"}],
+    }]), encoding="utf-8")
+    output = tmp_path / "agent-report.json"
+    captured = {}
+
+    def fake_run(config, conn, loaded_cases, command, output_dir, **kwargs):
+        captured.update({"cases": loaded_cases, "command": command,
+                         "output_dir": output_dir, **kwargs})
+        return {"schema_version": 1, "aggregate": {}, "runs": []}
+
+    monkeypatch.setattr(cli, "run_agent_eval", fake_run)
+    code = main([
+        "agent-eval", "--repo", FIX, "--db", str(tmp_path / "agent.db"),
+        "--cases", str(cases), "--agent-command", 'agent --model "test model"',
+        "--modes", "diff_only", "graph_agent", "--repetitions", "2",
+        "--runs-dir", str(tmp_path / "runs"), "--out", str(output),
+    ])
+
+    assert code == 0
+    assert captured["command"] == ["agent", "--model", "test model"]
+    assert captured["modes"] == ("diff_only", "graph_agent")
+    assert captured["repetitions"] == 2
+    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == 1
+
+
 def test_cli_test_impact(tmp_path, capsys, monkeypatch):
     import subprocess
     # isolated repo with a test file (FIX has none). chdir into it so the
