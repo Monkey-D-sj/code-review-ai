@@ -181,7 +181,7 @@ def test_build_change_summary_diff_path(tmp_path, monkeypatch):
                               "uncovered_changes": 1, "delete_change": 0}
     assert out["changed_functions"] == [
         {"qname": Q("auth", "login"), "kind": "function",
-         "file": "auth.py", "start_line": 6, "end_line": 7}]
+         "file": "auth.py", "start_line": 6, "end_line": 7, "risk": 50}]
     assert out["uncovered_changes"] == [{"file": "logo.png", "hunks": []}]
     assert out["delete_change"] == []
 

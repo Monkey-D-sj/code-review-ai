@@ -205,6 +205,7 @@ def _delete_change(config: Config, conn, deleted_files: set[str],
             "file_deleted": bool(row["file_deleted"]),
             "start_line": row["start_line"], "end_line": row["end_line"],
             "signature": row["signature"], "is_test": row["is_test"],
+            "risk": 90,
             "upstream": [{"source": u["source"], "kind": u["kind"],
                           "file": _relative_to_repo(config, u["file"])}
                          for u in json.loads(row["upstream_json"] or "[]")],
@@ -292,12 +293,14 @@ def _symbols_summary(config: Config, conn, symbols: list[str]) -> dict:
         ).fetchone()
         if row is None:
             records.append({"qname": symbol, "kind": None, "file": None,
-                            "start_line": 0, "end_line": 0})
+                            "start_line": 0, "end_line": 0,
+                            "risk": assess_symbol_risk(conn, symbol)})
             continue
         rel = _relative_to_repo(config, row["file_path"])
         files.add(rel)
         records.append({"qname": symbol, "kind": row["kind"], "file": rel,
-                        "start_line": row["start_line"], "end_line": row["end_line"]})
+                        "start_line": row["start_line"], "end_line": row["end_line"],
+                        "risk": assess_symbol_risk(conn, symbol)})
     return {"summary": {"files_changed": len(files), "lines_added": 0,
                         "lines_removed": 0, "changed_functions": len(symbols),
                         "uncovered_changes": 0, "delete_change": 0},
@@ -328,6 +331,8 @@ def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
     delete_change, covered_files = _delete_change(config, conn, deleted, numstat)
     functions, uncovered = _diff_coverage(config, diff, numstat, deleted,
                                           covered_files=covered_files)
+    for record in functions:
+        record["risk"] = assess_symbol_risk(conn, record["qname"])
     return {"summary": {"files_changed": len(numstat),
                         "lines_added": sum(added for added, _ in numstat.values()),
                         "lines_removed": sum(removed for _, removed in numstat.values()),
