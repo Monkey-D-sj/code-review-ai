@@ -48,8 +48,12 @@ def fts_search(conn, query, limit=50) -> list[dict]       # 查询
 
 - **全量**（`indexer.py`）：
   - `_clear_tables` 加 `DELETE FROM fts_nodes`。
-  - `_write_nodes` 插完 nodes 后一行 `INSERT INTO fts_nodes(fts_nodes) VALUES('rebuild')`
-    —— 从 nodes 表整体重建索引，零逐行代码。
+  - `_write_nodes` 插完 nodes 后返回 `(qname_to_id, inserted)`（`inserted` 为去重后实际插入的
+    节点列表）；全量路径在同一个事务内对这批节点逐行调用
+    `index_fts(conn, inserted, qname_to_id)` 灌 FTS，与增量路径共用同一写码。
+  - `reindex_all`（`INSERT INTO fts_nodes(fts_nodes) VALUES('rebuild')`）仅作为事务外的
+    恢复工具保留——`'rebuild'` FTS 命令会开启自己的事务，在 `indexer.rebuild` 的显式
+    `with transaction(conn)` 内调用会抛 `OperationalError`。
 - **增量**（`update.py`）：
   - `_apply_nodes_edges_delta` 删除路径：对已收集的 `removed_ids` 调 `deindex_fts`
     （`DELETE FROM fts_nodes WHERE rowid IN (...)`）。
@@ -60,7 +64,8 @@ def fts_search(conn, query, limit=50) -> list[dict]       # 查询
 
 `INDEX_VERSION` 5→6。旧库缺 `fts_nodes` 表：`init_schema` 的 `CREATE ... IF NOT
 EXISTS` 建表；下一次 `sync`（MCP 启动 `startup_sync` / 钩子 / `rebuild_index`）的
-`_meta_changed` 检测到版本不符 → 全量 rebuild → `_write_nodes` 经 `reindex_all`
+`_meta_changed` 检测到版本不符 → 全量 rebuild → `_write_nodes` 返回
+`(qname_to_id, inserted)` 后在事务内经 `index_fts(conn, inserted, qname_to_id)`
 灌 FTS。走既有「schema 变更即重建」惯例，不写一次性 backfill。代价：旧库首次
 启动全量重解析（与其它 schema 变更等价）。
 
@@ -89,11 +94,12 @@ ORDER BY bm25(fts_nodes) LIMIT ?
 
 ```json
 [
-  {"qname": "auth::login", "kind": "function", "file": "code_review_ai/auth.py",
+  {"qname": "auth::login", "kind": "function", "file": "C:/work/repo/code_review_ai/auth.py",
    "line": 12, "end_line": 30, "signature": "def login(...)", "score": -3.2}
 ]
 ```
 
+`file` 为符号所在文件的绝对路径（`nodes.file_path` 存的是绝对路径，与其它工具输出一致）。
 glob 模式 `score` 为 `null`；FTS 模式返回 bm25 分（越低越相关，升序）。
 
 ## 组件设计
