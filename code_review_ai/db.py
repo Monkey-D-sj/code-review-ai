@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Bumped whenever the schema or its meaning changes in a way that makes an
 # older index.db incompatible; indexers check this before rebuilding.
-INDEX_VERSION = 5
+INDEX_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (
@@ -95,6 +95,10 @@ CREATE INDEX IF NOT EXISTS idx_memberships_node ON flow_memberships(node_id);
 CREATE INDEX IF NOT EXISTS idx_community_memberships_node ON community_memberships(node_id);
 CREATE INDEX IF NOT EXISTS idx_tombstones_file ON tombstones(file_path);
 CREATE INDEX IF NOT EXISTS idx_tombstones_qname ON tombstones(qname);
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_nodes USING fts5(
+    qualified_name, file_path, signature, decorators, end_line,
+    content='nodes', content_rowid='id'
+);
 """
 
 

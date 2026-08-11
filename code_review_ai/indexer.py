@@ -14,6 +14,7 @@ from code_review_ai.db import transaction
 from code_review_ai.flow_builder import NodeRow, EdgeRow, FlowRecord, build_flows
 from code_review_ai.parser import ParsedFile, SOURCE_GLOBS, filter_excluded, is_test_node, list_source_files, parse_file
 from code_review_ai.resolver import resolve_edges
+from code_review_ai.search import index_fts
 
 
 def _ms(seconds: float) -> float:
@@ -64,7 +65,8 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
 
     with transaction(conn):
         _clear_tables(conn)
-        qname_to_id = _write_nodes(conn, parsed, config)
+        qname_to_id, inserted = _write_nodes(conn, parsed, config)
+        index_fts(conn, inserted, qname_to_id)
         _write_edges(conn, all_edges)
         recompute_degrees(conn)
         call_edges = [e for e in all_edges if e.kind == "call"]
@@ -96,13 +98,15 @@ def _clear_tables(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM communities")
     conn.execute("DELETE FROM edges")
     conn.execute("DELETE FROM nodes")
+    conn.execute("DELETE FROM fts_nodes")
 
 
-def _write_nodes(conn, parsed, config) -> dict[str, int]:
+def _write_nodes(conn, parsed, config) -> tuple[dict[str, int], list]:
     """Insert all nodes with parent_id NULL, then backfill parent_id in one
     batch. Dedupes by qualified_name — several Java files in one package each
     parse a module node for the shared package; keep only the first. Returns
-    the qname -> id map (ids are db-assigned)."""
+    the qname -> id map (ids are db-assigned) and the list of nodes actually
+    inserted (post-dedup), which the full-rebuild path uses to populate FTS."""
     seen: set[str] = set()
     inserted: list = []
     rows: list[tuple] = []
@@ -133,7 +137,7 @@ def _write_nodes(conn, parsed, config) -> dict[str, int]:
     ]
     if parent_updates:
         conn.executemany("UPDATE nodes SET parent_id=? WHERE id=?", parent_updates)
-    return qname_to_id
+    return qname_to_id, inserted
 
 
 def _write_edges(conn, edges) -> None:

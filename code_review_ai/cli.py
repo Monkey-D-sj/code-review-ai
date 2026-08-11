@@ -1,4 +1,3 @@
-from code_review_ai import qname
 import argparse
 import json
 import sys
@@ -23,6 +22,7 @@ from code_review_ai.impact import get_impact
 from code_review_ai.testimpact import get_test_impact
 from code_review_ai.deadcode import find_dead_code
 from code_review_ai.indexer import rebuild
+from code_review_ai.search import fts_search
 from code_review_ai.installer import DEFAULT_SOURCE, install
 from code_review_ai.update import sync, update_nodes_edges
 
@@ -101,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("search")
     _add_common(sp)
     sp.add_argument("query")
+    sp.add_argument("--limit", type=int, default=50,
+                    help="max results (default: 50)")
     up = sub.add_parser("update")
     _add_common(up)
     sp = sub.add_parser("sync")
@@ -324,14 +326,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(json.dumps(payload))
     elif args.cmd == "search":
-        import fnmatch
-        rows = conn.execute(
-            "SELECT qualified_name,kind,file_path,start_line,end_line FROM nodes "
-            "WHERE kind IN ('function','method','class')").fetchall()
-        matches = [r for r in rows
-                   if fnmatch.fnmatch(qname.short(r["qualified_name"]), args.query)]
-        for r in matches:
-            print(f"{r['qualified_name']}  {r['kind']}  {r['file_path']}:{r['start_line']}-{r['end_line']}")
+        for r in fts_search(conn, args.query, limit=args.limit):
+            signature = f"  {r['signature']}" if r.get("signature") else ""
+            print(f"{r['qname']}  {r['kind']}  {r['file']}:{r['line']}-{r['end_line']}{signature}")
     elif args.cmd == "communities":
         from code_review_ai.community import list_communities, get_community
         if args.symbol:

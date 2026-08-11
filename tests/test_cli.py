@@ -13,11 +13,13 @@ def test_cli_search(tmp_path, capsys):
     assert code == 0
     _ = capsys.readouterr()  # discard rebuild output
 
-    code = main(["search", "login", "--repo", FIX,
+    code = main(["search", "login", "--limit", "5", "--repo", FIX,
                  "--db", str(tmp_path / "c.db")])
     assert code == 0
     lines = capsys.readouterr().out.strip().splitlines()
-    assert any(Q("auth", "login") in line and "function" in line for line in lines)
+    hit = next(line for line in lines if Q("auth", "login") in line)
+    assert "function" in hit and "auth.py" in hit
+    assert "def login" in hit  # signature 列
 
 
 def test_cli_summary(tmp_path, capsys):

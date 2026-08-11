@@ -68,7 +68,7 @@ static review rules for its language. They coexist with any existing
 
 - `rebuild_index` - build/rebuild the index from the working tree
 - `get_impact` - impact chains for changed symbols (or derived from a git diff)
-- `search_symbol` - find symbols by name glob
+- `search_symbol` - find symbols by name; plain-word queries run FTS token match + bm25 ranking with a substring fallback on 0 hits, while queries containing `*`/`?` keep the short-name glob behavior
 - `get_symbol_detail` - node detail + direct callers/callees
 - `list_entry_points` - designated entry points
 - `get_communities` / `get_community` - Leiden communities (opt-in via `community_detection`)
@@ -79,7 +79,7 @@ static review rules for its language. They coexist with any existing
 code-review-ai rebuild --repo .                        # build index
 code-review-ai query   --symbols auth::login           # impact for given symbols
 code-review-ai query   --files path/to/file.py         # impact via git diff of files
-code-review-ai search  "login"                          # glob-match symbol short names
+code-review-ai search  "login" [--limit 50]             # full-text (FTS) or glob (*login*) symbol search
 code-review-ai communities [--symbol auth::login]       # list communities / one symbol's community
 ```
 

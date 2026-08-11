@@ -47,9 +47,23 @@ def test_get_impact_tool(tmp_path):
 
 def test_search_symbol_tool(tmp_path):
     server, conn, cfg = _server(tmp_path)
-    out = server._tool_manager._tools["search_symbol"].fn(query="login")
+    tools = server._tool_manager._tools
+    out = tools["search_symbol"].fn(query="login", limit=10)
     data = json.loads(out)
-    assert any(d["qname"] == Q("auth","login") for d in data)
+    hit = next(d for d in data if d["qname"] == Q("auth", "login"))
+    assert hit["kind"] == "function"
+    # nodes.file_path is stored absolute (os.path.join(repo, rel) in _parse_files);
+    # assert on the basename so the test is agnostic to repo-root layout.
+    assert hit["file"].endswith("auth.py")
+    assert hit["end_line"] >= hit["line"]
+    assert "signature" in hit and "score" in hit
+
+
+def test_search_symbol_glob_tool(tmp_path):
+    server, conn, cfg = _server(tmp_path)
+    out = server._tool_manager._tools["search_symbol"].fn(query="*login*")
+    data = json.loads(out)
+    assert any(d["qname"] == Q("auth", "login") for d in data)
 
 
 def test_list_entry_points_tool(tmp_path):

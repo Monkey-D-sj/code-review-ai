@@ -22,7 +22,7 @@ uv run code-review-ai summary --symbols auth::login   # change summary JSON (sum
 uv run code-review-ai summary                        # same, computed from the git diff of the whole tree
 uv run code-review-ai query-graph auth::login                # graph neighborhood (in/out via resolved edges)
 uv run code-review-ai query-graph auth::login --edge-kind call --direction both
-uv run code-review-ai search  "login"                       # glob-match symbol short names
+uv run code-review-ai search  "login" [--limit 50]          # full-text (FTS) or glob (*login*) symbol search
 uv run code-review-ai communities [--symbol auth::login]    # list communities, or one symbol's community
 uv run code-review-ai install --platform claude-code        # register MCP server with Claude Code (self-install)
 uv sync --extra community                                    # opt: install leidenalg+igraph for Phase C

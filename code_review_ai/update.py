@@ -18,6 +18,7 @@ from code_review_ai.indexer import rebuild, recompute_degrees, _stamp_built_at
 from code_review_ai.parser import (SOURCE_GLOBS, filter_excluded,
                                    is_test_node, list_source_files, parse_file)
 from code_review_ai.resolver import resolve_edges
+from code_review_ai.search import deindex_fts, index_fts
 
 
 def changed_files(config, conn) -> tuple[set[str], set[str], set[str]]:
@@ -187,8 +188,10 @@ def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
     touch = [os.path.join(repo, rel) for rel in changed_set | deleted_set]
     removed_ids: list[int] = []
     for abs_path in touch:
-        removed_ids += [r["id"] for r in conn.execute(
+        path_ids = [r["id"] for r in conn.execute(
             "SELECT id FROM nodes WHERE file_path=?", (abs_path,))]
+        removed_ids += path_ids
+        deindex_fts(conn, path_ids)   # 必须在 DELETE nodes 之前
         conn.execute("DELETE FROM edges WHERE file_path=?", (abs_path,))
         conn.execute("DELETE FROM nodes WHERE file_path=?", (abs_path,))
     if removed_ids:
@@ -235,6 +238,7 @@ def _insert_nodes(conn, parsed, config, skip_qnames=frozenset()) -> int:
     if parent_updates:
         conn.executemany(
             "UPDATE nodes SET parent_id=? WHERE id=?", parent_updates)
+    index_fts(conn, inserted, qname_to_id)
     return len(rows)
 
 
