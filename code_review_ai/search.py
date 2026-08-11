@@ -11,7 +11,6 @@ searchable columns.
 
 import fnmatch
 import json
-import sqlite3
 
 from code_review_ai import qname
 
@@ -65,7 +64,7 @@ def fts_search(conn, query: str, limit: int = 50) -> list[dict]:
     relevance (score = bm25 in FTS mode, None in glob mode). `query` containing
     `*`/`?` runs the legacy short-name glob; plain words run FTS with a LIKE
     infix fallback when nothing matches."""
-    if any(ch in query for ch in "*?"):
+    if any(char in query for char in "*?"):
         return _glob_search(conn, query, limit)
     match_expr = _match_expr(query)
     if match_expr is None:
@@ -82,8 +81,8 @@ def _match_expr(query: str) -> str | None:
     usable token survives (e.g. all-punctuation input)."""
     tokens = []
     for word in query.split():
-        token = "".join(ch for ch in word if ch.isalnum() or ch == "_")
-        if token and any(ch.isalnum() for ch in token):
+        token = "".join(char for char in word if char.isalnum() or char == "_")
+        if token and any(char.isalnum() for char in token):
             tokens.append(f"{token}*")
     return " AND ".join(tokens) if tokens else None
 
