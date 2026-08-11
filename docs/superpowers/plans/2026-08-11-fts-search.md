@@ -206,10 +206,19 @@ def test_deindex_removes_rows(tmp_path):
     _seed(conn,
           (1, "auth::login", "function", "auth.py", 6, 7, "def login(user, pw)", []),
           (2, "util::hash_pw", "function", "util.py", 1, 2, "def hash_pw(pw)", []))
+    # deindex_fts 只清 FTS 索引；节点仍在 nodes 表时 LIKE 兜底仍会命中，
+    # 所以直接断言 FTS 索引本身（不经过 fts_search 的 LIKE 兜底）。
+    assert conn.execute(
+        "SELECT count(*) FROM fts_nodes WHERE fts_nodes MATCH 'login'"
+    ).fetchone()[0] == 1
     deindex_fts(conn, [1])
-    hits = fts_search(conn, "login")
-    assert not any(h["qname"] == "auth::login" for h in hits)
-    assert any(h["qname"] == "util::hash_pw" for h in fts_search(conn, "hash"))
+    assert conn.execute(
+        "SELECT count(*) FROM fts_nodes WHERE fts_nodes MATCH 'login'"
+    ).fetchone()[0] == 0
+    # util::hash_pw 仍在索引
+    assert conn.execute(
+        "SELECT count(*) FROM fts_nodes WHERE fts_nodes MATCH 'hash_pw'"
+    ).fetchone()[0] == 1
 
 
 def test_reindex_all_rebuilds_from_nodes(tmp_path):
@@ -539,12 +548,19 @@ Expected: FAIL —— 增量后 `brand_new` 搜不到 / 删除后 `auth::login` 
 
 - [ ] **Step 3: 实现**
 
-`code_review_ai/update.py:194-195`，`_delete_memberships` 之后加 `deindex_fts`：
+`code_review_ai/update.py:188-193` 的 `_apply_nodes_edges_delta` 删除路径：逐路径先收集 ids、**`deindex_fts` 必须在 `DELETE FROM nodes` 之前**（外部内容表的 FTS DELETE 在对应内容行已删时会静默 no-op、泄漏陈旧索引条目，已实测 `/tmp/fts_delete2.py`）：
 
 ```python
+    removed_ids: list[int] = []
+    for abs_path in touch:
+        path_ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM nodes WHERE file_path=?", (abs_path,))]
+        removed_ids += path_ids
+        deindex_fts(conn, path_ids)   # 必须在 DELETE nodes 之前
+        conn.execute("DELETE FROM edges WHERE file_path=?", (abs_path,))
+        conn.execute("DELETE FROM nodes WHERE file_path=?", (abs_path,))
     if removed_ids:
         _delete_memberships(conn, removed_ids)
-        deindex_fts(conn, removed_ids)
 ```
 
 `code_review_ai/update.py:229-238` 的 `_insert_nodes`，`parent_updates` 回填之后、`return len(rows)` 之前加：
@@ -563,7 +579,7 @@ Expected: FAIL —— 增量后 `brand_new` 搜不到 / 删除后 `auth::login` 
 from code_review_ai.search import deindex_fts, index_fts
 ```
 
-> 说明：`_apply_nodes_edges_delta` 里 `removed_ids` 是按 file_path 收集的整文件旧节点 id（含被改文件里删掉的符号），全部 deindex；`_insert_nodes` 的 `inserted` 是该批次实际插入的 ParsedNode 列表，`qname_to_id` 是全库映射（含去重），二者组合精确维护 FTS。
+> 说明：`_apply_nodes_edges_delta` 里 `removed_ids` 是按 file_path 收集的整文件旧节点 id（含被改文件里删掉的符号），全部 deindex，**且必须发生在 `DELETE FROM nodes` 之前**（FTS5 外部内容表的 DELETE 需要对应内容行存在才能算出要删的 token，内容行已删则静默 no-op）。`_insert_nodes` 的 `inserted` 是该批次实际插入的 ParsedNode 列表，`qname_to_id` 是全库映射（含去重），二者组合精确维护 FTS。
 
 - [ ] **Step 4: 跑测试确认通过**
 
