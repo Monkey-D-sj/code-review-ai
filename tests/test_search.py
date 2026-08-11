@@ -1,6 +1,9 @@
 import json
+import shutil
+import subprocess
 
 from conftest import FIXTURES as FIX
+from code_review_ai import update as upd
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.indexer import rebuild
@@ -159,3 +162,62 @@ def test_rebuild_populates_fts(tmp_path):
     rebuild(cfg, conn)
     hits = fts_search(conn, "login")
     assert len([h for h in hits if h["qname"] == "auth::login"]) == 1
+
+
+def _git_repo(tmp_path):
+    """Copy the shared fixture into an isolated temp git repo."""
+    repo = tmp_path / "repo"
+    shutil.copytree(FIX, repo)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-q", "-m", "init"],
+        cwd=repo, check=True)
+    return repo
+
+
+def test_incremental_add_indexes_new_symbol(tmp_path):
+    repo = _git_repo(tmp_path)
+    cfg = load_config(str(repo))
+    cfg.repo_path = str(repo)
+    conn = connect(str(tmp_path / "i.db"))
+    init_schema(conn)
+    rebuild(cfg, conn)
+    repo.joinpath("util.py").write_text(
+        "def hash_pw(pw):\n    return pw\n\n\ndef brand_new():\n    pass\n",
+        encoding="utf-8")
+    upd.update_nodes_edges(cfg, conn, ["util.py"])
+    hits = fts_search(conn, "brand_new")
+    assert any(h["qname"] == "util::brand_new" for h in hits)
+    # 直接断言 FTS 索引本身——fts_search 有 nodes 表 LIKE 兜底，空索引也会被
+    # 中缀命中，掩盖 fts_nodes 从未填充的事实（同 test_deindex_removes_rows 手法）。
+    assert conn.execute(
+        "SELECT count(*) FROM fts_nodes WHERE fts_nodes MATCH 'brand_new'"
+    ).fetchone()[0] == 1
+
+
+def test_incremental_delete_deindexes_symbol(tmp_path):
+    repo = _git_repo(tmp_path)
+    cfg = load_config(str(repo))
+    cfg.repo_path = str(repo)
+    conn = connect(str(tmp_path / "d.db"))
+    init_schema(conn)
+    rebuild(cfg, conn)
+    auth_ids = [r["id"] for r in conn.execute(
+        "SELECT id FROM nodes WHERE file_path LIKE '%auth.py'")]
+    assert auth_ids
+    repo.joinpath("auth.py").unlink()
+    upd.update_nodes_edges(cfg, conn, ["auth.py"])
+    hits = fts_search(conn, "login")
+    assert not any(h["qname"] == "auth::login" for h in hits)
+    # ts/auth.ts 的 login 不受影响
+    assert any(h["qname"] == "ts.auth::login" for h in hits)
+    # 直接断言 FTS 索引本身——fts_search 的 MATCH 会 JOIN nodes 表，auth.py
+    # 的内容行已删，陈旧 FTS 行会被 JOIN 过滤掉而发现不了泄漏；须直接查
+    # fts_nodes（外部内容表 MATCH 只走索引，陈旧行仍会计数）。
+    placeholders = ",".join("?" for _ in auth_ids)
+    stale = conn.execute(
+        "SELECT count(*) FROM fts_nodes WHERE fts_nodes MATCH 'login' "
+        f"AND rowid IN ({placeholders})", auth_ids).fetchone()[0]
+    assert stale == 0
