@@ -1,6 +1,9 @@
 import json
 
+from conftest import FIXTURES as FIX
+from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
+from code_review_ai.indexer import rebuild
 from code_review_ai.search import (deindex_fts, fts_search, index_fts,
                                    reindex_all)
 
@@ -133,3 +136,26 @@ def test_all_punctuation_query_returns_empty(tmp_path):
                  "def login(user, pw)", []))
     assert fts_search(conn, "::") == []
     assert fts_search(conn, "") == []
+
+
+def test_rebuild_populates_fts(tmp_path):
+    cfg = load_config(FIX)
+    cfg.repo_path = FIX
+    conn = connect(str(tmp_path / "r.db"))
+    init_schema(conn)
+    rebuild(cfg, conn)
+    # 直接断言 FTS 索引本身（不经过 fts_search 的 LIKE 兜底）——否则空索引
+    # 也会被 nodes 表的 LIKE 中缀兜底命中，掩盖 fts_nodes 从未填充的事实。
+    assert conn.execute(
+        "SELECT count(*) FROM fts_nodes WHERE fts_nodes MATCH 'login'"
+    ).fetchone()[0] >= 2
+    hits = fts_search(conn, "login")
+    assert any(h["qname"] == "auth::login" for h in hits)
+    assert any(h["qname"] == "ts.auth::login" for h in hits)
+    # glob 模式向后兼容
+    hits = fts_search(conn, "*login*")
+    assert any(h["qname"] == "auth::login" for h in hits)
+    # 二次 rebuild 不产生重复 FTS 行
+    rebuild(cfg, conn)
+    hits = fts_search(conn, "login")
+    assert len([h for h in hits if h["qname"] == "auth::login"]) == 1
