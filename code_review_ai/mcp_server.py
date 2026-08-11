@@ -1,6 +1,3 @@
-from code_review_ai import qname
-
-import fnmatch
 import json
 import threading
 import urllib.request
@@ -15,6 +12,7 @@ from code_review_ai.graph import query_graph as _query_graph
 from code_review_ai.impact import get_impact as _get_impact
 from code_review_ai.testimpact import get_test_impact as _get_test_impact
 from code_review_ai.deadcode import find_dead_code as _find_dead_code
+from code_review_ai.search import fts_search
 from code_review_ai.update import sync
 
 
@@ -102,17 +100,14 @@ def create_server(config: Config):
                                        edge_kind=edge_kind, direction=direction))
 
     @mcp.tool()
-    def search_symbol(query: str) -> str:
-        """Discover symbols by glob on their short name (e.g. "*login*",
-        "UserService"). Returns a JSON list of {qname, kind, file, line}. Use
-        to find qualified names before get_symbol_detail / get_impact."""
-        rows = conn.execute(
-            "SELECT qualified_name,kind,file_path,start_line FROM nodes WHERE kind IN ('function','method','class')"
-        ).fetchall()
-        out = [{"qname": r["qualified_name"], "kind": r["kind"],
-                "file": r["file_path"], "line": r["start_line"]}
-               for r in rows if fnmatch.fnmatch(qname.short(r["qualified_name"]), query)]
-        return json.dumps(out)
+    def search_symbol(query: str, limit: int = 50) -> str:
+        """Discover symbols by full-text search or glob on their short name
+        (e.g. "*login*", "UserService", "login"). Pure-word queries run FTS
+        token match + bm25 ranking, falling back to substring on 0 hits.
+        Returns a JSON list of {qname, kind, file, line, end_line, signature,
+        score}. Use to find qualified names before get_symbol_detail /
+        get_impact."""
+        return json.dumps(fts_search(conn, query, limit=limit))
 
     @mcp.tool()
     def get_symbol_detail(qualified_name: str) -> str:
