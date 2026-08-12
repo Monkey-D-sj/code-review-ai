@@ -103,5 +103,73 @@
         "keywords": ["reuse", "snapshot", "defensive copy", "already-created", "previously registered", "live map"]
       }
     ]
+  },
+  {
+    "id": "p-limit-options-object",
+    "repo_name": "p-limit",
+    "repo_url": "https://github.com/sindresorhus/p-limit.git",
+    "source_commit": "870db0f54785cc6ae6444be421df98cc48932e58",
+    "mutation_paths": ["index.js"],
+    "prompt": "Review this change to pLimit()'s argument handling for valid API usage that now fails or is rejected.",
+    "gold_findings": [
+      {
+        "id": "options-object-no-longer-accepted",
+        "file": "test.js",
+        "line_start": 210,
+        "line_end": 218,
+        "keywords": ["options", "concurrency", "object"]
+      }
+    ]
+  },
+  {
+    "id": "gson-null-atomic-long-array-element",
+    "repo_name": "gson",
+    "repo_url": "https://github.com/google/gson.git",
+    "source_commit": "e4f54f78c93dae0507fcac5be81253974bc9042d",
+    "mutation_paths": ["gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java"],
+    "prompt": "Review this change to AtomicLongArray deserialization for malformed inputs that are no longer rejected consistently.",
+    "gold_findings": [
+      {
+        "id": "null-element-npe-instead-of-jsonsyntaxexception",
+        "file": "gson/src/test/java/com/google/gson/functional/JavaUtilConcurrentAtomicTest.java",
+        "line_start": 118,
+        "line_end": 126,
+        "keywords": ["jsonsyntaxexception", "npe", "null", "atomiclongarray"]
+      }
+    ]
+  },
+  {
+    "id": "itsdangerous-exp-string-coercion",
+    "repo_name": "itsdangerous",
+    "repo_url": "https://github.com/pallets/itsdangerous.git",
+    "source_commit": "e8da1da26b4c1627229a1144fa310673ac2649ef",
+    "mutation_paths": ["itsdangerous.py"],
+    "prompt": "Review this change to exp header timestamp handling for concrete behavior regressions.",
+    "gold_findings": [
+      {
+        "id": "string-exp-rejected",
+        "file": "itsdangerous.py",
+        "line_start": 823,
+        "line_end": 833,
+        "keywords": ["exp", "badsignature", "string", "timestamp"]
+      }
+    ]
+  },
+  {
+    "id": "itsdangerous-signature-padding-crash",
+    "repo_name": "itsdangerous",
+    "repo_url": "https://github.com/pallets/itsdangerous.git",
+    "source_commit": "3059374468be85f96ad7f8c96325badf80248f50",
+    "mutation_paths": ["itsdangerous.py"],
+    "prompt": "Review this change to signature verification for concrete behavior regressions on malformed signatures.",
+    "gold_findings": [
+      {
+        "id": "invalid-padding-raises-instead-of-failing-verification",
+        "file": "itsdangerous.py",
+        "line_start": 355,
+        "line_end": 362,
+        "keywords": ["padding", "base64", "verify", "raises"]
+      }
+    ]
   }
 ]

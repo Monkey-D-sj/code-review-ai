@@ -22,6 +22,8 @@ from enum import StrEnum
 from code_review_ai import qname
 from code_review_ai.flow_builder import NodeRow, EdgeRow
 
+MAX_CO_MEMBERS = 50
+
 
 class WeightMode(StrEnum):
     """Edge weighting strategy for community detection.
@@ -365,10 +367,15 @@ def get_community(conn: sqlite3.Connection, qualified_name: str) -> dict:
     if row is None:
         return {"found": False, "symbol": qualified_name,
                 "reason": "not in any community"}
-    members = [_node_brief(conn, r["node_id"]) for r in conn.execute(
-        "SELECT node_id FROM community_memberships WHERE community_id=?",
-        (row["community_id"],)
-    )]
+    rows = conn.execute(
+        "SELECT node_id FROM community_memberships WHERE community_id=? "
+        "ORDER BY node_id", (row["community_id"],)
+    ).fetchall()
+    if len(rows) > MAX_CO_MEMBERS:
+        rows = rows[:MAX_CO_MEMBERS] + [
+            {"node_id": -1, "qname": f"... and {len(rows) - MAX_CO_MEMBERS} "
+                                     f"more co-members"}]
+    members = [_node_brief(conn, r["node_id"]) for r in rows]
     return {"found": True, "symbol": qualified_name,
             "community_id": row["community_id"], "label": row["label"],
             "modularity": row["modularity"], "members": members}

@@ -26,6 +26,25 @@ from code_review_ai.indexer import rebuild
 FULL_EVAL_MODES = ("native_agent", "full_project_agent")
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
+# Shared review-methodology prefix, identical for every mode so the eval isolates
+# the toolset (native vs MCP) rather than the review strategy.
+_REVIEW_PREFIX = (
+    "Decide whether a change needs its callers/context inspected using this table:\n\n"
+    "MUST inspect context (high risk):\n"
+    "- Interface change: a function removed a parameter, or changed a parameter's "
+    "type or order.\n"
+    "- Exception change: previously returned None / an error code, now raises instead.\n"
+    "- Contract change: sync became async, or the change introduces blocking work / locks.\n"
+    "- Dynamic language: Python/JS destructive change with no compiler to catch broken callers.\n"
+    "- Cross-service: any RPC/API change (check whether consumers are ready).\n\n"
+    "No need to inspect context (low risk):\n"
+    "- Pure internal: only the function body changed (algorithm / optimization), "
+    "signature unchanged.\n"
+    "- New parameter with a default value that preserves existing behavior.\n"
+    "- Private / narrow scope: private function with few callers, all call sites "
+    "already adapted (the compiler usually reports these too).\n"
+)
+
 
 @dataclass(frozen=True)
 class FullAgentCase:
@@ -285,16 +304,20 @@ def _prompt(item: PreparedCase, mode: str) -> str:
         "files_read": [], "tool_calls": [],
     }
     project_note = ("You have native Read/Glob/Grep tools and the installed "
-                    "code-review-ai MCP tools. First call rebuild_index, then "
-                    "get_change_summary for the changed files, then get_impact "
-                    "for those files. Use search_symbol, query_graph, or symbol "
-                    "detail tools when their evidence can resolve uncertainty. "
+                    "code-review-ai MCP tools (the index is already current; "
+                    "do not call rebuild_index). Call get_change_summary for "
+                    "the changed files, then get_impact for those files. Use "
+                    "search_symbol and get_symbol_detail for individual "
+                    "symbols. Avoid query_graph/get_community unless "
+                    "cross-file structure is genuinely ambiguous, and pass a "
+                    "small max_neighbors when you do use them. "
                     if mode == "full_project_agent" else
                     "You have native Read/Glob/Grep tools. ")
     return (
         f"You are running a controlled review of a real patch in {item.case.repo_name}.\n"
         f"{project_note}Inspect the repository as needed, but do not modify it.\n"
         "Report only concrete regressions introduced by the supplied diff. "
+        f"{_REVIEW_PREFIX}"
         "Return exactly one JSON object matching this shape:\n"
         f"{json.dumps(contract)}\n\nTASK\n{item.case.prompt}\n\n"
         f"DIFF\n{item.diff}"
