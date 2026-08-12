@@ -1,5 +1,7 @@
 # Impact Routing 实现计划
 
+> **已废弃(superseded,2026-08-12):** 本计划实现的数值 `risk` 评分已移除,深度判定并入决策表类别(跨服务/删除/被跨模块调用的接口变更 → get_impact;其他需上下文 → query_graph 上游;私有 → 只读直接调用点)。离线验证证伪了「risk 高分才值得升级 get_impact」(Pearson −0.21),`assess_symbol_risk`、`agent-eval-route-check` 子命令、`route_check_analysis` 及配套测试均已删除;最终设计见 `docs/superpowers/specs/2026-08-09-impact-routing-design.md`。本文件仅保留作历史。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 给变更摘要加 per-node 风险评分,让评审 prompt 默认 query_graph 看上游、仅高风险才升级 get_impact,并用现有 baseline transcripts 离线验证风险信号。

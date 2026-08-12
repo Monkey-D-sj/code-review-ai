@@ -27,22 +27,39 @@ FULL_EVAL_MODES = ("native_agent", "full_project_agent")
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 # Shared review-methodology prefix, identical for every mode so the eval isolates
-# the toolset (native vs MCP) rather than the review strategy.
+# the toolset (native vs MCP) rather than the review strategy. This is the
+# self-containment decision the production review applies verbatim in
+# code_review_ai.hooks._REVIEW_PROMPT (the post-commit review prompt) — keep the
+# two in sync; parity is asserted in tests/test_full_agent_eval.py.
 _REVIEW_PREFIX = (
-    "Decide whether a change needs its callers/context inspected using this table:\n\n"
+    "For each changed function, decide whether you can judge the change from the "
+    "diff and the function's own body alone, or whether it needs its "
+    "callers/context inspected:\n\n"
     "MUST inspect context (high risk):\n"
     "- Interface change: a function removed a parameter, or changed a parameter's "
-    "type or order.\n"
+    "type, order or return type; a required parameter was added.\n"
     "- Exception change: previously returned None / an error code, now raises instead.\n"
     "- Contract change: sync became async, or the change introduces blocking work / locks.\n"
-    "- Dynamic language: Python/JS destructive change with no compiler to catch broken callers.\n"
+    "- Caller-dependent behavior: the change alters semantics callers rely on, "
+    "adds or removes a cross-module call, or rewires DI/routing.\n"
+    "- Called elsewhere: the function is called by other modules and the change "
+    "may break them.\n"
+    "- Dynamic language: Python/JS destructive change with no compiler to catch "
+    "broken callers.\n"
     "- Cross-service: any RPC/API change (check whether consumers are ready).\n\n"
     "No need to inspect context (low risk):\n"
-    "- Pure internal: only the function body changed (algorithm / optimization), "
-    "signature unchanged.\n"
+    "- Pure internal: only the function body changed (algorithm / optimization / "
+    "comment / rename / formatting), signature, return type and exception "
+    "semantics unchanged, and no behavior callers depend on changed.\n"
     "- New parameter with a default value that preserves existing behavior.\n"
     "- Private / narrow scope: private function with few callers, all call sites "
-    "already adapted (the compiler usually reports these too).\n"
+    "already adapted (the compiler usually reports these too).\n\n"
+    "When in doubt, treat the change as needing context inspection.\n"
+    "Depth of inspection: cross-service, deleted, or interface changes called "
+    "from other modules warrant the deepest inspection (full caller chain and "
+    "affected entries); other changes that need context just need their "
+    "callers inspected; private / narrow changes only need their direct call "
+    "sites read.\n"
 )
 
 
@@ -306,11 +323,15 @@ def _prompt(item: PreparedCase, mode: str) -> str:
     project_note = ("You have native Read/Glob/Grep tools and the installed "
                     "code-review-ai MCP tools (the index is already current; "
                     "do not call rebuild_index). Call get_change_summary for "
-                    "the changed files, then get_impact for those files. Use "
-                    "search_symbol and get_symbol_detail for individual "
-                    "symbols. Avoid query_graph/get_community unless "
-                    "cross-file structure is genuinely ambiguous, and pass a "
-                    "small max_neighbors when you do use them. "
+                    "the changed files, then follow the decision table above: "
+                    "only changes it flags as needing context get graph "
+                    "queries, at the depth it prescribes (get_impact for "
+                    "cross-service / deleted / cross-module interface changes, "
+                    "query_graph for other context-needing changes, read call "
+                    "sites for private changes). Self-contained changes need "
+                    "no graph queries. Use search_symbol and get_symbol_detail "
+                    "for individual symbols, and pass a small max_neighbors "
+                    "when you do call query_graph. "
                     if mode == "full_project_agent" else
                     "You have native Read/Glob/Grep tools. ")
     return (

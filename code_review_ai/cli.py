@@ -159,11 +159,6 @@ def main(argv: list[str] | None = None) -> int:
     ae.add_argument("--timeout", type=int, default=300)
     ae.add_argument("--runs-dir", default=".code-review-ai/agent-eval")
     ae.add_argument("-o", "--out")
-    rc = sub.add_parser("agent-eval-route-check")
-    _add_common(rc)
-    rc.add_argument("--cases", required=True)
-    rc.add_argument("--runs-dir", required=True)
-    rc.add_argument("-o", "--out")
     aa = sub.add_parser("agent-eval-analyze")
     aa.add_argument("--report", required=True)
     aa.add_argument("-o", "--out")
@@ -263,18 +258,6 @@ def main(argv: list[str] | None = None) -> int:
     cfg.repo_path = args.repo
     cfg.db_path = args.db
     conn = _conn(args.db)
-
-    if args.cmd == "agent-eval-route-check":
-        from code_review_ai.agent_eval_analysis import route_check_analysis
-        try:
-            rebuild(cfg, conn)
-            cases = load_agent_cases(args.cases)
-            payload = route_check_analysis(conn, cases, args.runs_dir)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        _write_json(payload, args.out)
-        return 0
 
     if args.cmd == "rebuild":
         stats = rebuild(cfg, conn)

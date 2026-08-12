@@ -28,8 +28,8 @@ HOOK_NAMES = ("post-commit", "post-merge", "post-checkout", "post-rewrite")
 
 _SOURCE_SUFFIX_RE = re.compile(r"\.(py|ts|tsx|js|mjs|cjs|jsx|vue)$", re.IGNORECASE)
 _REVIEW_PROMPT = (
-    "对以下代码变更影响做代码评审。输入是 code-review-ai 生成的变更摘要 JSON(含各函数的 risk 评分)。"
-    "1. get_change_summary 确认变更明细与各函数的 risk。"
+    "对以下代码变更影响做代码评审。输入是 code-review-ai 生成的变更摘要 JSON。"
+    "1. get_change_summary 确认变更明细。"
     "2. 对每个变更函数,先判断它是否自包含:只凭 diff 与该函数自身的代码,"
     "能否完整判断这次改动的正确性与影响范围?能(纯注释/文档/改名/格式化、仅函数内部局部计算、"
     "不改对外签名/返回类型/异常语义、不改变调用方依赖的行为)→ 直接按 diff 评审,不查上下文;"
@@ -39,8 +39,9 @@ _REVIEW_PROMPT = (
     "改动一个函数,最可能的破坏在调用它的人。仅当改动涉及下游时才同时看下游(direction=out):"
     "改了传给被调方的入参/实参、新增或移除对某函数的调用、返回值被下游进一步消费等;"
     "函数自身签名入参变化(如新增必填参数)砸的是调用方,归入上游。"
-    "4. 仅当该函数 risk ≥ 60(跨模块/删除)且改动重要 → 追加 get_impact 查完整影响链"
-    "(上游调用方、受影响业务入口)。"
+    "4. 需要上下文的改动里,只有跨服务/RPC/API 变更、删除的函数、被跨模块调用的接口变更"
+    "才追加 get_impact 查完整影响链(上游调用方、受影响业务入口);私有或同模块内小范围的改动"
+    "只看直接调用点即可,不需要 get_impact。"
     "5. search_symbol / Read 按需补充;不要用 git diff / grep 自己重算。"
     "再按语言用 code-review 系列 skill 评审,按 error / warning / info 三级输出发现,"
     "每条给出文件、行号、问题描述与具体失败场景,用中文回答。"

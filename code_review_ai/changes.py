@@ -212,7 +212,6 @@ def _delete_change(config: Config, conn, deleted_files: set[str],
             "file_deleted": bool(row["file_deleted"]),
             "start_line": row["start_line"], "end_line": row["end_line"],
             "signature": row["signature"], "is_test": row["is_test"],
-            "risk": 90,
             "upstream": [{"source": u["source"], "kind": u["kind"],
                           "file": _relative_to_repo(config, u["file"])}
                          for u in json.loads(row["upstream_json"] or "[]")],
@@ -247,44 +246,6 @@ def detect_changed_symbols(config: Config,
         config, diff, kinds=("function", "method"))]
 
 
-def assess_symbol_risk(conn, symbol: str, deleted: bool = False) -> int:
-    """0-100 blast-radius score for one changed symbol (spec 2026-08-09).
-
-    deleted -> 90; any cross-module resolved caller -> min(100, 60+10*n);
-    same-module callers only -> min(59, 30+5*n); resolved leaf -> 10;
-    unresolved (not in graph) -> 50. Cross-module means the caller node's
-    file_path differs from the target's (module == file in this graph).
-    """
-    if deleted:
-        return 90
-    target = conn.execute(
-        "SELECT file_path FROM nodes WHERE qualified_name=?", (symbol,)).fetchone()
-    if target is None:
-        return 50
-    if target["file_path"] is None:
-        return 50
-    target_file = target["file_path"]
-    incoming = conn.execute(
-        "SELECT DISTINCT source FROM edges WHERE target=? AND resolution='resolved'",
-        (symbol,)).fetchall()
-    cross = same = 0
-    for edge in incoming:
-        source = conn.execute(
-            "SELECT file_path FROM nodes WHERE qualified_name=?",
-            (edge["source"],)).fetchone()
-        if source is None:
-            continue
-        if source["file_path"] != target_file:
-            cross += 1
-        else:
-            same += 1
-    if cross:
-        return min(100, 60 + 10 * cross)
-    if same:
-        return min(59, 30 + 5 * same)
-    return 10
-
-
 def _relative_to_repo(config: Config, file_path: str) -> str:
     try:
         return Path(file_path).resolve().relative_to(Path(config.repo_path).resolve()).as_posix()
@@ -302,14 +263,12 @@ def _symbols_summary(config: Config, conn, symbols: list[str]) -> dict:
         ).fetchone()
         if row is None:
             records.append({"qname": symbol, "kind": None, "file": None,
-                            "start_line": 0, "end_line": 0,
-                            "risk": assess_symbol_risk(conn, symbol)})
+                            "start_line": 0, "end_line": 0})
             continue
         rel = _relative_to_repo(config, row["file_path"])
         files.add(rel)
         records.append({"qname": symbol, "kind": row["kind"], "file": rel,
-                        "start_line": row["start_line"], "end_line": row["end_line"],
-                        "risk": assess_symbol_risk(conn, symbol)})
+                        "start_line": row["start_line"], "end_line": row["end_line"]})
     return {"summary": {"files_changed": len(files), "lines_added": 0,
                         "lines_removed": 0, "changed_functions": len(symbols),
                         "uncovered_changes": 0, "delete_change": 0},
@@ -340,8 +299,6 @@ def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
     delete_change, covered_files = _delete_change(config, conn, deleted, numstat)
     functions, uncovered = _diff_coverage(config, diff, numstat, deleted,
                                           covered_files=covered_files)
-    for record in functions:
-        record["risk"] = assess_symbol_risk(conn, record["qname"])
     return {"summary": {"files_changed": len(numstat),
                         "lines_added": sum(added for added, _ in numstat.values()),
                         "lines_removed": sum(removed for _, removed in numstat.values()),

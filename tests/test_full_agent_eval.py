@@ -61,3 +61,32 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
     assert len(report["runs"]) == 2
     assert report["aggregate"]["native_agent"]["macro_f1"] == 1.0
     assert report["aggregate"]["full_project_agent"]["mcp_adoption_rate"] == 1.0
+
+
+def test_review_prefix_matches_production_hook_methodology():
+    """The eval's decision table must stay consistent with the review prompt the
+    post-commit hook actually applies (hooks._REVIEW_PROMPT). Every decision
+    trigger the production methodology names must appear in both — Chinese in
+    the hook, English in the eval — so a future edit to one side that drops a
+    trigger fails here instead of silently diverging."""
+    from code_review_ai.full_agent_eval import _REVIEW_PREFIX
+    from code_review_ai.hooks import _REVIEW_PROMPT
+    pairs = [
+        ("签名", "signature"),        # interface / signature change
+        ("参数", "parameter"),        # parameter removed / type / order
+        ("返回类型", "return type"),  # return type change
+        ("异常", "exception"),        # exception semantics / new exception
+        ("调用方", "caller"),         # caller-dependent behavior
+        ("跨模块", "cross-module"),   # cross-module call added / removed
+        ("路由", "DI"),               # DI/routing wiring
+        ("内部", "internal"),         # pure internal body only
+        ("拿不准", "in doubt"),       # tiebreaker: doubt -> inspect
+        ("跨服务", "cross-service"),  # depth: cross-service/RPC/API
+        ("删除", "deleted"),          # depth: deleted functions
+        ("调用点", "call sites"),     # depth: direct call sites vs full chain
+    ]
+    for hook_word, eval_word in pairs:
+        assert hook_word in _REVIEW_PROMPT, \
+            f"hook prompt lost trigger {hook_word!r}"
+        assert eval_word in _REVIEW_PREFIX, \
+            f"eval review prefix lost trigger {eval_word!r}"

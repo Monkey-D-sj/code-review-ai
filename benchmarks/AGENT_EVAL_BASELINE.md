@@ -115,46 +115,16 @@ Graph's lower total is partly explained by the timed-out run. Hybrid cost about
 All eight issues are fixed in the current runner. Earlier three-case JSON files
 predate some fixes and must not be used for cost or confidence claims.
 
-## Impact-routing offline validation
+## Impact routing
 
-Offline validation of the "upgrade to get_impact only when risk is high"
-routing policy against this 10-case baseline. For each case, `max_risk` is the
-maximum `assess_symbol_risk` score over its changed symbols (0-100; all 10
-symbols resolve in the current index, so none hit the unresolved-symbol
-default of 50). Deltas are the mean F1 of Graph/Hybrid minus mean F1 of Diff
-Only across the three repetitions, positive meaning the extra context helped.
-Computed with `agent-eval-route-check` on the `agent-eval-real-10-r3`
-transcripts (2026-08-09).
-
-| Case | max_risk | graph_delta_f1 | hybrid_delta_f1 |
-|---|---:|---:|---:|
-| indexer-missing-tracked-file-regression | 35 | +0.4444 | +0.4444 |
-| cli-external-repo-config-regression | 100 | -0.0778 | +0.1889 |
-| nested-exclude-pattern-regression | 100 | +0.0555 | 0.0000 |
-| benchmark-test-node-filter-regression | 40 | +0.6667 | +0.7778 |
-| production-file-mistagged-as-test | 100 | -0.4444 | -0.5333 |
-| post-commit-review-wrong-diff-base | 35 | -0.3889 | -0.2222 |
-| python-relative-import-resolution-regression | 35 | -0.2222 | +0.2222 |
-| src-layout-qualified-name-regression | 35 | +0.3000 | -0.2937 |
-| unsupported-diff-file-crash | 40 | -0.4444 | -0.2222 |
-| watcher-cross-thread-sqlite-regression | 10 | -0.0556 | -0.0889 |
-
-Pearson correlation of delta F1 with max_risk: graph **-0.2136**, hybrid
-**-0.1904**.
-
-| Risk group | n | mean graph delta | mean hybrid delta | graph_positive |
-|---|---:|---:|---:|---:|
-| >= 60 (high) | 3 | -0.1556 | -0.1148 | 1 |
-| < 60 (low) | 7 | +0.0429 | +0.0882 | 3 |
-
-The data does not support upgrading to get_impact only when risk is high. The
->= 60 group has negative mean graph/hybrid deltas (-0.16 / -0.11) while the
-< 60 group is slightly positive (+0.04 / +0.09), and both Pearson correlations
-are negative (graph -0.21, hybrid -0.19) - if anything the direction is the
-opposite of the hypothesis, with the extra context most often hurting on the
-high-risk cases. With only 3 high-risk cases in a 10-case corpus, the group
-differences sit within noise and should not be read as a reliable
-anti-correlation either.
+This baseline's "upgrade to `get_impact` only when risk is high" hypothesis
+was tested offline against these transcripts and refuted (Pearson correlation
+of context F1 delta with symbol risk was negative; the >= 60 risk group had
+negative mean deltas). Consequently the numeric risk score was removed
+entirely: "whether to inspect context" and "how deep" now come from the review
+methodology's decision table (see `hooks._REVIEW_PROMPT` step 2/4 and the
+parity-asserted `full_agent_eval._REVIEW_PREFIX`). The historical risk-based
+validation tables are no longer maintained.
 
 ## Next experiment
 

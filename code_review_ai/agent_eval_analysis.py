@@ -7,8 +7,7 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
-from code_review_ai.agent_eval import AgentEvalCase, MCP_TOOL_PREFIX
-from code_review_ai.changes import assess_symbol_risk
+from code_review_ai.agent_eval import MCP_TOOL_PREFIX
 
 
 def analyze_agent_report(report: dict, bootstrap_samples: int = 5000,
@@ -149,84 +148,3 @@ def analyze_file(report_path: str, output_path: str | None = None) -> dict:
     return analysis
 
 
-def route_check_analysis(conn, cases: list[AgentEvalCase],
-                         runs_dir: str) -> dict:
-    """Per-case max risk vs impact-context F1 delta over existing transcripts.
-
-    Reads <runs_dir>/<case_id>/<mode>/run-*.json (each record has
-    result.f1), averages per mode, and compares graph/hybrid against
-    diff_only. Confirms the risk signal: high-risk cases should benefit
-    from impact context, low-risk cases should not.
-    """
-    per_case = []
-    for case in cases:
-        risks = [assess_symbol_risk(conn, symbol) for symbol in case.changed_symbols]
-        if not risks:
-            continue
-        f1 = _case_mode_f1(runs_dir, case.case_id)
-        baseline = _mean(f1.get("diff_only", []))
-        per_case.append({
-            "case_id": case.case_id,
-            "max_risk": max(risks),
-            "graph_delta_f1": round(_mean(f1.get("graph_agent", [])) - baseline, 4),
-            "hybrid_delta_f1": round(_mean(f1.get("hybrid_agent", [])) - baseline, 4),
-        })
-    risk_values = [row["max_risk"] for row in per_case]
-    return {
-        "case_count": len(per_case),
-        "cases": per_case,
-        "correlation": {
-            "graph_delta_f1": _pearson(risk_values,
-                                       [row["graph_delta_f1"] for row in per_case]),
-            "hybrid_delta_f1": _pearson(risk_values,
-                                        [row["hybrid_delta_f1"] for row in per_case]),
-        },
-        "groups": {
-            "high_risk": _group_summary([row for row in per_case if row["max_risk"] >= 60]),
-            "low_risk": _group_summary([row for row in per_case if row["max_risk"] < 60]),
-        },
-    }
-
-
-def _case_mode_f1(runs_dir: str, case_id: str) -> dict[str, list[float]]:
-    """{mode: [f1,...]} from transcripts <runs_dir>/<case_id>/<mode>/run-*.json."""
-    case_dir = Path(runs_dir) / case_id
-    if not case_dir.is_dir():
-        return {}
-    by_mode: dict[str, list[float]] = defaultdict(list)
-    for mode_path in sorted(case_dir.iterdir()):
-        if not mode_path.is_dir():
-            continue
-        for run_file in sorted(mode_path.glob("run-*.json")):
-            record = json.loads(run_file.read_text(encoding="utf-8"))
-            f1 = record.get("result", {}).get("f1")
-            if isinstance(f1, (int, float)):
-                by_mode[mode_path.name].append(float(f1))
-    return by_mode
-
-
-def _group_summary(rows: list[dict]) -> dict:
-    return {
-        "n": len(rows),
-        "mean_graph_delta": round(_mean([r["graph_delta_f1"] for r in rows]), 4) if rows else 0.0,
-        "mean_hybrid_delta": round(_mean([r["hybrid_delta_f1"] for r in rows]), 4) if rows else 0.0,
-        "graph_positive": sum(r["graph_delta_f1"] > 0 for r in rows),
-    }
-
-
-def _mean(values: list[float]) -> float:
-    return sum(values) / len(values) if values else 0.0
-
-
-def _pearson(xs: list[float], ys: list[float]) -> float | None:
-    """Pearson correlation; None when n<2 or zero variance."""
-    if len(xs) < 2 or len(xs) != len(ys):
-        return None
-    mean_x = sum(xs) / len(xs)
-    mean_y = sum(ys) / len(ys)
-    numerator = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
-    denom_x = sum((x - mean_x) ** 2 for x in xs)
-    denom_y = sum((y - mean_y) ** 2 for y in ys)
-    if denom_x == 0 or denom_y == 0:
-        return None
-    return round(numerator / (denom_x * denom_y) ** 0.5, 4)
