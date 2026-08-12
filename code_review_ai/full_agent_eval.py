@@ -12,8 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from code_review_ai.agent_eval import (
-    AgentExecutor, AgentRun, GoldFinding, _execute_agent, _mode_metrics,
-    _parse_agent_output, _parse_gold, _score, _string_values, _usage,
+    AgentExecutor, AgentRun, GoldFinding, MCP_TOOL_PREFIX, _execute_agent,
+    _mode_metrics, _parse_agent_output, _parse_gold, _score, _string_values,
+    _usage,
 )
 from code_review_ai.changes import detect_changed_symbols
 from code_review_ai.config import load_config
@@ -237,7 +238,8 @@ def _full_aggregates(runs: list[dict], modes: tuple[str, ...]) -> dict:
         aggregate["mean_actual_tool_calls"] = _mean(
             [run["tool_call_count"] for run in selected])
         aggregate["mcp_adoption_rate"] = _mean([
-            float(any(call.startswith("mcp__") for call in run["tool_calls"]))
+            float(any(call.startswith(MCP_TOOL_PREFIX)
+                      for call in run["tool_calls"]))
             for run in selected])
     return aggregates
 

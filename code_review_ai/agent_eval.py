@@ -21,6 +21,7 @@ from code_review_ai.parser import SOURCE_GLOBS, filter_excluded, list_source_fil
 
 MODES = ("diff_only", "search_baseline", "graph_agent", "hybrid_agent")
 HYBRID_MAX_CHARS = 12_000
+MCP_TOOL_PREFIX = "mcp__code-review-ai__"
 
 
 @dataclass(frozen=True)

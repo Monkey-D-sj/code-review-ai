@@ -7,7 +7,7 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
-from code_review_ai.agent_eval import AgentEvalCase
+from code_review_ai.agent_eval import AgentEvalCase, MCP_TOOL_PREFIX
 from code_review_ai.changes import assess_symbol_risk
 
 
@@ -66,7 +66,7 @@ def _mode_analysis(runs: list[dict], mode: str, samples: int,
             int(run.get("tool_call_count", len(run.get("tool_calls", []))))
             for run in selected) / len(selected), 4),
         "mcp_adoption_rate": round(sum(any(
-            isinstance(call, str) and call.startswith("mcp__")
+            isinstance(call, str) and call.startswith(MCP_TOOL_PREFIX)
             for call in run.get("tool_calls", [])) for run in selected)
             / len(selected), 4),
     }
