@@ -222,6 +222,23 @@ def test_git_diff_per_hunk_shape_and_deleted(tmp_path):
     assert ranges["a.py"] == [(4, 1)]   # +4,1 hunk: new-side start=4, count=1
 
 
+def test_git_diff_pure_removal_hunk_is_attributed(tmp_path):
+    """A diff that only deletes lines (e.g. a removed try/except or parameter)
+    still yields a (start, 1) point so the change attributes to the containing
+    function — a count-0 hunk would otherwise match nothing."""
+    repo = _git_repo(tmp_path)
+    _commit(repo, "a.py", "def f():\n    x = 1\n    y = 2\n    z = 3\n    return x\n")
+    (repo / "a.py").write_text("def f():\n    x = 1\n    return x\n", encoding="utf-8")
+    import code_review_ai.changes as ch
+    ranges, deleted = ch._git_diff("HEAD", None, str(repo))
+    assert deleted == set()
+    assert ranges["a.py"] == [(2, 1)]   # +2,0 pure removal -> synthesized point
+                                        # at the first surviving line (x = 1)
+    cfg = _cfg(repo)
+    cfg.diff_base = "HEAD"
+    assert Q("a", "f") in detect_changed_symbols(cfg)
+
+
 def test_uncovered_unsupported_extension(tmp_path, monkeypatch):
     cfg = load_config(FIX)
     import code_review_ai.changes as ch

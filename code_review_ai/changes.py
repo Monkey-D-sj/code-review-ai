@@ -63,8 +63,15 @@ def _git_diff(base: str, files: list[str] | None,
         if h and cur_file:
             start = int(h.group(1))
             count = int(h.group(2)) if h.group(2) else 1
-            if count > 0:
-                ranges[cur_file].append((start, count))
+            if count == 0:
+                # Pure-removal hunk: the +side (working tree) has no lines at
+                # the deletion site, so a count-0 range would overlap nothing.
+                # Synthesize a one-line point at `start` — the surviving line
+                # the deletion lands on — so _diff_coverage can still attribute
+                # it to the containing function/method (e.g. a removed parameter
+                # or a deleted try/except block).
+                count = 1
+            ranges[cur_file].append((start, count))
     return ranges, deleted
 
 
