@@ -310,27 +310,22 @@ def _prompt(item: PreparedCase, mode: str) -> str:
                       "description": "..."}],
         "files_read": [], "tool_calls": [],
     }
-    project_note = ("You have native Read/Glob/Grep tools and the installed "
-                    "code-review-ai MCP tools (the index is already current; "
-                    "do not call rebuild_index). Call get_change_summary for "
-                    "the changed files, then follow the decision table above: "
-                    "only changes it flags as needing context get graph "
-                    "queries, at the depth it prescribes (get_impact for "
-                    "cross-service / deleted / cross-module interface changes, "
-                    "query_graph for other context-needing changes, read call "
-                    "sites for private changes). Self-contained changes need "
-                    "no graph queries. Use search_symbol and get_symbol_detail "
-                    "for individual symbols, and pass a small max_neighbors "
-                    "when you do call query_graph. "
+    project_note = ("你有原生 Read/Glob/Grep 工具,也装有 code-review-ai 的 MCP 工具"
+                    "(索引已是最新,不要调用 rebuild_index)。先用 get_change_summary 取变更文件,"
+                    "再按上面的决策表:只有决策表标记「需要上下文」的改动才做图查询,深度按类别"
+                    "(跨服务/删除/被跨模块调用的接口变更 → get_impact;其他需要上下文的改动 → "
+                    "query_graph;私有改动 → 读直接调用点)。自包含的改动不需要任何图查询。"
+                    "单个符号用 search_symbol 和 get_symbol_detail;调用 query_graph 时传较小的 "
+                    "max_neighbors。"
                     if mode == "full_project_agent" else
-                    "You have native Read/Glob/Grep tools. ")
+                    "你有原生 Read/Glob/Grep 工具。")
     return (
-        f"You are running a controlled review of a real patch in {item.case.repo_name}.\n"
-        f"{project_note}Inspect the repository as needed, but do not modify it.\n"
-        "Report only concrete regressions introduced by the supplied diff. "
+        f"你正在对 {item.case.repo_name} 的一个真实补丁做受控评审。\n"
+        f"{project_note}按需检查仓库,但不要修改它。\n"
+        "只报告该 diff 引入的具体回归。"
         f"{_REVIEW_PREFIX}"
-        "Return exactly one JSON object matching this shape:\n"
-        f"{json.dumps(contract)}\n\nTASK\n{item.case.prompt}\n\n"
+        "返回恰好一个 JSON 对象,符合以下结构:\n"
+        f"{json.dumps(contract)}\n\n任务\n{item.case.prompt}\n\n"
         f"DIFF\n{item.diff}"
     )
 
