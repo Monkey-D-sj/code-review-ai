@@ -258,8 +258,16 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
               executor: AgentExecutor) -> dict:
     prompt = _prompt(item, mode)
     profile = "native" if mode == "native_agent" else "full_project"
+    # Key the run index by the worktree dir name. prepare_full_agent_cases
+    # creates a fresh random-suffixed worktree per eval invocation, so a DB
+    # named only by case+mode+repetition could be reused across invocations
+    # and point at a stale worktree's node paths (sync() won't rebuild it:
+    # config_hash omits repo_path, and the incremental path can't delete old
+    # nodes keyed by a different absolute path). A worktree-scoped DB is
+    # guaranteed missing on a fresh invocation, forcing a full rebuild.
+    worktree = Path(item.repo_path).name
     db_path = (Path(output_dir).resolve() / "indexes" / item.case.case_id /
-               f"{mode}-{repetition}.db")
+               f"{worktree}-{mode}-{repetition}.db")
     db_path.parent.mkdir(parents=True, exist_ok=True)
     environment = {
         "CRAI_EVAL_MODE": mode, "CRAI_EVAL_CASE": item.case.case_id,

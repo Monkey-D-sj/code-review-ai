@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -93,6 +94,34 @@ def test_review_methodology_skill_is_single_source():
             f"methodology skill lost trigger {trigger!r}"
         assert trigger in hook_prompt, \
             f"hook prompt lost trigger {trigger!r}"
+
+
+def test_run_index_db_is_worktree_scoped(tmp_path):
+    """The run index DB must be keyed by the worktree dir, not just
+    case+mode+repetition. prepare_full_agent_cases creates a fresh
+    random-suffixed worktree per eval invocation, so a collision-prone DB name
+    would reuse a previous invocation's index pointing at a stale worktree's
+    node paths (the bug behind the stale-index cost anomaly observed on
+    gson-graph-adapter-builder-reuse)."""
+    from code_review_ai.full_agent_eval import _run_once
+    case = _case()
+    worktree = tmp_path / "worktrees" / "real-fix-0a1b2c3d"
+    prepared = PreparedCase(case, str(worktree),
+                            "diff --git a/src/app.py b/src/app.py")
+    captured = {}
+
+    def fake_executor(command, prompt, cwd, env, timeout):
+        captured["db"] = env["CRAI_EVAL_DB_PATH"]
+        payload = {"findings": [], "files_read": [], "tool_calls": [],
+                   "tool_call_count": 0,
+                   "usage": {"input_tokens": 1, "output_tokens": 1}}
+        return AgentRun(0, json.dumps(payload), "", 1.0)
+
+    _run_once(prepared, "native_agent", 1, ["agent"],
+              str(tmp_path / "out"), 60, fake_executor)
+    db = Path(captured["db"])
+    assert db.parent.name == "real-fix"
+    assert db.name == "real-fix-0a1b2c3d-native_agent-1.db"
 
 
 def test_eval_prompt_inlines_methodology_skill(tmp_path):
