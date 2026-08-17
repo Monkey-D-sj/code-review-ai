@@ -126,8 +126,12 @@ def prepare_full_agent_cases(cases: list[FullAgentCase], repos_dir: str,
                   str(worktree), case.source_commit])
         for mutation_path in case.mutation_paths:
             _restore_parent_version(worktree, case.source_commit, mutation_path)
+        # 3 lines of context per hunk: the diff is 75-90% of the prompt and is
+        # re-read every turn, so context lines dominate eval input cost while
+        # the mutation itself is usually only a handful of lines. The changed
+        # lines are all preserved; gold anchors live on the mutated files.
         diff = _run_git(["-C", str(worktree), "diff", "--no-ext-diff",
-                         "--unified=40", "--", *case.mutation_paths]).stdout
+                         "--unified=3", "--", *case.mutation_paths]).stdout
         if not diff.strip():
             raise ValueError(f"case {case.case_id} produced an empty mutation")
         prepared.append(PreparedCase(case, str(worktree), diff))
