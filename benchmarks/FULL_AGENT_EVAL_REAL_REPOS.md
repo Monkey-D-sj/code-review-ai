@@ -187,3 +187,105 @@ Machine-readable artifacts:
 - `benchmark-results/full-agent-eval-online-v2-r3.json`
 - `benchmark-results/full-agent-eval-online-v2-r3-analysis.json`
 - `benchmark-results/full-agent-eval-online-v2-preflight.json`
+
+## Online v3 results (deepseek-v4-flash)
+
+> **Model note — do not compare against v2.** This run used the session-default
+> `deepseek-v4-flash` provider, not the `claude-sonnet-5` alias of v2. The
+> tables below are a self-contained Native-vs-Full-Project comparison under one
+> model; absolute F1 is much lower than v2 because the underlying model is much
+> weaker. Only the paired delta and tool-usage patterns are interpretable.
+
+Setup identical to the methodology above: 12 cases × 2 modes × 3 repetitions =
+72 runs, 4 concurrent workers, 600-second timeout, `$1.00` per-run budget
+ceiling, provider failures scored as zero without retry. Index setup outside
+agent timing.
+
+Confidence intervals use 5,000 case-clustered bootstrap samples (each draw
+samples cases and retains all three repetitions).
+
+| Mode | Success | Precision (95% CI) | Recall (95% CI) | F1 (95% CI) |
+|---|---:|---:|---:|---:|
+| Native Agent | 27/36 | 51.8% (29.1-73.9) | 58.3% (34.7-80.6) | 53.0% (29.5-74.3) |
+| Full Project Agent | 25/36 | **58.7%** (38.2-78.4) | **68.1%** (47.2-86.1) | **61.4%** (40.4-81.0) |
+
+Paired against Native Agent:
+
+| Comparison | F1 delta (95% CI) | Win / tie / loss |
+|---|---:|---:|
+| Full Project - Native | +8.5 pp (-8.2 to +26.9) | 4 / 5 / 3 |
+
+Full Project scores higher on precision and recall under the same model and
+reads fewer files to do it, but the interval crosses zero (positive in 84% of
+bootstrap samples), so this run does not establish a quality improvement.
+Three cases regressed under Full Project (`gson-graph-adapter-builder-reuse`,
+`itsdangerous-unsafe-separator`, `spring-petclinic-owner-scoped-pet-uniqueness`),
+and two fastapi cases scored zero in both modes.
+
+### Failure attribution (20/72)
+
+Failures are scored as zero per methodology; Full Project carried two more than
+Native, so its F1 advantage is if anything conservative:
+
+| Cause | Count |
+|---|---:|
+| `$1.00` budget ceiling hit mid-run | 11 |
+| 600s timeout | 6 |
+| `claude.exe` not on PATH (transient, Windows) | 3 |
+
+### Tool adoption (Full Project, 36 runs)
+
+`get_change_summary` 26 · `search_symbol` 24 · `query_graph` 22 ·
+`get_test_impact` 22 · `get_impact` 20 · `get_symbol_detail` 9 ·
+`get_community` 2 · `list_entry_points` 2. **`rebuild_index` was never called.**
+
+### Per-case macro F1
+
+| Case | Native | Full Project | Full runs using `get_impact` |
+|---|---:|---:|---:|
+| fastapi-frontend-dependency-response-propagation | 0.000 | **0.667** | 2/3 |
+| fastapi-include-router-stream-item-type | 0.000 | **0.444** | 2/3 |
+| fastapi-nested-annotated-sequence | 0.000 | 0.000 | 0/3 |
+| fastapi-validation-alias-pipeline | 0.000 | 0.000 | 0/3 |
+| gson-duplicate-null-map-key | 0.778 | 0.778 | 1/3 |
+| gson-graph-adapter-builder-reuse | **0.889** | 0.667 | 2/3 |
+| itsdangerous-load-payload-forwarding | 0.667 | **1.000** | 3/3 |
+| itsdangerous-unsafe-separator | **0.822** | 0.500 | 3/3 |
+| p-limit-async-context | 1.000 | 1.000 | 2/3 |
+| p-limit-detached-map | 0.556 | **1.000** | 2/3 |
+| spring-petclinic-owner-details-lazy-loading | 1.000 | 1.000 | 3/3 |
+| spring-petclinic-owner-scoped-pet-uniqueness | **0.648** | 0.315 | 0/3 |
+
+The Full Project advantage concentrates in the cross-module cases this product
+targets (`fastapi-frontend`, `fastapi-include-router`, `itsdangerous-load`,
+`p-limit-detached`), but `get_impact` use is not a reliable success signal: the
+biggest regression (`petclinic-uniqueness`) never used it, while the two
+zero-zero fastapi cases varied.
+
+### Online cost, latency, and context use
+
+| Mode | Total cost | Mean/run | Mean latency | Mean files read | Mean tool calls | Mean tokens/run |
+|---|---:|---:|---:|---:|---:|---:|
+| Native Agent | $9.06 | $0.252 | 210.2s | 5.36 | 6.69 | 17,631 |
+| Full Project Agent | $13.50 | $0.375 | 251.3s | **3.94** | 9.97 | 27,628 |
+
+Compared with Native Agent, Full Project cost 49% more per run and was 20%
+slower (latency inflated by the same failure mix on both sides), while reading
+26% fewer files. The extra MCP round trips and returned context cost more than
+the saved file reads — the same trade-off v2 measured, at a larger scale.
+
+### What this establishes
+
+- The complete MCP product runs end-to-end against prebuilt indexes on all
+  twelve real cases under a weak model, with `rebuild_index` never invoked and
+  the routing policy genuinely conditional (`get_impact` used in 20/36 runs).
+- Under one model, Full Project narrowed repository exploration (3.94 vs 5.36
+  files read) with directionally higher precision and recall, but the delta is
+  not significant at 3 repetitions.
+- v3 is not comparable to v2: different model, different absolute F1 scale.
+  Rerun both paired modes on `claude-sonnet-5` with more repetitions before
+  judging the routing policy against the published baseline.
+
+Machine-readable artifact:
+
+- `.code-review-ai/full-agent-eval/report-v3.json` (gitignored runtime artifact)
