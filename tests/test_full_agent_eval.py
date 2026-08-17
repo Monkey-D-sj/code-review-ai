@@ -63,14 +63,15 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
     assert report["aggregate"]["full_project_agent"]["mcp_adoption_rate"] == 1.0
 
 
-def test_review_prefix_matches_production_hook_methodology():
-    """The eval's decision table must stay consistent with the review prompt the
-    post-commit hook actually applies (hooks._REVIEW_PROMPT). Both prompts are
-    Chinese, so every decision trigger the methodology names must appear in
-    both — a future edit to one side that drops a trigger fails here instead of
+def test_review_methodology_skill_is_single_source():
+    """The review methodology lives in one place — the bundled
+    `code-review-methodology` skill — and both the eval harness and the
+    post-commit hook derive their prompts from it, so the two can't drift.
+    Every decision trigger must appear in the skill body and in the hook prompt
+    composed from it; a future edit that drops a trigger fails here instead of
     silently diverging."""
-    from code_review_ai.full_agent_eval import _REVIEW_PREFIX
-    from code_review_ai.hooks import _REVIEW_PROMPT
+    from code_review_ai.hooks import _build_review_prompt
+    from code_review_ai.skills import load_skill_body
     triggers = [
         "签名",       # interface / signature change
         "参数",       # parameter removed / type / order
@@ -85,8 +86,22 @@ def test_review_prefix_matches_production_hook_methodology():
         "删除",       # depth: deleted functions
         "调用点",     # depth: direct call sites vs full chain
     ]
+    skill = load_skill_body("code-review-methodology")
+    hook_prompt = _build_review_prompt()
     for trigger in triggers:
-        assert trigger in _REVIEW_PROMPT, \
+        assert trigger in skill, \
+            f"methodology skill lost trigger {trigger!r}"
+        assert trigger in hook_prompt, \
             f"hook prompt lost trigger {trigger!r}"
-        assert trigger in _REVIEW_PREFIX, \
-            f"eval review prefix lost trigger {trigger!r}"
+
+
+def test_eval_prompt_inlines_methodology_skill(tmp_path):
+    """The eval forces the methodology inline rather than relying on the agent
+    invoking the skill, so every benchmark run sees the exact same decision
+    table regardless of the agent's skill-discipline."""
+    from code_review_ai.full_agent_eval import _prompt
+    from code_review_ai.skills import load_skill_body
+    prepared = PreparedCase(_case(), str(tmp_path),
+                            "diff --git a/src/app.py b/src/app.py")
+    prompt = _prompt(prepared, "native_agent")
+    assert load_skill_body("code-review-methodology") in prompt

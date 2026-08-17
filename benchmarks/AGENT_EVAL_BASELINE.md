@@ -122,9 +122,10 @@ was tested offline against these transcripts and refuted (Pearson correlation
 of context F1 delta with symbol risk was negative; the >= 60 risk group had
 negative mean deltas). Consequently the numeric risk score was removed
 entirely: "whether to inspect context" and "how deep" now come from the review
-methodology's decision table (see `hooks._REVIEW_PROMPT` step 2/4 and the
-parity-asserted `full_agent_eval._REVIEW_PREFIX`). The historical risk-based
-validation tables are no longer maintained.
+methodology's decision table (see `hooks._build_review_prompt`, whose
+self-containment rules come from the parity-asserted `code-review-methodology`
+skill, also inlined by the eval harness). The historical risk-based validation
+tables are no longer maintained.
 
 ## Next experiment
 

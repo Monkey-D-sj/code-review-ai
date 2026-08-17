@@ -66,7 +66,7 @@ def test_install_success_runs_claude_mcp_add(monkeypatch, tmp_path):
         "uvx", "--from", DEFAULT_SOURCE, DEFAULT_MCP_ENTRY,
     ]
     assert "Appended tool usage docs" in res.message
-    assert "Deployed 5 review skills" in res.message
+    assert f"Deployed {len(SKILL_NAMES)} review skills" in res.message
 
 
 def test_install_failure_does_not_append_docs(monkeypatch):
@@ -196,7 +196,7 @@ def test_install_codex_skips_subprocess_and_deploys(monkeypatch, tmp_path):
     assert res.success is True
     assert calls == []  # codex 不执行任何 MCP 注册子进程
     assert "manual" in res.message.lower()
-    assert "Deployed 5 review skills" in res.message
+    assert f"Deployed {len(SKILL_NAMES)} review skills" in res.message
 
 
 @pytest.mark.parametrize("platform,suffix", [

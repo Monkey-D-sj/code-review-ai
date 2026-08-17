@@ -30,6 +30,7 @@ SUPPORTED_PLATFORMS = {"claude-code", "codex"}
 
 SKILL_NAMES = (
     "code-review-langs",
+    "code-review-methodology",
     "code-review-python",
     "code-review-typescript",
     "code-review-javascript",

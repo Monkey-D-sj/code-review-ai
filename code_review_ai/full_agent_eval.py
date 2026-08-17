@@ -21,36 +21,19 @@ from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
+from code_review_ai.skills import load_skill_body
 
 
 FULL_EVAL_MODES = ("native_agent", "full_project_agent")
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
-# Shared review-methodology prefix, identical for every mode so the eval isolates
-# the toolset (native vs MCP) rather than the review strategy. This is the
-# self-containment decision the production review applies verbatim in
-# code_review_ai.hooks._REVIEW_PROMPT (the post-commit review prompt) — keep the
-# two in sync; parity is asserted in tests/test_full_agent_eval.py.
-_REVIEW_PREFIX = (
-    "对每个变更函数,先判断它是否自包含:只凭 diff 与该函数自身的代码,能否完整判断"
-    "这次改动的正确性与影响范围;不能则检查其调用方/上下文:\n\n"
-    "必须检查上下文(高风险):\n"
-    "- 接口变更:函数删除了参数,或改变参数的类型/顺序/返回类型;新增必填参数。\n"
-    "- 异常变更:之前返回 None / 错误码,现在改为抛异常。\n"
-    "- 契约变更:同步改为异步,或改动引入了阻塞工作/锁。\n"
-    "- 调用方依赖的行为:改动改变了调用方依赖的语义、新增或移除跨模块调用、重接路由/DI。\n"
-    "- 被其他模块调用:函数被其他模块调用且改动可能破坏它们。\n"
-    "- 动态语言:Python/JS 破坏性改动没有编译器拦截被破坏的调用方。\n"
-    "- 跨服务:任何 RPC/API 改动(检查消费方是否就绪)。\n\n"
-    "无需检查上下文(低风险):\n"
-    "- 纯内部:只改了函数体(算法/优化/注释/改名/格式化),签名、返回类型与异常语义不变,"
-    "且没有改变调用方依赖的行为。\n"
-    "- 新增带默认值、保持现有行为的参数。\n"
-    "- 私有/小范围:私有函数调用方少,且所有调用点已适配。\n\n"
-    "拿不准 → 按「需要上下文」处理。\n"
-    "检查深度:跨服务、删除的函数、被跨模块调用的接口变更需要最深检查(完整调用链与受影响入口);"
-    "其他需要上下文的改动只需检查其调用方;私有/小范围改动只需读直接调用点。\n"
-)
+# Shared review-methodology decision table, identical for every mode so the eval
+# isolates the toolset (native vs MCP) rather than the review strategy. It lives
+# in exactly one place — the bundled `code-review-methodology` skill — and is
+# inlined here via load_skill_body; the post-commit hook composes its prompt from
+# the same skill (code_review_ai.hooks._build_review_prompt), so the two can't
+# drift. Parity is asserted in tests/test_full_agent_eval.py.
+_REVIEW_PREFIX = load_skill_body("code-review-methodology")
 
 
 @dataclass(frozen=True)

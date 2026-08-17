@@ -23,29 +23,37 @@ import subprocess
 from pathlib import Path
 
 from code_review_ai.installer import DEFAULT_SOURCE
+from code_review_ai.skills import load_skill_body
 
 HOOK_NAMES = ("post-commit", "post-merge", "post-checkout", "post-rewrite")
 
 _SOURCE_SUFFIX_RE = re.compile(r"\.(py|ts|tsx|js|mjs|cjs|jsx|vue)$", re.IGNORECASE)
-_REVIEW_PROMPT = (
-    "对以下代码变更影响做代码评审。输入是 code-review-ai 生成的变更摘要 JSON。"
-    "1. get_change_summary 确认变更明细。"
-    "2. 对每个变更函数,先判断它是否自包含:只凭 diff 与该函数自身的代码,"
-    "能否完整判断这次改动的正确性与影响范围?能(纯注释/文档/改名/格式化、仅函数内部局部计算、"
-    "不改对外签名/返回类型/异常语义、不改变调用方依赖的行为)→ 直接按 diff 评审,不查上下文;"
-    "不能(改了对外签名/返回类型/新增异常、改变了调用方依赖的语义、新增/移除跨模块调用、"
-    "路由/DI 装配、被其他模块调用且改动可能破坏它们)→ 需要上下文;拿不准按需要上下文处理。"
-    "3. 需要上下文的真实改动 → 默认用 query_graph 看该函数的上游(direction=in,即调用方):"
-    "改动一个函数,最可能的破坏在调用它的人。仅当改动涉及下游时才同时看下游(direction=out):"
-    "改了传给被调方的入参/实参、新增或移除对某函数的调用、返回值被下游进一步消费等;"
-    "函数自身签名入参变化(如新增必填参数)砸的是调用方,归入上游。"
-    "4. 需要上下文的改动里,只有跨服务/RPC/API 变更、删除的函数、被跨模块调用的接口变更"
-    "才追加 get_impact 查完整影响链(上游调用方、受影响业务入口);私有或同模块内小范围的改动"
-    "只看直接调用点即可,不需要 get_impact。"
-    "5. search_symbol / Read 按需补充;不要用 git diff / grep 自己重算。"
-    "再按语言用 code-review 系列 skill 评审,按 error / warning / info 三级输出发现,"
-    "每条给出文件、行号、问题描述与具体失败场景,用中文回答。"
-)
+
+
+def _build_review_prompt() -> str:
+    """Compose the review prompt handed to the LLM. The self-containment decision
+    table comes from the bundled `code-review-methodology` skill — the single
+    source of truth shared with the eval harness — flattened to one line so it
+    embeds cleanly in the hook script's single-quoted prompt. Tool orchestration
+    stays here; the language checklists live in the code-review-* skills."""
+    methodology = " ".join(
+        line.strip()
+        for line in load_skill_body("code-review-methodology").splitlines())
+    return (
+        "对以下代码变更影响做代码评审。输入是 code-review-ai 生成的变更摘要 JSON。"
+        "1. get_change_summary 确认变更明细。"
+        f"2. {methodology}"
+        "3. 需要上下文的真实改动 → 默认用 query_graph 看该函数的上游(direction=in,即调用方):"
+        "改动一个函数,最可能的破坏在调用它的人。仅当改动涉及下游时才同时看下游(direction=out):"
+        "改了传给被调方的入参/实参、新增或移除对某函数的调用、返回值被下游进一步消费等;"
+        "函数自身签名入参变化(如新增必填参数)砸的是调用方,归入上游。"
+        "4. 需要上下文的改动里,只有跨服务/RPC/API 变更、删除的函数、被跨模块调用的接口变更"
+        "才追加 get_impact 查完整影响链(上游调用方、受影响业务入口);私有或同模块内小范围的改动"
+        "只看直接调用点即可,不需要 get_impact。"
+        "5. search_symbol / Read 按需补充;不要用 git diff / grep 自己重算。"
+        "再按语言用 code-review 系列 skill 评审,按 error / warning / info 三级输出发现,"
+        "每条给出文件、行号、问题描述与具体失败场景,用中文回答。"
+    )
 # Per-platform review LLM invocation: (launch command, args, answer mode).
 # Answer mode "extract" parses the final answer out of a stream-json debug log
 # via `code-review-ai extract-review`; "stdout" takes the review directly from
@@ -230,7 +238,7 @@ def _extract_review_block(review_cmd: str, review_args: str) -> str:
     concise per-tool trace into $debug via `code-review-ai trace-review`."""
     return (
         f"printf '%s' \"$summary\" | {review_cmd} "
-        f"'{_REVIEW_PROMPT}' {review_args} > \"$raw\" 2>/dev/null\n"
+        f"'{_build_review_prompt()}' {review_args} > \"$raw\" 2>/dev/null\n"
         + "review_status=$?\n"
         + 'if [ "$review_status" -eq 0 ]; then\n'
         + "  $LAUNCH extract-review \"$raw\" \"$archive\"\n"
@@ -251,7 +259,7 @@ def _direct_review_block(review_cmd: str, review_args: str) -> str:
     """codex / custom launch: stdout is the answer, stderr the flow."""
     return (
         f"printf '%s' \"$summary\" | {review_cmd} "
-        f"'{_REVIEW_PROMPT}' {review_args} > \"$archive\" 2> \"$debug\"\n"
+        f"'{_build_review_prompt()}' {review_args} > \"$archive\" 2> \"$debug\"\n"
         + "review_status=$?\n"
         + 'if [ "$review_status" -ne 0 ]; then\n'
         + '  echo "code-review-ai: review command failed (debug: $debug)" >&2\n'
