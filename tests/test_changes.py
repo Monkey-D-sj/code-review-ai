@@ -136,6 +136,22 @@ def test_git_numstat_runs_in_repo_path(tmp_path):
     assert ch._git_numstat("HEAD", None, str(repo)) == {"a.py": (1, 1)}
 
 
+def test_deletion_only_hunk_keeps_a_symbol_anchor(tmp_path):
+    repo = _git_repo(tmp_path)
+    _commit(repo, "app.py", "def target():\n    marker = 1\n    return marker\n")
+    (repo / "app.py").write_text(
+        "def target():\n    return 1\n", encoding="utf-8")
+    cfg = _cfg(repo)
+    cfg.diff_base = "HEAD"
+
+    import code_review_ai.changes as ch
+    ranges, deleted = ch._git_diff("HEAD", ["app.py"], str(repo))
+
+    assert deleted == set()
+    assert ranges["app.py"] == [(2, 1)]
+    assert detect_changed_symbols(cfg, files=["app.py"]) == ["app::target"]
+
+
 def test_changed_functions_includes_class():
     cfg = load_config(FIX)
     import code_review_ai.changes as ch
@@ -175,13 +191,15 @@ def test_build_change_summary_diff_path(tmp_path, monkeypatch):
                         lambda base, files, cwd=None: ({"auth.py": [(6, 7)]}, set()))
     monkeypatch.setattr(ch, "_git_numstat",
                         lambda base, files, cwd=None: {"auth.py": (10, 2), "logo.png": (0, 0)})
+    monkeypatch.setattr(ch, "_diff_text_for_file", lambda config, base, rel: "")
     out = build_change_summary(cfg, _conn(tmp_path))
     assert out["summary"] == {"files_changed": 2, "lines_added": 10,
                               "lines_removed": 2, "changed_functions": 1,
                               "uncovered_changes": 1, "delete_change": 0}
     assert out["changed_functions"] == [
         {"qname": Q("auth", "login"), "kind": "function",
-         "file": "auth.py", "start_line": 6, "end_line": 7}]
+         "file": "auth.py", "start_line": 6, "end_line": 7, "risk": 50,
+         "diff": ""}]
     assert out["uncovered_changes"] == [{"file": "logo.png", "hunks": []}]
     assert out["delete_change"] == []
 
@@ -201,6 +219,8 @@ def test_build_change_summary_symbols_path(tmp_path):
     assert record["file"] == "auth.py"
     assert record["start_line"] == 6
     assert record["end_line"] == 7
+    assert isinstance(record["risk"], int)
+    assert 0 <= record["risk"] <= 100
     assert out["uncovered_changes"] == []
     assert out["summary"]["uncovered_changes"] == 0
     assert out["delete_change"] == []
@@ -218,23 +238,6 @@ def test_git_diff_per_hunk_shape_and_deleted(tmp_path):
     ranges, deleted = ch._git_diff("HEAD", None, str(repo))
     assert "b.py" in deleted
     assert ranges["a.py"] == [(4, 1)]   # +4,1 hunk: new-side start=4, count=1
-
-
-def test_git_diff_pure_removal_hunk_is_attributed(tmp_path):
-    """A diff that only deletes lines (e.g. a removed try/except or parameter)
-    still yields a (start, 1) point so the change attributes to the containing
-    function — a count-0 hunk would otherwise match nothing."""
-    repo = _git_repo(tmp_path)
-    _commit(repo, "a.py", "def f():\n    x = 1\n    y = 2\n    z = 3\n    return x\n")
-    (repo / "a.py").write_text("def f():\n    x = 1\n    return x\n", encoding="utf-8")
-    import code_review_ai.changes as ch
-    ranges, deleted = ch._git_diff("HEAD", None, str(repo))
-    assert deleted == set()
-    assert ranges["a.py"] == [(2, 1)]   # +2,0 pure removal -> synthesized point
-                                        # at the first surviving line (x = 1)
-    cfg = _cfg(repo)
-    cfg.diff_base = "HEAD"
-    assert Q("a", "f") in detect_changed_symbols(cfg)
 
 
 def test_uncovered_unsupported_extension(tmp_path, monkeypatch):
@@ -343,12 +346,14 @@ def test_delete_change_from_tombstone_deleted_file(tmp_path, monkeypatch):
     by_qname = {r["qname"]: r for r in out["delete_change"]}
     assert set(by_qname) == {"auth", "auth::login"}
     assert by_qname["auth"]["kind"] == "module"
+    assert by_qname["auth"]["risk"] == 90
     assert by_qname["auth"]["file_deleted"] is True
     assert by_qname["auth"]["file"] == "auth.py"
     assert by_qname["auth"]["upstream"] == [
         {"source": "app", "kind": "import", "file": "app.py"}]
     assert by_qname["auth::login"]["upstream"] == [
         {"source": "app::main", "kind": "call", "file": "app.py"}]
+    assert by_qname["auth::login"]["risk"] == 90
     assert out["uncovered_changes"] == []   # 被 delete_change 覆盖，不进 uncovered
 
 
@@ -369,6 +374,7 @@ def test_delete_change_from_tombstone_surviving_file(tmp_path, monkeypatch):
     assert out["summary"]["delete_change"] == 1
     record = out["delete_change"][0]
     assert record["qname"] == "auth::login"
+    assert record["risk"] == 90
     assert record["file_deleted"] is False
     assert record["file"] == "auth.py"
     assert out["uncovered_changes"] == []   # 空 hunk uncovered 条目被抑制
@@ -390,3 +396,146 @@ def test_delete_change_ignores_reaadded_qname(tmp_path, monkeypatch):
     assert out["delete_change"] == []       # qname 仍在活图 -> 不是当前删除
     assert out["uncovered_changes"] == [{"file": "auth.py", "hunks": []}]
 
+
+def _seed_risk_graph(conn):
+    """a.py::target 有同模块+跨模块 caller; a.py::leaf 只有同模块 caller;
+    b.py::external 无 caller。"""
+    for qname, kind, file_path in [
+            ("a::target", "function", "a.py"),
+            ("a::leaf", "function", "a.py"),
+            ("a::caller", "function", "a.py"),
+            ("b::external", "function", "b.py"),
+    ]:
+        conn.execute("INSERT INTO nodes(qualified_name, kind, file_path) "
+                     "VALUES(?,?,?)", (qname, kind, file_path))
+    for source, target in [("a::caller", "a::target"),  # 同模块
+                           ("b::external", "a::target"),  # 跨模块
+                           ("a::caller", "a::leaf")]:    # 同模块
+        conn.execute("INSERT INTO edges(source, target, kind, resolution) "
+                     "VALUES(?,?,?,?)", (source, target, "call", "resolved"))
+
+
+def test_assess_symbol_risk_rules(tmp_path):
+    from code_review_ai.changes import assess_symbol_risk
+    conn = _conn(tmp_path)
+    _seed_risk_graph(conn)
+    assert assess_symbol_risk(conn, "a::target") == 70      # 跨模块入边 -> 60+10
+    assert assess_symbol_risk(conn, "a::leaf") == 35        # 同模块入边 -> 30+5
+    assert assess_symbol_risk(conn, "b::external") == 10    # 叶子
+    assert assess_symbol_risk(conn, "nope::missing") == 50  # 未解析
+    assert assess_symbol_risk(conn, "a::target", deleted=True) == 90  # 删除
+
+
+def test_assess_symbol_risk_caps_cross_module(tmp_path):
+    from code_review_ai.changes import assess_symbol_risk
+    conn = _conn(tmp_path)
+    conn.execute("INSERT INTO nodes(qualified_name, kind, file_path) "
+                 "VALUES('a::hub','function','a.py')")
+    for index in range(1, 6):  # 5 个跨模块 caller -> 60+50=110 -> 截断 100
+        conn.execute("INSERT INTO nodes(qualified_name, kind, file_path) "
+                     "VALUES(?,?,?)", (f"b::c{index}", "function", "b.py"))
+        conn.execute("INSERT INTO edges(source, target, kind, resolution) "
+                     "VALUES(?,?,?,?)", (f"b::c{index}", "a::hub", "call", "resolved"))
+    assert assess_symbol_risk(conn, "a::hub") == 100
+
+
+def test_assess_symbol_risk_ignores_tests_and_non_call_edges(tmp_path):
+    from code_review_ai.changes import assess_symbol_risk
+    conn = _conn(tmp_path)
+    for qname, file_path, is_test in [
+            ("app::target", "app.py", 0),
+            ("tests::test_target", "tests/test_app.py", 1),
+            ("other::importer", "other.py", 0),
+    ]:
+        conn.execute(
+            "INSERT INTO nodes(qualified_name, kind, file_path, is_test) "
+            "VALUES(?,?,?,?)", (qname, "function", file_path, is_test))
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) VALUES(?,?,?,?)",
+        ("tests::test_target", "app::target", "call", "resolved"))
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) VALUES(?,?,?,?)",
+        ("other::importer", "app::target", "import", "resolved"))
+    assert assess_symbol_risk(conn, "app::target") == 10
+
+
+def _stub_diff_sources(monkeypatch, text):
+    import code_review_ai.changes as ch
+    monkeypatch.setattr(ch, "_git_diff",
+                        lambda base, files, cwd=None: ({"auth.py": [(6, 1)]}, set()))
+    monkeypatch.setattr(ch, "_git_numstat",
+                        lambda base, files, cwd=None: {"auth.py": (1, 0)})
+    monkeypatch.setattr(ch, "_diff_text_for_file",
+                        lambda config, base, rel: text)
+
+
+_LOGIN_DIFF = (
+    "diff --git a/auth.py b/auth.py\n"
+    "--- a/auth.py\n"
+    "+++ b/auth.py\n"
+    "@@ -6,1 +6,2 @@\n"
+    " def login(user, pw) -> str:\n"
+    "+    return f\"{user}!\"\n"
+)
+
+
+def test_change_summary_low_risk_function_diff_only(tmp_path, monkeypatch):
+    """Every changed function gets diff text; source is never attached."""
+    cfg = load_config(FIX)
+    cfg.repo_path = FIX
+    _stub_diff_sources(monkeypatch, _LOGIN_DIFF)
+    out = build_change_summary(cfg, _conn(tmp_path))
+    record = out["changed_functions"][0]
+    assert record["qname"] == Q("auth", "login")
+    assert record["risk"] == 50
+    assert "return f\"{user}!\"" in record["diff"]
+    assert "source" not in record
+
+
+def test_change_summary_source_none_keeps_old_shape(tmp_path, monkeypatch):
+    cfg = load_config(FIX)
+    cfg.repo_path = FIX
+    cfg.summary_source = "none"
+    _stub_diff_sources(monkeypatch, _LOGIN_DIFF)
+    out = build_change_summary(cfg, _conn(tmp_path))
+    record = out["changed_functions"][0]
+    assert "diff" not in record
+    assert "source" not in record
+
+
+def test_slice_diff_hunks_isolates_function_range():
+    """Only the hunk overlapping the function's new-side range is returned."""
+    import code_review_ai.changes as ch
+    text = (
+        "diff --git a/auth.py b/auth.py\n"
+        "--- a/auth.py\n"
+        "+++ b/auth.py\n"
+        "@@ -1,3 +1,3 @@\n"
+        " class UserService:\n"
+        "-    def authenticate(self, user, pw) -> bool:\n"
+        "+    def authenticate(self, user, pw, strict=True) -> bool:\n"
+        "         return check(pw)\n"
+        "@@ -6,1 +6,2 @@\n"
+        " def login(user, pw) -> str:\n"
+        "+    return f\"{user}!\"\n"
+    )
+    sliced = ch._slice_diff_hunks(text, 6, 7)
+    assert "def login" in sliced
+    assert "return f" in sliced
+    assert "authenticate" not in sliced
+
+
+def test_diff_text_for_file_real_git(tmp_path):
+    repo = _git_repo(tmp_path)
+    _commit(repo, "a.py", "x = 1\ny = 2\n")
+    (repo / "a.py").write_text("x = 1\ny = 2\nz = 3\n", encoding="utf-8")
+    cfg = _cfg(repo)
+    import code_review_ai.changes as ch
+    text = ch._diff_text_for_file(cfg, "HEAD", "a.py")
+    assert "+z = 3" in text
+    assert "a.py" in text
+
+
+def test_summary_context_config_defaults():
+    cfg = load_config()
+    assert cfg.summary_source == "diff"

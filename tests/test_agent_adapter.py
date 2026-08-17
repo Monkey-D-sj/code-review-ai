@@ -1,9 +1,11 @@
 import json
+import subprocess
 
 import pytest
 
-from code_review_ai.agent_adapter import (normalize_claude_result,
-                                          normalize_claude_stream)
+from code_review_ai.agent_adapter import (ONLINE_MCP_TOOL_NAMES, _mcp_config,
+                                          normalize_claude_result,
+                                          normalize_claude_stream, run_claude)
 
 
 def test_normalize_claude_structured_output_and_usage():
@@ -45,11 +47,15 @@ def test_normalize_claude_stream_uses_observed_tool_events(monkeypatch, tmp_path
     monkeypatch.chdir(tmp_path)
     source = tmp_path / "src" / "app.py"
     events = [
+        {"type": "system", "subtype": "init",
+         "tools": ["Read", "mcp__code-review-ai__get_impact", "StructuredOutput"]},
         {"type": "assistant", "message": {"content": [
             {"type": "tool_use", "name": "Read",
              "input": {"file_path": str(source)}},
             {"type": "tool_use", "name": "mcp__code-review-ai__get_impact",
              "input": {"files": ["src/app.py"]}},
+            {"type": "tool_use", "name": "Bash",
+             "input": {"command": "should-not-count"}},
         ]}},
         {"type": "result", "structured_output": {
             "findings": [], "files_read": ["fake.py"],
@@ -60,3 +66,32 @@ def test_normalize_claude_stream_uses_observed_tool_events(monkeypatch, tmp_path
     assert payload["files_read"] == ["src/app.py"]
     assert payload["tool_calls"] == ["Read", "mcp__code-review-ai__get_impact"]
     assert payload["tool_call_count"] == 2
+
+
+def test_online_eval_uses_prebuilt_index_without_rebuild_tool(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CRAI_EVAL_DB_PATH", str(tmp_path / "prebuilt.db"))
+    config = _mcp_config()["mcpServers"]["code-review-ai"]
+    assert "rebuild_index" not in ONLINE_MCP_TOOL_NAMES
+    assert config["env"]["CRAI_SKIP_STARTUP_SYNC"] == "true"
+    assert config["env"]["CRAI_DISABLE_WATCHER"] == "true"
+    assert config["env"]["CRAI_DB_PATH"].endswith("prebuilt.db")
+
+
+def test_streaming_eval_uses_bare_claude_session(monkeypatch):
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        stdout = "\n".join(json.dumps(event) for event in [
+            {"type": "system", "subtype": "init", "tools": ["Read"]},
+            {"type": "result", "structured_output": {
+                "findings": [], "files_read": [], "tool_calls": []}},
+        ])
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr("code_review_ai.agent_adapter.subprocess.run", fake_run)
+    returncode, _, _ = run_claude("review", tool_profile="native")
+    assert returncode == 0
+    assert "--bare" in observed["command"]
+    assert "--setting-sources" not in observed["command"]

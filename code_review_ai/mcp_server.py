@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import urllib.request
 import urllib.error
@@ -14,6 +15,10 @@ from code_review_ai.testimpact import get_test_impact as _get_test_impact
 from code_review_ai.deadcode import find_dead_code as _find_dead_code
 from code_review_ai.search import fts_search
 from code_review_ai.update import sync
+
+# Cap discovery results so a broad glob cannot flood a single tool result
+# with thousands of node briefs (a real fresh-token cost in agentic use).
+_SEARCH_SYMBOL_LIMIT = 30
 
 
 def _conn(config: Config):
@@ -109,7 +114,8 @@ def create_server(config: Config):
         Returns a JSON list of {qname, kind, file, line, end_line, signature,
         score}. Use to find qualified names before get_symbol_detail /
         get_impact."""
-        return json.dumps(fts_search(conn, query, limit=limit))
+        return json.dumps(fts_search(
+            conn, query, limit=min(limit, _SEARCH_SYMBOL_LIMIT)))
 
     @mcp.tool()
     def get_symbol_detail(qualified_name: str) -> str:
@@ -191,9 +197,16 @@ def main():
     logging.basicConfig(level=logging.INFO)
     config = load_config()
     server = create_server(config)
-    startup_sync(config, server._conn, server._lock)
-    t = threading.Thread(target=run_watcher, args=(config, server._lock), daemon=True)
-    t.start()
+    skip_sync = os.environ.get("CRAI_SKIP_STARTUP_SYNC", "").lower() in {
+        "1", "true", "yes"}
+    disable_watcher = os.environ.get("CRAI_DISABLE_WATCHER", "").lower() in {
+        "1", "true", "yes"}
+    if not skip_sync:
+        startup_sync(config, server._conn, server._lock)
+    if not disable_watcher:
+        t = threading.Thread(target=run_watcher,
+                             args=(config, server._lock), daemon=True)
+        t.start()
     server.run()
 
 

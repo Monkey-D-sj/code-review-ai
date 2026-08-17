@@ -1,5 +1,6 @@
 
 import fnmatch
+import hashlib
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
@@ -29,6 +30,24 @@ class FlowRecord:
     node_count: int
     file_count: int
     path: list[int]
+
+
+def flow_input_hash(conn) -> str:
+    """Stable hash of exactly what build_flows consumes: entry-candidate
+    function/method nodes (qname, kind, file) plus resolved call edges. Same
+    input -> same flows, so update_flows can skip a rebuild when the call graph
+    didn't structurally change (e.g. a body-only edit that alters no edges)."""
+    nodes = conn.execute(
+        "SELECT qualified_name, kind, file_path FROM nodes "
+        "WHERE kind IN ('function','method') ORDER BY qualified_name").fetchall()
+    edges = conn.execute(
+        "SELECT source, target FROM edges "
+        "WHERE kind='call' AND resolution='resolved' ORDER BY source, target"
+    ).fetchall()
+    parts = [f"n:{row['qualified_name']}|{row['kind']}|{row['file_path']}"
+             for row in nodes]
+    parts += [f"e:{row['source']}->{row['target']}" for row in edges]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
 def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],

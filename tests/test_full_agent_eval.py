@@ -1,13 +1,13 @@
 import json
-from pathlib import Path
 
 import pytest
 
 from code_review_ai.agent_eval import AgentRun, GoldFinding
 from code_review_ai.full_agent_eval import (
-    FullAgentCase, PreparedCase, load_full_agent_cases, run_full_agent_eval,
-    select_full_agent_cases,
+    FullAgentCase, PreparedCase, _case_config, load_full_agent_cases,
+    run_full_agent_eval, rescore_full_agent_report, select_full_agent_cases,
 )
+from code_review_ai.full_agent_eval import _prompt
 
 
 def _case():
@@ -34,6 +34,39 @@ def test_load_full_agent_cases_validates_manifest(tmp_path):
         select_full_agent_cases(cases, ["missing"])
 
 
+def test_case_config_uses_metadata_only_change_summary(tmp_path):
+    prepared = PreparedCase(_case(), str(tmp_path), "diff")
+    config = _case_config(prepared, str(tmp_path / "case.db"))
+    assert config.summary_source == "none"
+    assert config.diff_base == "HEAD"
+
+
+def test_native_and_project_share_the_same_review_policy(tmp_path):
+    prepared = PreparedCase(
+        _case(), str(tmp_path), "diff --git a/src/app.py b/src/app.py")
+    native = _prompt(prepared, "native_agent")
+    project = _prompt(prepared, "full_project_agent")
+
+    shared_requirements = (
+        "For every changed symbol",
+        "inspect upstream callers first",
+        "Inspect downstream callees",
+        "inspect relevant tests, configuration, routing, dependency injection",
+        "public API boundaries",
+    )
+    for requirement in shared_requirements:
+        assert requirement in native
+        assert requirement in project
+
+    assert "Use them to obtain the repository evidence" in native
+    assert "get_change_summary" not in native
+    assert "query_graph" not in native
+    assert "code-review-ai MCP tools" not in native
+    assert "get_change_summary" in project
+    assert "query_graph" in project
+    assert "do not call rebuild_index" in project
+
+
 def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
     case = _case()
     prepared = PreparedCase(case, str(tmp_path),
@@ -42,10 +75,23 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
         "code_review_ai.full_agent_eval.prepare_full_agent_cases",
         lambda cases, repos_dir, work_dir: [prepared],
     )
+    prebuilt_db = tmp_path / "prebuilt.db"
+    monkeypatch.setattr(
+        "code_review_ai.full_agent_eval._prepare_case_index",
+        lambda item, work_dir, label: {
+            "case_id": item.case.case_id, "db_path": str(prebuilt_db),
+            "nodes": 2, "edges": 1, "flows": 0, "elapsed_ms": 3.0,
+            "timed_with_agent": False,
+        },
+    )
 
     def fake_executor(command, prompt, cwd, env, timeout):
         assert env["CRAI_EVAL_TOOL_PROFILE"] in {"native", "full_project"}
-        calls = (["Read", "mcp__code-review-ai__get_impact"]
+        assert env["CRAI_EVAL_DB_PATH"] == str(prebuilt_db)
+        if env["CRAI_EVAL_TOOL_PROFILE"] == "full_project":
+            assert "do not call rebuild_index" in prompt
+            assert "get_impact only when" in prompt
+        calls = (["Read", "mcp__code-review-ai__query_graph"]
                  if env["CRAI_EVAL_TOOL_PROFILE"] == "full_project" else ["Read"])
         payload = {"findings": [{
             "file": "src/app.py", "line": 1, "title": "regression",
@@ -62,75 +108,32 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
     assert len(report["runs"]) == 2
     assert report["aggregate"]["native_agent"]["macro_f1"] == 1.0
     assert report["aggregate"]["full_project_agent"]["mcp_adoption_rate"] == 1.0
+    adoption = report["aggregate"]["full_project_agent"]["mcp_tool_adoption_rate"]
+    assert adoption["query_graph"] == 1.0
+    assert adoption["rebuild_index"] == 0.0
+    assert report["index_setup"][0]["timed_with_agent"] is False
 
 
-def test_review_methodology_skill_is_single_source():
-    """The review methodology lives in one place — the bundled
-    `code-review-methodology` skill — and both the eval harness and the
-    post-commit hook derive their prompts from it, so the two can't drift.
-    Every decision trigger must appear in the skill body and in the hook prompt
-    composed from it; a future edit that drops a trigger fails here instead of
-    silently diverging."""
-    from code_review_ai.hooks import _build_review_prompt
-    from code_review_ai.skills import load_skill_body
-    triggers = [
-        "签名",       # interface / signature change
-        "参数",       # parameter removed / type / order
-        "返回类型",   # return type change
-        "异常",       # exception semantics / new exception
-        "调用方",     # caller-dependent behavior
-        "跨模块",     # cross-module call added / removed
-        "路由",       # DI/routing wiring
-        "内部",       # pure internal body only
-        "拿不准",     # tiebreaker: doubt -> inspect
-        "跨服务",     # depth: cross-service/RPC/API
-        "删除",       # depth: deleted functions
-        "调用点",     # depth: direct call sites vs full chain
-    ]
-    skill = load_skill_body("code-review-methodology")
-    hook_prompt = _build_review_prompt()
-    for trigger in triggers:
-        assert trigger in skill, \
-            f"methodology skill lost trigger {trigger!r}"
-        assert trigger in hook_prompt, \
-            f"hook prompt lost trigger {trigger!r}"
-
-
-def test_run_index_db_is_worktree_scoped(tmp_path):
-    """The run index DB must be keyed by the worktree dir, not just
-    case+mode+repetition. prepare_full_agent_cases creates a fresh
-    random-suffixed worktree per eval invocation, so a collision-prone DB name
-    would reuse a previous invocation's index pointing at a stale worktree's
-    node paths (the bug behind the stale-index cost anomaly observed on
-    gson-graph-adapter-builder-reuse)."""
-    from code_review_ai.full_agent_eval import _run_once
+def test_rescore_uses_stored_outputs_and_filters_unavailable_tools(tmp_path):
     case = _case()
-    worktree = tmp_path / "worktrees" / "real-fix-0a1b2c3d"
-    prepared = PreparedCase(case, str(worktree),
-                            "diff --git a/src/app.py b/src/app.py")
-    captured = {}
-
-    def fake_executor(command, prompt, cwd, env, timeout):
-        captured["db"] = env["CRAI_EVAL_DB_PATH"]
-        payload = {"findings": [], "files_read": [], "tool_calls": [],
-                   "tool_call_count": 0,
-                   "usage": {"input_tokens": 1, "output_tokens": 1}}
-        return AgentRun(0, json.dumps(payload), "", 1.0)
-
-    _run_once(prepared, "native_agent", 1, ["agent"],
-              str(tmp_path / "out"), 60, fake_executor)
-    db = Path(captured["db"])
-    assert db.parent.name == "real-fix"
-    assert db.name == "real-fix-0a1b2c3d-native_agent-1.db"
-
-
-def test_eval_prompt_inlines_methodology_skill(tmp_path):
-    """The eval forces the methodology inline rather than relying on the agent
-    invoking the skill, so every benchmark run sees the exact same decision
-    table regardless of the agent's skill-discipline."""
-    from code_review_ai.full_agent_eval import _prompt
-    from code_review_ai.skills import load_skill_body
-    prepared = PreparedCase(_case(), str(tmp_path),
-                            "diff --git a/src/app.py b/src/app.py")
-    prompt = _prompt(prepared, "native_agent")
-    assert load_skill_body("code-review-methodology") in prompt
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps({
+        "schema_version": 1, "modes": ["native_agent"], "repetitions": 1,
+        "runs": [{"case_id": case.case_id, "mode": "native_agent",
+                  "repetition": 1, "success": True, "precision": 0,
+                  "recall": 0, "f1": 0, "elapsed_ms": 1,
+                  "files_read": [], "context_files": [],
+                  "tool_calls": ["Read", "Bash"], "tool_call_count": 2,
+                  "usage": {"input_tokens": 1, "output_tokens": 1}}],
+    }), encoding="utf-8")
+    transcript_dir = tmp_path / "transcripts"
+    transcript = transcript_dir / case.case_id / "native_agent" / "run-1.json"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(json.dumps({"parsed_output": {"findings": [{
+        "file": "src/app.py", "title": "regression",
+        "description": "concrete regression"}]}}), encoding="utf-8")
+    rescored = rescore_full_agent_report(
+        str(report_path), [case], str(transcript_dir))
+    assert rescored["runs"][0]["f1"] == 1.0
+    assert rescored["runs"][0]["tool_calls"] == ["Read"]
+    assert rescored["rescored"]["gold_finding_count"] == 1

@@ -1,6 +1,15 @@
 
 import sqlite3
 
+_SIGNATURE_LIMIT = 160
+
+
+def _cap_signature(value: str | None) -> str:
+    """Truncate long signatures so impact briefs stay compact."""
+    text = value or ""
+    return text if len(text) <= _SIGNATURE_LIMIT \
+        else text[:_SIGNATURE_LIMIT] + "…"
+
 
 def _node_brief(conn: sqlite3.Connection, node_id: int) -> dict:
     r = conn.execute(
@@ -10,7 +19,7 @@ def _node_brief(conn: sqlite3.Connection, node_id: int) -> dict:
     if r is None:
         return {"qname": str(node_id), "file": "", "line": 0, "sig": ""}
     return {"qname": r["qualified_name"], "file": r["file_path"],
-            "line": r["start_line"], "sig": r["signature"]}
+            "line": r["start_line"], "sig": _cap_signature(r["signature"])}
 
 
 def _slice_flow(conn: sqlite3.Connection, flow_id: int, symbol_node_id: int,
@@ -79,14 +88,15 @@ def _edge_brief(conn: sqlite3.Connection, qname: str) -> dict:
                      (qname,)).fetchone()
     if r is None:
         return {"qname": qname, "file": "", "line": 0, "sig": ""}
-    return {"qname": qname, "file": r["file_path"], "line": r["start_line"], "sig": r["signature"]}
+    return {"qname": qname, "file": r["file_path"], "line": r["start_line"],
+            "sig": _cap_signature(r["signature"])}
 
 
 _TEST_FILTER = {"exclude": 0, "only": 1, "include": None}
 
 
 def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
-               max_nodes_per_direction: int = 50,
+               max_nodes_per_direction: int = 20,
                tests: str = "exclude") -> list[dict]:
     """Impact analysis for changed symbols. `tests` selects which nodes the
     upstream/downstream/affected_entries contain: 'exclude' (default, business

@@ -12,28 +12,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from code_review_ai.agent_eval import (
-    AgentExecutor, AgentRun, GoldFinding, MCP_TOOL_PREFIX, _execute_agent,
-    _mode_metrics, _parse_agent_output, _parse_gold, _score, _string_values,
-    _usage,
+    AgentExecutor, AgentRun, GoldFinding, _execute_agent, _mode_metrics,
+    _parse_agent_output, _parse_gold, _score, _string_values, _usage,
+    SHARED_REVIEW_POLICY,
 )
 from code_review_ai.changes import detect_changed_symbols
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
-from code_review_ai.skills import load_skill_body
 
 
 FULL_EVAL_MODES = ("native_agent", "full_project_agent")
-_SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
-# Shared review-methodology decision table, identical for every mode so the eval
-# isolates the toolset (native vs MCP) rather than the review strategy. It lives
-# in exactly one place — the bundled `code-review-methodology` skill — and is
-# inlined here via load_skill_body; the post-commit hook composes its prompt from
-# the same skill (code_review_ai.hooks._build_review_prompt), so the two can't
-# drift. Parity is asserted in tests/test_full_agent_eval.py.
-_REVIEW_PREFIX = load_skill_body("code-review-methodology")
+_SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 @dataclass(frozen=True)
@@ -45,6 +37,7 @@ class FullAgentCase:
     mutation_paths: tuple[str, ...]
     prompt: str
     gold_findings: tuple[GoldFinding, ...]
+    complexity_tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -71,6 +64,7 @@ def _parse_case(record: object, position: int) -> FullAgentCase:
     paths = record.get("mutation_paths")
     prompt = record.get("prompt")
     golds = record.get("gold_findings")
+    complexity_tags = record.get("complexity_tags", [])
     names = (case_id, repo_name)
     if not all(isinstance(value, str) and _SAFE_NAME.match(value)
                for value in names):
@@ -87,9 +81,12 @@ def _parse_case(record: object, position: int) -> FullAgentCase:
         raise ValueError(f"case {case_id} has invalid mutation_paths")
     if not isinstance(golds, list) or not golds:
         raise ValueError(f"case {case_id} requires gold_findings")
+    if not isinstance(complexity_tags, list) or not all(
+            isinstance(tag, str) and tag for tag in complexity_tags):
+        raise ValueError(f"case {case_id} has invalid complexity_tags")
     findings = tuple(_parse_gold(gold, case_id) for gold in golds)
     return FullAgentCase(case_id, repo_name, repo_url, commit, tuple(paths),
-                         prompt, findings)
+                         prompt, findings, tuple(complexity_tags))
 
 
 def select_full_agent_cases(cases: list[FullAgentCase],
@@ -126,16 +123,51 @@ def prepare_full_agent_cases(cases: list[FullAgentCase], repos_dir: str,
                   str(worktree), case.source_commit])
         for mutation_path in case.mutation_paths:
             _restore_parent_version(worktree, case.source_commit, mutation_path)
-        # 3 lines of context per hunk: the diff is 75-90% of the prompt and is
-        # re-read every turn, so context lines dominate eval input cost while
-        # the mutation itself is usually only a handful of lines. The changed
-        # lines are all preserved; gold anchors live on the mutated files.
         diff = _run_git(["-C", str(worktree), "diff", "--no-ext-diff",
-                         "--unified=3", "--", *case.mutation_paths]).stdout
+                         "--unified=40", "--", *case.mutation_paths]).stdout
         if not diff.strip():
             raise ValueError(f"case {case.case_id} produced an empty mutation")
         prepared.append(PreparedCase(case, str(worktree), diff))
     return prepared
+
+
+def _case_config(item: PreparedCase, db_path: str):
+    config = load_config(item.repo_path)
+    config.repo_path = item.repo_path
+    config.db_path = db_path
+    config.diff_base = "HEAD"
+    config.community_detection = False
+    # The eval prompt already embeds the full mutation diff; let
+    # get_change_summary return metadata-only instead of re-inlining the same
+    # per-function hunks (a duplicate fresh-token cost in the MCP result).
+    config.summary_source = "none"
+    return config
+
+
+def _prepare_case_index(item: PreparedCase, work_dir: str,
+                        label: str) -> dict:
+    """Build the graph before the timed agent run and report setup separately."""
+    snapshot_name = Path(item.repo_path).name
+    db_path = (Path(work_dir).resolve() / "indexes" / item.case.case_id /
+               f"{snapshot_name}-{label}.db")
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    config = _case_config(item, str(db_path))
+    conn = connect(str(db_path))
+    init_schema(conn)
+    started = time.perf_counter()
+    try:
+        stats = rebuild(config, conn)
+    finally:
+        conn.close()
+    return {
+        "case_id": item.case.case_id,
+        "db_path": str(db_path),
+        "nodes": stats.node_count,
+        "edges": stats.edge_count,
+        "flows": stats.flow_count,
+        "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+        "timed_with_agent": False,
+    }
 
 
 def preflight_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
@@ -143,34 +175,27 @@ def preflight_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
     prepared = prepare_full_agent_cases(cases, repos_dir, work_dir)
     results = []
     for item in prepared:
-        db_path = Path(work_dir).resolve() / "indexes" / item.case.case_id / "preflight.db"
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        config = load_config(item.repo_path)
-        config.repo_path = item.repo_path
-        config.db_path = str(db_path)
-        config.diff_base = "HEAD"
-        config.community_detection = False
-        conn = connect(str(db_path))
-        init_schema(conn)
-        started = time.perf_counter()
-        stats = rebuild(config, conn)
+        setup = _prepare_case_index(item, work_dir, "preflight")
+        config = _case_config(item, setup["db_path"])
+        conn = connect(setup["db_path"])
         symbols = detect_changed_symbols(config)
         impacts = get_impact(conn, symbols, tests="include")
         results.append({
             "case_id": item.case.case_id, "repo_name": item.case.repo_name,
             "source_commit": item.case.source_commit,
+            "complexity_tags": list(item.case.complexity_tags),
             "repo_path": item.repo_path, "diff_characters": len(item.diff),
             "changed_symbols": symbols,
             "found_symbols": [impact["symbol"] for impact in impacts
                               if impact["found"]],
-            "index": {"nodes": stats.node_count, "edges": stats.edge_count,
-                      "flows": stats.flow_count,
-                      "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)},
+            "index": {key: setup[key] for key in (
+                "nodes", "edges", "flows", "elapsed_ms")},
         })
         conn.close()
     total_symbols = sum(len(result["changed_symbols"]) for result in results)
     found = sum(len(result["found_symbols"]) for result in results)
-    return {"schema_version": 1, "dry_run": True, "cases": results,
+    return {"schema_version": 2, "dry_run": True,
+            "evaluation": "full_project_online_tool_use", "cases": results,
             "aggregate": {"case_count": len(results),
                           "changed_symbols": total_symbols,
                           "symbol_found_rate": round(found / total_symbols, 4)
@@ -185,6 +210,10 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
                         executor: AgentExecutor | None = None) -> dict:
     _validate(cases, command, modes, repetitions, timeout_seconds, workers)
     prepared = prepare_full_agent_cases(cases, repos_dir, work_dir)
+    index_setups = {
+        item.case.case_id: _prepare_case_index(item, work_dir, "online")
+        for item in prepared
+    }
     execute_agent = executor or _execute_agent
     jobs = [(item, mode, repetition) for item in prepared for mode in modes
             for repetition in range(1, repetitions + 1)]
@@ -192,7 +221,8 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
     def execute(job: tuple[PreparedCase, str, int]) -> dict:
         item, mode, repetition = job
         return _run_once(item, mode, repetition, command, work_dir,
-                         timeout_seconds, execute_agent)
+                         timeout_seconds, execute_agent,
+                         index_setups[item.case.case_id]["db_path"])
 
     if workers == 1:
         runs = [execute(job) for job in jobs]
@@ -200,10 +230,12 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
         with ThreadPoolExecutor(max_workers=workers) as pool:
             runs = list(pool.map(execute, jobs))
     aggregates = _full_aggregates(runs, modes)
-    return {"schema_version": 1, "evaluation": "full_project_tool_use",
+    return {"schema_version": 2,
+            "evaluation": "full_project_online_tool_use",
             "baseline_mode": "native_agent",
             "modes": list(modes), "repetitions": repetitions,
             "workers": workers, "aggregate": aggregates, "runs": runs,
+            "index_setup": list(index_setups.values()),
             "cases": [{"id": item.case.case_id,
                        "repo_name": item.case.repo_name,
                        "repo_url": item.case.repo_url,
@@ -232,9 +264,20 @@ def rescore_full_agent_report(report_path: str, cases: list[FullAgentCase],
         payload = transcript.get("parsed_output")
         predictions = payload.get("findings", []) if isinstance(payload, dict) else []
         run.update(_score(predictions, by_id[case_id].gold_findings))
+        calls = [call for call in run.get("tool_calls", [])
+                 if call in {"Read", "Glob", "Grep"}
+                 or (isinstance(call, str) and call.startswith("mcp__code-review-ai__"))]
+        removed = len(run.get("tool_calls", [])) - len(calls)
+        run["tool_calls"] = calls
+        run["tool_call_count"] = max(
+            0, int(run.get("tool_call_count", 0)) - removed)
     modes = tuple(report.get("modes") or dict.fromkeys(
         run["mode"] for run in runs))
     report["aggregate"] = _full_aggregates(runs, modes)
+    if report.get("index_setup") and all(
+            run.get("index_prebuilt") is True for run in runs):
+        report["schema_version"] = 2
+        report["evaluation"] = "full_project_online_tool_use"
     report["rescored"] = {
         "gold_case_count": len(cases),
         "gold_finding_count": sum(len(case.gold_findings) for case in cases),
@@ -251,28 +294,27 @@ def _full_aggregates(runs: list[dict], modes: tuple[str, ...]) -> dict:
         aggregate["mean_actual_tool_calls"] = _mean(
             [run["tool_call_count"] for run in selected])
         aggregate["mcp_adoption_rate"] = _mean([
-            float(any(call.startswith(MCP_TOOL_PREFIX)
-                      for call in run["tool_calls"]))
+            float(any(call.startswith("mcp__") for call in run["tool_calls"]))
             for run in selected])
+        aggregate["mcp_tool_adoption_rate"] = {
+            name: _mean([
+                float(f"mcp__code-review-ai__{name}" in run["tool_calls"])
+                for run in selected
+            ])
+            for name in (
+                "rebuild_index", "get_change_summary", "query_graph",
+                "get_impact", "get_test_impact", "search_symbol",
+                "get_symbol_detail",
+            )
+        }
     return aggregates
 
 
 def _run_once(item: PreparedCase, mode: str, repetition: int,
               command: list[str], output_dir: str, timeout_seconds: int,
-              executor: AgentExecutor) -> dict:
+              executor: AgentExecutor, db_path: str) -> dict:
     prompt = _prompt(item, mode)
     profile = "native" if mode == "native_agent" else "full_project"
-    # Key the run index by the worktree dir name. prepare_full_agent_cases
-    # creates a fresh random-suffixed worktree per eval invocation, so a DB
-    # named only by case+mode+repetition could be reused across invocations
-    # and point at a stale worktree's node paths (sync() won't rebuild it:
-    # config_hash omits repo_path, and the incremental path can't delete old
-    # nodes keyed by a different absolute path). A worktree-scoped DB is
-    # guaranteed missing on a fresh invocation, forcing a full rebuild.
-    worktree = Path(item.repo_path).name
-    db_path = (Path(output_dir).resolve() / "indexes" / item.case.case_id /
-               f"{worktree}-{mode}-{repetition}.db")
-    db_path.parent.mkdir(parents=True, exist_ok=True)
     environment = {
         "CRAI_EVAL_MODE": mode, "CRAI_EVAL_CASE": item.case.case_id,
         "CRAI_EVAL_TOOL_PROFILE": profile,
@@ -285,6 +327,8 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
         "case_id": item.case.case_id, "repo_name": item.case.repo_name,
         "mode": mode, "repetition": repetition,
         "source_commit": item.case.source_commit,
+        "complexity_tags": list(item.case.complexity_tags),
+        "index_prebuilt": True,
         "success": run.returncode == 0 and parse_error is None,
         "returncode": run.returncode, "elapsed_ms": round(run.elapsed_ms, 3),
         "parse_error": parse_error, **score,
@@ -305,22 +349,23 @@ def _prompt(item: PreparedCase, mode: str) -> str:
                       "description": "..."}],
         "files_read": [], "tool_calls": [],
     }
-    project_note = ("你有原生 Read/Glob/Grep 工具,也装有 code-review-ai 的 MCP 工具"
-                    "(索引已是最新,不要调用 rebuild_index)。先用 get_change_summary 取变更文件,"
-                    "再按上面的决策表:只有决策表标记「需要上下文」的改动才做图查询,深度按类别"
-                    "(跨服务/删除/被跨模块调用的接口变更 → get_impact;其他需要上下文的改动 → "
-                    "query_graph;私有改动 → 读直接调用点)。自包含的改动不需要任何图查询。"
-                    "单个符号用 search_symbol 和 get_symbol_detail;调用 query_graph 时传较小的 "
-                    "max_neighbors。"
-                    if mode == "full_project_agent" else
-                    "你有原生 Read/Glob/Grep 工具。")
+    tool_note = ("You have native Read/Glob/Grep tools and the installed "
+                 "code-review-ai MCP tools. The graph index is already "
+                 "synchronized; do not call rebuild_index. Use "
+                 "get_change_summary for structured change details, query_graph "
+                 "for direct upstream or downstream neighbors, and get_impact "
+                 "only when those direct neighbors leave the wider blast radius "
+                 "uncertain. Risk is a prioritization signal, not a hard gate. "
+                 if mode == "full_project_agent" else
+                 "You have native Read/Glob/Grep tools. Use them to obtain the "
+                 "repository evidence required by the review policy. ")
     return (
-        f"你正在对 {item.case.repo_name} 的一个真实补丁做受控评审。\n"
-        f"{project_note}按需检查仓库,但不要修改它。\n"
-        "只报告该 diff 引入的具体回归。"
-        f"{_REVIEW_PREFIX}"
-        "返回恰好一个 JSON 对象,符合以下结构:\n"
-        f"{json.dumps(contract)}\n\n任务\n{item.case.prompt}\n\n"
+        f"You are running a controlled review of a real patch in {item.case.repo_name}.\n"
+        f"{SHARED_REVIEW_POLICY}{tool_note}"
+        "Inspect the repository as needed, but do not modify it.\n"
+        "Report only concrete regressions introduced by the supplied diff. "
+        "Return exactly one JSON object matching this shape:\n"
+        f"{json.dumps(contract)}\n\nTASK\n{item.case.prompt}\n\n"
         f"DIFF\n{item.diff}"
     )
 

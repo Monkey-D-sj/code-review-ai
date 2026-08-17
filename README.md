@@ -85,6 +85,138 @@ code-review-ai communities [--symbol auth::login]       # list communities / one
 
 `rebuild`/`query`/`search`/`communities` also accept no `--repo`/`--db` (defaults: `.` and `.code-review-ai/index.db`).
 
+## Agentic Eval
+
+`agent-eval` compares the same review cases under four controlled, precomputed
+context modes: `diff_only`, `search_baseline`, `graph_agent`, and
+`hybrid_agent`. Despite the historical name, `graph_agent` does not let an
+agent call tools; it is a component ablation that injects `get_impact` output.
+Hybrid mode combines the diff with the changed-symbol source, up to three
+direct callers/callees per symbol, and compact graph evidence under a 12,000
+serialized-character hard budget. The agent command
+reads a prompt from stdin and must write one JSON object to stdout. Runs retain
+the full prompt, stdout, stderr, parsed answer, latency, reported/estimated
+tokens, files read, tool calls, and deterministic finding scores.
+
+Start from `examples/agent-eval-cases.example.json`, then run:
+
+```bash
+code-review-ai agent-eval --repo . \
+  --cases examples/agent-eval-cases.example.json \
+  --agent-command "your-agent --json" --repetitions 3 \
+  --workers 4 \
+  --runs-dir .code-review-ai/agent-eval \
+  -o .code-review-ai/agent-eval-report.json
+```
+
+Use `--case-ids case-a case-b` to rerun provider failures without paying for
+the rest of the suite again. Reports preserve provider model, uncached/cache
+token categories, and total cost when the adapter exposes them. For the Claude
+streaming adapter, files and tool calls come from observed provider events,
+not model-authored telemetry fields.
+
+Each gold finding has a stable `id`, repository-relative `file`, optional line
+range, and optional matching keywords. A prediction matches only when every
+provided constraint is satisfied. The aggregate report compares finding
+Precision/Recall/F1, success rate, latency, tokens, files read, and tool calls
+per mode. Token and file/tool metrics are marked or understood as agent-reported;
+when usage is absent, token counts are explicitly estimated from text length.
+
+The runner sets `CRAI_EVAL_MODE` and `CRAI_EVAL_CASE` for provider adapters.
+For a fair experiment, keep the model, prompt policy, temperature, context
+budget, and repetition count fixed, and prevent the Diff/Search agents from
+using repository tools outside the supplied context.
+
+A built-in Claude Code adapter normalizes `claude -p --output-format json`
+into the eval contract and disables repository tools for controlled context
+experiments:
+
+```bash
+code-review-ai agent-eval --repo . \
+  --cases benchmarks/agentic-eval-real-repos.json \
+  --repos-dir .code-review-ai/external-repos \
+  --agent-command "python -m code_review_ai.agent_adapter claude --model sonnet" \
+  --repetitions 3 --workers 4 \
+  -o .code-review-ai/agent-eval-real-repos-r3.json
+```
+
+`benchmarks/agentic-eval-real-repos.json` is the canonical case set shared by
+`agent-eval` and `full-agent-eval`: twelve reverse mutations from real fixes in
+itsdangerous, p-limit, Gson, FastAPI, and Spring PetClinic. Six cases are
+explicitly context-heavy, covering cross-module alias pipelines, route-state
+propagation, framework lifecycles, ORM/view boundaries, and database-backed
+concurrency invariants. Each runner consumes the same repository URL,
+fix commit, mutation paths, review task, and gold findings. `agent-eval`
+automatically clones/caches each repository, creates an isolated worktree,
+restores the selected production paths to the fix parent, detects changed
+symbols, and builds all four controlled contexts from the same mutations used
+by `full-agent-eval`. The older `benchmarks/agent-eval-real-10.json` remains a
+project-local historical smoke suite, not the cross-evaluator baseline.
+On Windows, commands with complex quoting can also be supplied as a JSON array.
+The 120-run baseline and its limitations are documented in
+`benchmarks/AGENT_EVAL_BASELINE.md`. Search currently has the best F1 point
+estimate; confidence intervals do not establish that Graph or Hybrid improves
+F1 over Diff Only.
+
+Before spending model budget, preflight the manifest, symbol coverage, context
+sizes, and supplied files:
+
+```bash
+code-review-ai agent-eval --repo . \
+  --cases benchmarks/agentic-eval-real-repos.json --dry-run \
+  --repos-dir .code-review-ai/external-repos \
+  -o .code-review-ai/agent-eval-preflight.json
+```
+
+After a multi-repetition run, generate bootstrap confidence intervals and
+paired comparisons against Diff Only:
+
+```bash
+code-review-ai agent-eval-analyze \
+  --report .code-review-ai/agent-eval-report.json \
+  -o .code-review-ai/agent-eval-analysis.json
+```
+
+### Full-project tool-use eval
+
+`full-agent-eval` tests the installed product on isolated real repositories.
+It checks out a real fix commit, restores selected production files to the
+parent revision, keeps the fixed tests available, and pairs a Native Agent
+(`Read`/`Glob`/`Grep`) with a Full Project Agent using the same native tools
+plus this project's MCP server.
+
+Both evaluators use the same review policy. The controlled runner varies only
+the supplied context, while the full-project runner varies only available
+context tools.
+
+For Full Project mode, each historical snapshot is indexed before the Agent
+timer starts. The evaluated MCP server reuses that index without startup sync
+or a watcher, and `rebuild_index` is not available to the Agent. The Prompt
+mirrors the installed review policy: start from the change summary, use graph
+neighbors when context is needed, and expand to `get_impact` only when the
+blast radius remains uncertain or the change crosses an important boundary.
+
+```bash
+code-review-ai full-agent-eval \
+  --cases benchmarks/agentic-eval-real-repos.json --dry-run \
+  -o .code-review-ai/full-agent-preflight.json
+
+code-review-ai full-agent-eval \
+  --cases benchmarks/agentic-eval-real-repos.json \
+  --agent-command "python -m code_review_ai.agent_adapter claude --model sonnet --max-budget-usd 1.00" \
+  --repetitions 3 --workers 4 \
+  -o .code-review-ai/full-agent-report.json
+```
+
+The current online-v2 result completed 36/36 calls. Compared with Native Agent,
+Full Project changed the F1 point estimate from 90.4% to 91.3%, precision from
+85.2% to 88.0%, and recall from 100.0% to 97.2%. The paired F1 interval is -9.8
+to +8.5 points, so the small experiment does not establish a quality gain. With
+index setup excluded from Agent timing, Full Project cost 3.0% more, was 2.3%
+slower, and read 25.3% fewer files. Only 9/18 Full Project runs chose
+`get_impact`; all 18 used project MCP. Methodology, artifacts, and limitations
+are documented in `benchmarks/FULL_AGENT_EVAL_REAL_REPOS.md`.
+
 ## Historical-change benchmark
 
 Measure whether impact queries recover the files touched by known historical
@@ -296,7 +428,7 @@ no test covers the change, swap the empty-`$tests` branch for `exit 0`.
 
 ## Config
 
-Layered: defaults -> `[tool.code-review-ai]` in `pyproject.toml` (or a standalone `cr-ai.toml`) -> env `CRAI_<UPPER_KEY>`. Notable keys: `diff_base` (default `origin/main`), `entry_names`, `community_detection` (bool, default `false`; set `CRAI_COMMUNITY_DETECTION=1` to enable Leiden communities).
+Layered: defaults -> `[tool.code-review-ai]` in `pyproject.toml` (or a standalone `cr-ai.toml`) -> env `CRAI_<UPPER_KEY>`. Notable keys: `diff_base` (default `origin/main`), `entry_names`, `community_detection` (bool, default `false`; set `CRAI_COMMUNITY_DETECTION=1` to enable Leiden communities), `summary_source` (default `"diff"` — attaches each changed function's unified diff to `get_change_summary`; `"none"` keeps the metadata-only shape).
 
 ## How it works
 

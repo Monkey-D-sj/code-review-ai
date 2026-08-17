@@ -185,13 +185,15 @@ def test_update_flows_rebuilds_from_db_and_skips_when_head_unchanged(tmp_path):
     assert before > 0
     # HEAD 未变 -> no-op
     assert upd.update_flows(cfg, conn) == 0
-    # 改一个文件、commit（HEAD 变）-> 重算，flow 结构应随新符号变化
+    # 改一个文件、commit（HEAD 变）-> 先按 sync 顺序更新 nodes/edges，
+    # 再重算 flows（flow 结构应随新符号变化；哈希守卫只在图结构不变时跳过）
     (repo / "util.py").write_text(
         (repo / "util.py").read_text(encoding="utf-8")
         + "\ndef new_helper():\n    pass\n",
         encoding="utf-8")
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                     "commit", "-aqm", "add helper"], cwd=repo, check=True)
+    upd.update_nodes_edges(cfg, conn)
     n = upd.update_flows(cfg, conn)
     assert n > 0
     assert conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0] == n
@@ -212,6 +214,9 @@ def test_update_communities_when_enabled(tmp_path):
     conn.execute(
         "INSERT INTO edges(source,target,kind,resolution) "
         "VALUES('auth','auth::UserService','import','resolved')")
+    # rebuild 已 stamp communities_as_of_head；手工插边不走 HEAD，清掉标记
+    # 模拟"社区已过期"，让 update_communities 基于当前 DB 图重算。
+    conn.execute("DELETE FROM build_meta WHERE key='communities_as_of_head'")
     conn.commit()
     n = upd.update_communities(cfg, conn)
     assert n > 0
@@ -445,3 +450,125 @@ def test_tombstone_upstream_excludes_same_batch_sources(tmp_path):
     ).fetchone()
     assert inner is not None
     assert json.loads(inner[0]) == []   # mod::outer 同批被删，排除
+
+
+# ---- flow / community staleness guards ----
+
+def test_update_flows_skips_body_only_edit(tmp_path):
+    """只改函数体（不动任何调用边）-> flow 输入哈希不变 -> 跳过全量重算。"""
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    flows_before = conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
+    members_before = conn.execute(
+        "SELECT COUNT(*) FROM flow_memberships").fetchone()[0]
+    (repo / "util.py").write_text(
+        (repo / "util.py").read_text(encoding="utf-8")
+        .replace("    pass\n", "    pass  # comment\n"),
+        encoding="utf-8")
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-aqm", "comment only"], cwd=repo, check=True)
+    result = upd.sync(cfg, conn)
+    assert result["flows"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0] == flows_before
+    assert conn.execute(
+        "SELECT COUNT(*) FROM flow_memberships").fetchone()[0] == members_before
+    assert conn.execute(
+        "SELECT value FROM build_meta WHERE key='flows_as_of_head'"
+    ).fetchone()[0] == current_head(cfg)
+
+
+def test_update_flows_rebuilds_when_call_edge_added(tmp_path):
+    """新增调用边 -> flow 输入哈希变化 -> 重算，且新边进入 flow。"""
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    (repo / "util.py").write_text(
+        (repo / "util.py").read_text(encoding="utf-8")
+        .replace("    pass\n", '    hash_pw("x")\n'),
+        encoding="utf-8")
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-aqm", "add call"], cwd=repo, check=True)
+    result = upd.sync(cfg, conn)
+    assert result["flows"] > 0
+    helper_id = conn.execute(
+        "SELECT id FROM nodes WHERE qualified_name='util::helper'"
+    ).fetchone()[0]
+    # helper 的 flow 现在应包含 hash_pw
+    in_flow = conn.execute(
+        "SELECT COUNT(*) FROM flow_memberships m "
+        "JOIN nodes n ON n.id=m.node_id "
+        "WHERE n.qualified_name='util::hash_pw' AND m.flow_id IN "
+        "(SELECT flow_id FROM flow_memberships WHERE node_id=?)",
+        (helper_id,)).fetchone()[0]
+    assert in_flow > 0
+
+
+def test_sync_skips_flows_when_only_non_source_committed(tmp_path):
+    """只提交非源码文件 -> nodes/edges 未变 -> flows 直接跳过并推进标记。"""
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    flows_before = conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
+    (repo / "README.md").write_text("# docs\n", encoding="utf-8")
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "add", "README.md"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-qm", "docs"], cwd=repo, check=True)
+    result = upd.sync(cfg, conn)
+    assert result["flows"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0] == flows_before
+    assert conn.execute(
+        "SELECT value FROM build_meta WHERE key='flows_as_of_head'"
+    ).fetchone()[0] == current_head(cfg)
+
+
+def test_update_communities_skips_when_head_unchanged(tmp_path):
+    pytest.importorskip("leidenalg")
+    repo, cfg = _git_repo(tmp_path)
+    cfg.community_detection = True
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)   # rebuild 构建社区并 stamp communities_as_of_head
+    members_before = conn.execute(
+        "SELECT COUNT(*) FROM community_memberships").fetchone()[0]
+    assert members_before > 0
+    # HEAD 未变 -> no-op
+    assert upd.update_communities(cfg, conn) == 0
+    assert conn.execute(
+        "SELECT COUNT(*) FROM community_memberships").fetchone()[0] == members_before
+
+
+def test_update_communities_rebuilds_after_commit(tmp_path):
+    pytest.importorskip("leidenalg")
+    repo, cfg = _git_repo(tmp_path)
+    cfg.community_detection = True
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    upd.update_communities(cfg, conn)           # 推进 communities_as_of_head
+    (repo / "util.py").write_text(
+        (repo / "util.py").read_text(encoding="utf-8")
+        + "\ndef new_module_fn():\n    pass\n",
+        encoding="utf-8")
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-aqm", "add module fn"], cwd=repo, check=True)
+    # HEAD 变了 -> 重新划分
+    assert upd.update_communities(cfg, conn) > 0
+
+
+def test_sync_noop_right_after_full_rebuild_with_communities(tmp_path):
+    """全量 rebuild 已构建社区（并 stamp communities_as_of_head）后，紧接着
+    sync（HEAD 未变）应完全 no-op —— rebuild 自身推进标记，不需要下一次
+    sync 再重算一遍社区。"""
+    pytest.importorskip("leidenalg")
+    repo, cfg = _git_repo(tmp_path)
+    cfg.community_detection = True
+    conn = connect(cfg.db_path)
+    _init_and_build(cfg, conn)
+    members = conn.execute(
+        "SELECT COUNT(*) FROM community_memberships").fetchone()[0]
+    assert members > 0
+    result = upd.sync(cfg, conn)
+    assert result["full_rebuild"] is False
+    assert result["communities"] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) FROM community_memberships").fetchone()[0] == members

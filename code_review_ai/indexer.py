@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from code_review_ai.community import build_communities, inter_community_edges, WeightMode
 from code_review_ai.config import Config
 from code_review_ai.db import transaction
-from code_review_ai.flow_builder import NodeRow, EdgeRow, FlowRecord, build_flows
+from code_review_ai.flow_builder import NodeRow, EdgeRow, FlowRecord, build_flows, flow_input_hash
 from code_review_ai.parser import ParsedFile, SOURCE_GLOBS, filter_excluded, is_test_node, list_source_files, parse_file
 from code_review_ai.resolver import resolve_edges
 from code_review_ai.search import index_fts
@@ -74,7 +74,7 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
         t_comm_start = time.perf_counter()
         community_count = _write_communities(conn, parsed, all_edges, qname_to_id, config)
         t_communities = _ms(time.perf_counter() - t_comm_start)
-        built_at = _stamp_meta(config, conn)
+        built_at = _stamp_meta(config, conn, community_count)
     t_db = time.perf_counter()
 
     timings = {
@@ -254,7 +254,8 @@ def _stamp_built_at(conn: sqlite3.Connection) -> str:
     return built_at
 
 
-def _stamp_meta(config: Config, conn: sqlite3.Connection) -> str:
+def _stamp_meta(config: Config, conn: sqlite3.Connection,
+                community_count: int = 0) -> str:
     """Stamp build metadata after a full rebuild: built_at (via
     _stamp_built_at), config_hash, index_version, flows_as_of_head, and the
     file manifest (so the next incremental update can diff against it)."""
@@ -263,11 +264,24 @@ def _stamp_meta(config: Config, conn: sqlite3.Connection) -> str:
     from code_review_ai.db import INDEX_VERSION
     from code_review_ai import manifest
     built_at = _stamp_built_at(conn)
+    meta = [("config_hash", _config_hash(config)),
+            ("index_version", str(INDEX_VERSION)),
+            ("flows_as_of_head", current_head(config) or "")]
+    # When the rebuild actually produced communities (libs present AND
+    # community_detection on), advance the marker here too — otherwise the
+    # very next sync would re-run community detection on an unchanged graph.
+    # community_count==0 leaves it unstamped so a libs-missing rebuild still
+    # retries detection on the next sync.
+    if community_count > 0:
+        meta.append(("communities_as_of_head", current_head(config) or ""))
     conn.executemany(
-        "INSERT OR REPLACE INTO build_meta(key,value) VALUES(?,?)",
-        [("config_hash", _config_hash(config)),
-         ("index_version", str(INDEX_VERSION)),
-         ("flows_as_of_head", current_head(config) or "")])
+        "INSERT OR REPLACE INTO build_meta(key,value) VALUES(?,?)", meta)
+    # hash of the flow input the just-built flows were derived from, so the
+    # incremental update_flows can skip a rebuild when the call graph didn't
+    # structurally change (e.g. a body-only commit right after a full rebuild)
+    conn.execute(
+        "INSERT OR REPLACE INTO build_meta(key,value) VALUES('flows_input_hash',?)",
+        (flow_input_hash(conn),))
     # populate file manifest so incremental updates can diff
     repo = config.repo_path
     files = filter_excluded(

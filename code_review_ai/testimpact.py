@@ -13,7 +13,7 @@ from code_review_ai.impact import get_impact
 
 
 def get_test_impact(conn: sqlite3.Connection, changed_symbols: list[str],
-                    max_nodes_per_direction: int = 50) -> dict:
+                    max_nodes_per_direction: int = 20) -> dict:
     """For each changed symbol, find the tests that reach it and return a
     "run these tests" payload.
 

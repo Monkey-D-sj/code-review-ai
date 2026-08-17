@@ -66,6 +66,22 @@ def test_search_symbol_glob_tool(tmp_path):
     assert any(d["qname"] == Q("auth", "login") for d in data)
 
 
+def test_search_symbol_tool_caps_broad_globs(tmp_path):
+    server, conn, cfg = _server(tmp_path)
+    for index in range(40):
+        conn.execute(
+            "INSERT INTO nodes(qualified_name,kind,language,file_path,"
+            "start_line,end_line,signature) VALUES (?,?,?,?,?,?,?)",
+            (f"bulk::sym{index:02d}", "function", "python",
+             "src/bulk.py", index + 1, index + 2, f"def sym{index:02d}()"),
+        )
+    conn.commit()
+    out = server._tool_manager._tools["search_symbol"].fn(query="*sym*")
+    data = json.loads(out)
+    assert len(data) == 30
+    assert data[0]["qname"] == "bulk::sym00"
+
+
 def test_list_entry_points_tool(tmp_path):
     server, conn, cfg = _server(tmp_path)
     out = server._tool_manager._tools["list_entry_points"].fn()

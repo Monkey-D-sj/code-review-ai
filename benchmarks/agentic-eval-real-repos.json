@@ -1,0 +1,234 @@
+[
+  {
+    "id": "itsdangerous-load-payload-forwarding",
+    "repo_name": "itsdangerous",
+    "repo_url": "https://github.com/pallets/itsdangerous.git",
+    "source_commit": "b00d8fd9dc3d74bdafb6b90b691bbb9616cff835",
+    "mutation_paths": ["itsdangerous.py"],
+    "prompt": "Review this proposed serializer refactor for concrete compatibility or behavior regressions. Inspect related implementations and call paths when useful.",
+    "gold_findings": [
+      {
+        "id": "jws-serializer-override-removed",
+        "file": "itsdangerous.py",
+        "keywords": ["jsonwebsignature", "return_header"]
+      },
+      {
+        "id": "urlsafe-extra-arguments-not-forwarded",
+        "file": "itsdangerous.py",
+        "keywords": ["urlsafe", "*args", "**kwargs", "extra arg", "forwards"]
+      }
+    ]
+  },
+  {
+    "id": "itsdangerous-unsafe-separator",
+    "repo_name": "itsdangerous",
+    "repo_url": "https://github.com/pallets/itsdangerous.git",
+    "source_commit": "ce5e2cd0afebadb5dd732ee1c151824a0de8b5d4",
+    "mutation_paths": ["itsdangerous.py"],
+    "prompt": "Review this change to signing separator handling. Identify concrete correctness or security regressions in supported separator values.",
+    "gold_findings": [
+      {
+        "id": "separator-can-collide-with-signature-alphabet",
+        "file": "itsdangerous.py",
+        "keywords": ["base64", "alphabet", "unsafe separator", "signature-boundary", "ambigu"]
+      },
+      {
+        "id": "separator-no-longer-normalized-to-bytes",
+        "file": "itsdangerous.py",
+        "keywords": ["want_bytes", "bytestring", "coerce", "bytes", "typeerror"]
+      }
+    ]
+  },
+  {
+    "id": "p-limit-detached-map",
+    "repo_name": "p-limit",
+    "repo_url": "https://github.com/sindresorhus/p-limit.git",
+    "source_commit": "ef37eb2f372d385883d113803c98ba0bf3828ad1",
+    "mutation_paths": ["index.js"],
+    "prompt": "Review this implementation change to the concurrency limiter's map helper. Look for valid API usage that now fails or bypasses the limiter.",
+    "gold_findings": [
+      {
+        "id": "detached-map-loses-receiver",
+        "file": "index.js",
+        "keywords": ["detached", "destructur", "this", "receiver", "map", "generator"]
+      }
+    ]
+  },
+  {
+    "id": "p-limit-async-context",
+    "repo_name": "p-limit",
+    "repo_url": "https://github.com/sindresorhus/p-limit.git",
+    "source_commit": "ad8afe6f46429e726b32fdedf063c553ebcb0196",
+    "mutation_paths": ["index.js"],
+    "prompt": "Review this queue implementation and packaging change for runtime regressions involving asynchronous execution context across queued work.",
+    "gold_findings": [
+      {
+        "id": "queued-work-loses-async-resource-context",
+        "file": "index.js",
+        "keywords": ["async", "context", "asynclocalstorage", "asyncresource", "propagat", "bind"]
+      }
+    ]
+  },
+  {
+    "id": "gson-duplicate-null-map-key",
+    "repo_name": "gson",
+    "repo_url": "https://github.com/google/gson.git",
+    "source_commit": "f4d371d29c04066dbe7fdb31f642831f9c7f40cd",
+    "mutation_paths": ["gson/src/main/java/com/google/gson/internal/bind/MapTypeAdapterFactory.java"],
+    "prompt": "Review this map deserialization change. Identify malformed inputs that are no longer rejected consistently.",
+    "gold_findings": [
+      {
+        "id": "duplicate-key-after-null-not-detected",
+        "file": "gson/src/main/java/com/google/gson/internal/bind/MapTypeAdapterFactory.java",
+        "keywords": ["duplicate", "null", "put", "previous", "containskey", "overwrite"]
+      }
+    ]
+  },
+  {
+    "id": "gson-graph-adapter-builder-reuse",
+    "repo_name": "gson",
+    "repo_url": "https://github.com/google/gson.git",
+    "source_commit": "c395dd1fdf2590c575965208f1b479dd76a6c926",
+    "mutation_paths": ["extras/src/main/java/com/google/gson/graph/GraphAdapterBuilder.java"],
+    "prompt": "Review this graph adapter builder refactor. Focus on custom instance creators, overwriting registrations, and reuse of a builder after registering an adapter.",
+    "gold_findings": [
+      {
+        "id": "default-creator-overwrite-delegates-to-previous-creator",
+        "file": "extras/src/main/java/com/google/gson/graph/GraphAdapterBuilder.java",
+        "keywords": ["previous creator", "default constructor", "constructorconstructor", "overwrite semantics", "delegat"]
+      },
+      {
+        "id": "builder-reuse-mutates-registered-adapter",
+        "file": "extras/src/main/java/com/google/gson/graph/GraphAdapterBuilder.java",
+        "keywords": ["reuse", "snapshot", "defensive copy", "already-created", "previously registered", "live map"]
+      }
+    ]
+  },
+  {
+    "id": "fastapi-frontend-dependency-response-propagation",
+    "repo_name": "fastapi",
+    "repo_url": "https://github.com/fastapi/fastapi.git",
+    "source_commit": "d62354434b2e508fe89024213b220ca8e67dea5e",
+    "mutation_paths": ["fastapi/routing.py"],
+    "complexity_tags": ["caller-sensitive", "framework-lifecycle", "multi-effect"],
+    "prompt": "Review this frontend routing change for regressions in dependency execution and response lifecycle behavior. Trace how dependency results reach the final static response.",
+    "gold_findings": [
+      {
+        "id": "frontend-dependency-response-metadata-lost",
+        "file": "fastapi/routing.py",
+        "keywords": ["header", "cookie", "response metadata", "solved_result", "dependency response"]
+      },
+      {
+        "id": "frontend-dependency-background-tasks-not-run",
+        "file": "fastapi/routing.py",
+        "keywords": ["background", "task", "solved_result", "response.background"]
+      }
+    ]
+  },
+  {
+    "id": "fastapi-validation-alias-pipeline",
+    "repo_name": "fastapi",
+    "repo_url": "https://github.com/fastapi/fastapi.git",
+    "source_commit": "d86c47477e4d91b5e1f07973b3437908558a8b4b",
+    "mutation_paths": [
+      "fastapi/_compat/v2.py",
+      "fastapi/dependencies/utils.py",
+      "fastapi/openapi/utils.py",
+      "fastapi/params.py"
+    ],
+    "complexity_tags": ["cross-module", "public-api", "runtime-schema-consistency"],
+    "prompt": "Review this parameter-model refactor across request extraction and OpenAPI generation. Look for public alias configurations that become inconsistent between runtime validation and the generated contract.",
+    "gold_findings": [
+      {
+        "id": "validation-alias-ignored-during-request-extraction",
+        "file": "fastapi/dependencies/utils.py",
+        "alternate_files": ["fastapi/params.py", "fastapi/_compat/v2.py"],
+        "keywords": ["validation_alias", "validation alias", "request parameter", "body alias", "header alias"]
+      },
+      {
+        "id": "openapi-uses-wrong-parameter-alias",
+        "file": "fastapi/openapi/utils.py",
+        "alternate_files": ["fastapi/_compat/v2.py", "fastapi/params.py"],
+        "keywords": ["openapi", "schema", "parameter name", "validation_alias", "validation alias"]
+      }
+    ]
+  },
+  {
+    "id": "fastapi-include-router-stream-item-type",
+    "repo_name": "fastapi",
+    "repo_url": "https://github.com/fastapi/fastapi.git",
+    "source_commit": "ad03e117c0010a563067740c97cb7ab011cb5174",
+    "mutation_paths": ["fastapi/routing.py"],
+    "complexity_tags": ["state-propagation", "caller-sensitive", "public-api"],
+    "prompt": "Review this route-copying and router-inclusion change for regressions in streaming endpoint metadata. Follow state from the original route through the included route.",
+    "gold_findings": [
+      {
+        "id": "included-router-loses-stream-item-type",
+        "file": "fastapi/routing.py",
+        "keywords": ["stream_item_type", "stream item", "include_router", "included router", "jsonl", "sse"]
+      }
+    ]
+  },
+  {
+    "id": "fastapi-nested-annotated-sequence",
+    "repo_name": "fastapi",
+    "repo_url": "https://github.com/fastapi/fastapi.git",
+    "source_commit": "65e42bd5eca657daf97c6762b9632e7c2cb3317a",
+    "mutation_paths": ["fastapi/_compat/shared.py"],
+    "complexity_tags": ["type-system", "multi-consumer", "runtime-schema-consistency"],
+    "prompt": "Review this type-classification change for regressions involving nested typing wrappers. Check both request parsing and schema behavior for sequence-valued parameters.",
+    "gold_findings": [
+      {
+        "id": "nested-annotated-sequence-misclassified",
+        "file": "fastapi/_compat/shared.py",
+        "keywords": ["annotated", "sequence", "scalar sequence", "query parameter", "get_origin", "unwrap"]
+      }
+    ]
+  },
+  {
+    "id": "spring-petclinic-owner-scoped-pet-uniqueness",
+    "repo_name": "spring-petclinic",
+    "repo_url": "https://github.com/spring-projects/spring-petclinic.git",
+    "source_commit": "e0db9b184e028d41bcb626f3cbf03a942f67e104",
+    "mutation_paths": [
+      "src/main/java/org/springframework/samples/petclinic/owner/PetController.java",
+      "src/main/resources/db/h2/schema.sql",
+      "src/main/resources/db/mysql/schema.sql",
+      "src/main/resources/db/postgres/schema.sql"
+    ],
+    "complexity_tags": ["cross-layer", "database-invariant", "concurrency"],
+    "prompt": "Review this pet creation/update and database schema change. Check whether the same business invariant holds under concurrent requests and across all supported databases, and whether violations reach the user correctly.",
+    "gold_findings": [
+      {
+        "id": "pet-name-uniqueness-not-enforced-atomically",
+        "file": "src/main/resources/db/h2/schema.sql",
+        "alternate_files": [
+          "src/main/resources/db/mysql/schema.sql",
+          "src/main/resources/db/postgres/schema.sql"
+        ],
+        "keywords": ["unique", "duplicate", "owner_id", "lower(name)", "case-insensitive", "concurrent"]
+      },
+      {
+        "id": "duplicate-pet-constraint-not-translated-to-form-error",
+        "file": "src/main/java/org/springframework/samples/petclinic/owner/PetController.java",
+        "keywords": ["saveandflush", "dataintegrityviolation", "duplicate", "constraint", "form error"]
+      }
+    ]
+  },
+  {
+    "id": "spring-petclinic-owner-details-lazy-loading",
+    "repo_name": "spring-petclinic",
+    "repo_url": "https://github.com/spring-projects/spring-petclinic.git",
+    "source_commit": "e765e3ffe16002beb30c6a5c6f06409816259bf4",
+    "mutation_paths": ["src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java"],
+    "complexity_tags": ["framework-lifecycle", "orm", "view-boundary"],
+    "prompt": "Review this owner-details controller change for regressions that appear only when the returned model is rendered. Trace persistence-session lifetime and nested relationship access across the controller/view boundary.",
+    "gold_findings": [
+      {
+        "id": "owner-details-visits-remain-lazy-after-session",
+        "file": "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+        "keywords": ["lazy", "transaction", "transactional", "visits", "initialize", "session", "size()"]
+      }
+    ]
+  }
+]

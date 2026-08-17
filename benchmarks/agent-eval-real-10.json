@@ -115,8 +115,8 @@
     "id": "unsupported-diff-file-crash",
     "prompt": "Review this exception-handling narrowing in change-summary coverage. Include mixed source and documentation commits.",
     "source_commit": "259abc7",
-    "diff": "diff --git a/code_review_ai/changes.py b/code_review_ai/changes.py\n--- a/code_review_ai/changes.py\n+++ b/code_review_ai/changes.py\n@@ -75,7 +75,7 @@ def _diff_coverage(...):\n         path = f\"{repo}/{rel}\"\n         try:\n             parsed_file = parse_file(path, repo)\n-        except (OSError, ValueError):\n+        except OSError:\n             uncovered.append({\"file\": rel, \"hunks\": hunks})\n             continue",
-    "changed_symbols": ["code_review_ai.changes::_diff_coverage"],
+    "diff": "diff --git a/code_review_ai/changes.py b/code_review_ai/changes.py\n--- a/code_review_ai/changes.py\n+++ b/code_review_ai/changes.py\n@@ -75,7 +75,5 @@ def _changed_functions(...):\n         path = f\"{repo}/{rel}\"\n         try:\n             pf = parse_file(path, repo)\n-        except (OSError, ValueError):\n-            # Unsupported files in a mixed source/documentation diff are skipped.\n+        except OSError:\n             continue",
+    "changed_symbols": ["code_review_ai.changes::_changed_functions"],
     "gold_findings": [
       {
         "id": "unsupported-extension-value-error",

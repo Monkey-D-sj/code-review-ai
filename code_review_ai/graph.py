@@ -4,6 +4,17 @@ VALID_KINDS = ("call", "contains", "import", "extends", "implements", "all")
 VALID_DIRECTIONS = ("in", "out", "both")
 
 
+_SIGNATURE_LIMIT = 160
+
+
+def _cap_signature(value: str | None) -> str:
+    """Truncate long signatures so graph briefs stay compact (signatures are
+    the single largest field per neighbor)."""
+    text = value or ""
+    return text if len(text) <= _SIGNATURE_LIMIT \
+        else text[:_SIGNATURE_LIMIT] + "…"
+
+
 def _node_brief(conn: sqlite3.Connection, qualified_name: str) -> dict:
     row = conn.execute(
         "SELECT qualified_name,kind,file_path,start_line,signature "
@@ -14,7 +25,7 @@ def _node_brief(conn: sqlite3.Connection, qualified_name: str) -> dict:
                 "line": 0, "signature": ""}
     return {"qname": row["qualified_name"], "kind": row["kind"],
             "file": row["file_path"], "line": row["start_line"],
-            "signature": row["signature"]}
+            "signature": _cap_signature(row["signature"])}
 
 
 def _dedup(items: list[dict]) -> list[dict]:
@@ -41,7 +52,7 @@ def _neighbors(conn: sqlite3.Connection, select_column: str, where_column: str,
 
 def query_graph(conn: sqlite3.Connection, qualified_name: str,
                 edge_kind: str = "call", direction: str = "both",
-                max_per_dir: int = 50) -> dict:
+                max_per_dir: int = 20) -> dict:
     """Neighbors of one symbol via resolved edges: `in` = nodes pointing to it,
     `out` = nodes it points to. Raises ValueError on invalid edge_kind/direction."""
     if edge_kind not in VALID_KINDS:

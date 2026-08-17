@@ -63,15 +63,10 @@ def _git_diff(base: str, files: list[str] | None,
         if h and cur_file:
             start = int(h.group(1))
             count = int(h.group(2)) if h.group(2) else 1
-            if count == 0:
-                # Pure-removal hunk: the +side (working tree) has no lines at
-                # the deletion site, so a count-0 range would overlap nothing.
-                # Synthesize a one-line point at `start` — the surviving line
-                # the deletion lands on — so _diff_coverage can still attribute
-                # it to the containing function/method (e.g. a removed parameter
-                # or a deleted try/except block).
-                count = 1
-            ranges[cur_file].append((start, count))
+            # A deletion-only hunk has a zero-length new side (for example
+            # ``+67,0``). Keep a one-line anchor at that position so removing
+            # lines inside a surviving function still resolves to that symbol.
+            ranges[cur_file].append((max(start, 1), max(count, 1)))
     return ranges, deleted
 
 
@@ -212,6 +207,7 @@ def _delete_change(config: Config, conn, deleted_files: set[str],
             "file_deleted": bool(row["file_deleted"]),
             "start_line": row["start_line"], "end_line": row["end_line"],
             "signature": row["signature"], "is_test": row["is_test"],
+            "risk": 90,
             "upstream": [{"source": u["source"], "kind": u["kind"],
                           "file": _relative_to_repo(config, u["file"])}
                          for u in json.loads(row["upstream_json"] or "[]")],
@@ -246,11 +242,104 @@ def detect_changed_symbols(config: Config,
         config, diff, kinds=("function", "method"))]
 
 
+def assess_symbol_risk(conn, symbol: str, deleted: bool = False) -> int:
+    """0-100 blast-radius score for one changed symbol (spec 2026-08-09).
+
+    deleted -> 90; any cross-module resolved caller -> min(100, 60+10*n);
+    same-module callers only -> min(59, 30+5*n); resolved leaf -> 10;
+    unresolved (not in graph) -> 50. Cross-module means the caller node's
+    file_path differs from the target's (module == file in this graph).
+    """
+    if deleted:
+        return 90
+    target = conn.execute(
+        "SELECT file_path FROM nodes WHERE qualified_name=?", (symbol,)).fetchone()
+    if target is None:
+        return 50
+    if target["file_path"] is None:
+        return 50
+    target_file = target["file_path"]
+    incoming = conn.execute(
+        "SELECT DISTINCT e.source, n.file_path FROM edges e "
+        "JOIN nodes n ON n.qualified_name=e.source "
+        "WHERE e.target=? AND e.kind='call' AND e.resolution='resolved' "
+        "AND n.is_test=0",
+        (symbol,)).fetchall()
+    cross = same = 0
+    for edge in incoming:
+        source_file = edge["file_path"]
+        if source_file is None:
+            continue
+        if source_file != target_file:
+            cross += 1
+        else:
+            same += 1
+    if cross:
+        return min(100, 60 + 10 * cross)
+    if same:
+        return min(59, 30 + 5 * same)
+    return 10
+
+
 def _relative_to_repo(config: Config, file_path: str) -> str:
     try:
         return Path(file_path).resolve().relative_to(Path(config.repo_path).resolve()).as_posix()
     except ValueError:
         return file_path.replace("\\", "/")
+
+
+def _diff_text_for_file(config: Config, base: str, rel: str) -> str:
+    """Raw unified diff of one file against base, or '' on git failure."""
+    out = subprocess.run(["git", "diff", "--unified=0", base, "--", rel],
+                         capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", cwd=config.repo_path)
+    if out.returncode != 0:
+        return ""
+    return out.stdout
+
+
+def _unified_hunk_blocks(text: str) -> list[tuple[int, int, str]]:
+    """[(new_start, new_count, block)] for each @@ -a,b +c,d @@ hunk in a
+    unified diff. The new-side range locates the hunk in the current file."""
+    blocks: list[tuple[int, int, str]] = []
+    current: list[str] = []
+    new_start = new_count = 0
+    for line in text.splitlines():
+        match = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
+        if match:
+            if current:
+                blocks.append((new_start, new_count, "\n".join(current)))
+            new_start = int(match.group(2))
+            new_count = int(match.group(3)) if match.group(3) else 1
+            current = [line]
+        elif current:
+            current.append(line)
+    if current:
+        blocks.append((new_start, new_count, "\n".join(current)))
+    return blocks
+
+
+def _slice_diff_hunks(text: str, start_line: int, end_line: int) -> str:
+    """Diff hunk blocks whose new-side range overlaps [start_line, end_line]."""
+    blocks = [block for start, count, block in _unified_hunk_blocks(text)
+              if not (end_line < start or start_line > start + count - 1)]
+    return "\n".join(blocks)
+
+
+def _attach_change_context(config: Config, base: str,
+                           functions: list[dict]) -> None:
+    """Attach each changed function's unified diff to change-summary records
+    when config.summary_source == "diff". Mutates records. delete_change /
+    uncovered_changes are left untouched (deleted functions have no current
+    diff worth inlining; their signature + upstream already carry the
+    evidence)."""
+    if config.summary_source != "diff":
+        return
+    diffs = {rel: _diff_text_for_file(config, base, rel)
+             for rel in {record["file"] for record in functions}}
+    for record in functions:
+        record["diff"] = _slice_diff_hunks(diffs.get(record["file"], ""),
+                                           record["start_line"], record["end_line"])
 
 
 def _symbols_summary(config: Config, conn, symbols: list[str]) -> dict:
@@ -263,12 +352,14 @@ def _symbols_summary(config: Config, conn, symbols: list[str]) -> dict:
         ).fetchone()
         if row is None:
             records.append({"qname": symbol, "kind": None, "file": None,
-                            "start_line": 0, "end_line": 0})
+                            "start_line": 0, "end_line": 0,
+                            "risk": assess_symbol_risk(conn, symbol)})
             continue
         rel = _relative_to_repo(config, row["file_path"])
         files.add(rel)
         records.append({"qname": symbol, "kind": row["kind"], "file": rel,
-                        "start_line": row["start_line"], "end_line": row["end_line"]})
+                        "start_line": row["start_line"], "end_line": row["end_line"],
+                        "risk": assess_symbol_risk(conn, symbol)})
     return {"summary": {"files_changed": len(files), "lines_added": 0,
                         "lines_removed": 0, "changed_functions": len(symbols),
                         "uncovered_changes": 0, "delete_change": 0},
@@ -290,6 +381,13 @@ def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
     one-hop upstream) and are suppressed from `uncovered_changes`; deletions
     without a tombstone fall back to uncovered. Returns {"summary",
     "changed_functions", "uncovered_changes", "delete_change"}.
+
+    On the diff path, each changed function record also gets the actual change
+    per config.summary_source: "diff" (default) attaches the function's
+    unified diff hunks so the reviewer sees what changed without a whole-file
+    Read; "none" keeps the metadata-only shape. Full function bodies stay a
+    Read — the graph returns chains, not content. Deleted functions have no
+    current diff to inline, so delete_change records are left untouched.
     Raises RuntimeError if the git diff fails (e.g. no commits at all)."""
     if symbols is not None:
         return _symbols_summary(config, conn, symbols)
@@ -299,6 +397,9 @@ def build_change_summary(config: Config, conn, symbols: list[str] | None = None,
     delete_change, covered_files = _delete_change(config, conn, deleted, numstat)
     functions, uncovered = _diff_coverage(config, diff, numstat, deleted,
                                           covered_files=covered_files)
+    for record in functions:
+        record["risk"] = assess_symbol_risk(conn, record["qname"])
+    _attach_change_context(config, base, functions)
     return {"summary": {"files_changed": len(numstat),
                         "lines_added": sum(added for added, _ in numstat.values()),
                         "lines_removed": sum(removed for _, removed in numstat.values()),

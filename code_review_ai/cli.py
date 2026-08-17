@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from code_review_ai.changes import build_change_summary, detect_changed_symbols
 from code_review_ai.benchmark import load_cases, run_benchmark
@@ -158,7 +159,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="concurrent agent processes (default: 1)")
     ae.add_argument("--timeout", type=int, default=300)
     ae.add_argument("--runs-dir", default=".code-review-ai/agent-eval")
+    ae.add_argument("--repos-dir", default=".code-review-ai/external-repos",
+                    help="cache for repositories referenced by canonical cases")
     ae.add_argument("-o", "--out")
+    rc = sub.add_parser("agent-eval-route-check")
+    _add_common(rc)
+    rc.add_argument("--cases", required=True)
+    rc.add_argument("--runs-dir", required=True)
+    rc.add_argument("--repos-dir", default=".code-review-ai/external-repos")
+    rc.add_argument("-o", "--out")
     aa = sub.add_parser("agent-eval-analyze")
     aa.add_argument("--report", required=True)
     aa.add_argument("-o", "--out")
@@ -259,6 +268,22 @@ def main(argv: list[str] | None = None) -> int:
     cfg.db_path = args.db
     conn = _conn(args.db)
 
+    if args.cmd == "agent-eval-route-check":
+        from code_review_ai.agent_eval_analysis import route_check_analysis
+        try:
+            cases = load_agent_cases(args.cases)
+            if any(case.source_commit is None for case in cases):
+                rebuild(cfg, conn)
+            payload = route_check_analysis(
+                conn, cases, args.runs_dir, config=cfg,
+                work_dir=str(Path(args.runs_dir) / ".route-check-snapshots"),
+                repos_dir=args.repos_dir)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_json(payload, args.out)
+        return 0
+
     if args.cmd == "rebuild":
         stats = rebuild(cfg, conn)
         print(json.dumps({"nodes": stats.node_count, "edges": stats.edge_count,
@@ -346,7 +371,8 @@ def main(argv: list[str] | None = None) -> int:
             cases = select_agent_cases(load_agent_cases(args.cases), args.case_ids)
             if args.dry_run:
                 payload = preflight_agent_eval(cfg, conn, cases,
-                                               modes=tuple(args.modes))
+                                               modes=tuple(args.modes),
+                                               repos_dir=args.repos_dir)
             else:
                 if not args.agent_command:
                     raise ValueError("--agent-command is required unless --dry-run")
@@ -355,6 +381,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.runs_dir, modes=tuple(args.modes),
                     repetitions=args.repetitions,
                     timeout_seconds=args.timeout, workers=args.workers,
+                    repos_dir=args.repos_dir,
                 )
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"error: {exc}", file=sys.stderr)

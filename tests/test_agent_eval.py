@@ -1,13 +1,16 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from conftest import FIXTURES, Q
-from code_review_ai.agent_eval import (AgentRun, load_agent_cases,
+from code_review_ai.agent_eval import (AgentRun, GoldFinding, load_agent_cases,
                                        parse_agent_command, preflight_agent_eval,
                                        run_agent_eval,
-                                       select_agent_cases, _context_files)
+                                       select_agent_cases, _context_files,
+                                       _agent_prompt, _mode_metrics, _score)
+from code_review_ai.full_agent_eval import load_full_agent_cases
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 
@@ -59,6 +62,32 @@ def test_real_smoke_manifest_has_ten_provenanced_cases():
     assert len(cases) == 10
     assert len({case.case_id for case in cases}) == 10
     assert all(case.source_commit for case in cases)
+
+
+def test_canonical_real_repo_manifest_is_shared_by_both_evaluators():
+    manifest = (Path(__file__).parents[1] / "benchmarks" /
+                "agentic-eval-real-repos.json")
+    controlled = load_agent_cases(str(manifest))
+    full = load_full_agent_cases(str(manifest))
+
+    assert len(controlled) == len(full) == 12
+    assert [case.case_id for case in controlled] == [case.case_id for case in full]
+    for controlled_case, full_case in zip(controlled, full):
+        assert controlled_case.repo_name == full_case.repo_name
+        assert controlled_case.repo_url == full_case.repo_url
+        assert controlled_case.source_commit == full_case.source_commit
+        assert controlled_case.mutation_paths == full_case.mutation_paths
+        assert controlled_case.gold_findings == full_case.gold_findings
+        assert controlled_case.complexity_tags == full_case.complexity_tags
+        assert controlled_case.changed_symbols == ()
+        assert controlled_case.diff == ""
+
+
+def test_controlled_prompt_uses_shared_review_policy():
+    prompt = _agent_prompt("diff_only", "TASK\nreview\n\nDIFF\npatch")
+    assert "For every changed symbol" in prompt
+    assert "inspect upstream callers first" in prompt
+    assert "Inspect downstream callees" in prompt
 
 
 def test_select_agent_cases_and_reject_unknown(tmp_path):
@@ -180,3 +209,104 @@ def test_context_files_does_not_count_json_as_javascript(tmp_path):
     config = _config(tmp_path)
     context = '"manifest": "cases.json", "source": "src/app.js"'
     assert _context_files(config, context) == ["src/app.js"]
+
+
+def test_score_uses_maximum_matching_for_related_golds():
+    golds = (
+        GoldFinding("general", "a.py", None, None, ("serializer",)),
+        GoldFinding("specific", "a.py", None, None, ("urlsafe",)),
+    )
+    predictions = [
+        {"file": "a.py", "title": "URLSafe serializer forwarding",
+         "description": "urlsafe serializer"},
+        {"file": "a.py", "title": "Serializer override removed",
+         "description": "serializer"},
+    ]
+    score = _score(predictions, golds)
+    assert score["f1"] == 1.0
+    assert {match["gold_id"] for match in score["matched_findings"]} == {
+        "general", "specific"}
+
+
+def test_score_accepts_an_alternate_root_cause_file():
+    golds = (GoldFinding(
+        "cross-layer", "src/schema.sql", None, None, ("unique",),
+        ("src/controller.java",)),)
+    score = _score([{
+        "file": "src/controller.java", "title": "Missing unique handling",
+        "description": "duplicate names are not rejected",
+    }], golds)
+    assert score["f1"] == 1.0
+
+
+def test_agent_eval_builds_context_from_mutated_source_commit(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email",
+                    "eval@example.com"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Eval"],
+                   check=True)
+    source = repo / "app.py"
+    filler = "".join(f"# filler {index}\n" for index in range(20))
+    source.write_text(
+        'def target():\n    return "broken"\n\n' + filler +
+        '\ndef other():\n    return "other-broken"\n', encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "app.py"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "bug"],
+                   check=True)
+    source.write_text(
+        'def target():\n    return "fixed"\n\n' + filler +
+        '\ndef other():\n    return "other-fixed"\n', encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "app.py"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "fix"],
+                   check=True)
+    commit = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+        capture_output=True, text=True).stdout.strip()
+    record = _case_record()
+    record.update({
+        "source_commit": commit,
+        "changed_symbols": ["app::target"],
+        "diff": ("diff --git a/app.py b/app.py\n"
+                 "--- a/app.py\n+++ b/app.py\n"
+                 "@@ -1,2 +1,2 @@\n def target():\n"
+                 "-    return \"fixed\"\n+    return \"broken\""),
+    })
+    config = load_config(str(repo))
+    config.repo_path = str(repo)
+    config.db_path = str(tmp_path / "index.db")
+    config.community_detection = False
+    conn = connect(config.db_path)
+    init_schema(conn)
+    observed = {}
+
+    def fake_executor(command, prompt, cwd, environment, timeout):
+        observed["cwd"] = cwd
+        observed["source"] = (Path(cwd) / "app.py").read_text(encoding="utf-8")
+        observed["prompt"] = prompt
+        return AgentRun(0, json.dumps({"findings": [], "files_read": [],
+                                       "tool_calls": []}), "", 1.0)
+
+    run_agent_eval(
+        config, conn, load_agent_cases(str(_manifest(tmp_path, [record]))),
+        ["fake"], str(tmp_path / "runs"), modes=("hybrid_agent",),
+        executor=fake_executor)
+
+    assert observed["cwd"] != str(repo)
+    assert 'return "broken"' in observed["source"]
+    assert 'return "other-fixed"' in observed["source"]
+    assert 'return "other-broken"' not in observed["source"]
+    assert 'return "broken"' in observed["prompt"]
+    assert 'return "fixed"' in source.read_text(encoding="utf-8")
+    assert not Path(observed["cwd"]).exists()
+
+
+def test_mode_metrics_accepts_reports_without_usage():
+    metrics = _mode_metrics([{
+        "success": True, "precision": 0.0, "recall": 0.0, "f1": 0.0,
+        "elapsed_ms": 1.0, "files_read": [], "context_files": [],
+        "tool_calls": [],
+    }])
+    assert metrics["mean_input_tokens"] == 0.0
+    assert metrics["total_cost_usd"] == 0.0

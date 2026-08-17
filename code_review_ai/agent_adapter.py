@@ -41,6 +41,8 @@ MCP_TOOL_NAMES = (
     "get_symbol_detail", "list_entry_points", "get_communities",
     "get_community",
 )
+ONLINE_MCP_TOOL_NAMES = tuple(
+    name for name in MCP_TOOL_NAMES if name != "rebuild_index")
 
 
 def run_claude(prompt: str, model: str | None = None,
@@ -53,8 +55,7 @@ def run_claude(prompt: str, model: str | None = None,
                "--output-format", "stream-json" if streaming else "json",
                "--json-schema", json.dumps(FINDING_SCHEMA)]
     if streaming:
-        command.extend(["--verbose", "--disable-slash-commands",
-                        "--setting-sources", "user",
+        command.extend(["--verbose", "--bare", "--disable-slash-commands",
                         "--permission-mode", "dontAsk",
                         "--tools", "Read,Glob,Grep"])
         allowed = ["Read", "Glob", "Grep"]
@@ -62,7 +63,7 @@ def run_claude(prompt: str, model: str | None = None,
             command.extend(["--strict-mcp-config", "--mcp-config",
                             json.dumps(_mcp_config())])
             allowed.extend(f"mcp__code-review-ai__{name}"
-                           for name in MCP_TOOL_NAMES)
+                           for name in ONLINE_MCP_TOOL_NAMES)
         else:
             command.extend(["--strict-mcp-config", "--mcp-config",
                             json.dumps({"mcpServers": {}})])
@@ -97,6 +98,8 @@ def _mcp_config() -> dict:
         "CRAI_DB_PATH": str(Path(db_path).resolve()),
         "CRAI_DIFF_BASE": "HEAD",
         "CRAI_COMMUNITY_DETECTION": "false",
+        "CRAI_SKIP_STARTUP_SYNC": "true",
+        "CRAI_DISABLE_WATCHER": "true",
     }
     return {"mcpServers": {"code-review-ai": {
         "type": "stdio", "command": sys.executable,
@@ -118,6 +121,13 @@ def normalize_claude_stream(stdout: str) -> dict:
     if result_event is None:
         raise ValueError("Claude stream has no result event")
     payload = normalize_claude_result(result_event)
+    available_tools = set()
+    for event in events:
+        if event.get("type") == "system" and event.get("subtype") == "init":
+            tools = event.get("tools")
+            if isinstance(tools, list):
+                available_tools.update(tool for tool in tools
+                                       if isinstance(tool, str))
     calls: list[str] = []
     files: list[str] = []
     for event in events:
@@ -126,6 +136,8 @@ def normalize_claude_stream(stdout: str) -> dict:
             if not isinstance(name, str):
                 continue
             if name == "StructuredOutput":
+                continue
+            if available_tools and name not in available_tools:
                 continue
             calls.append(name)
             tool_input = block.get("input")

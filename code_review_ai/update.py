@@ -13,7 +13,8 @@ from code_review_ai.changes import current_head
 from code_review_ai.community import WeightMode, build_communities, inter_community_edges
 from code_review_ai.config import config_hash as _config_hash
 from code_review_ai.db import INDEX_VERSION, transaction
-from code_review_ai.flow_builder import EdgeRow, NodeRow, build_flows
+from code_review_ai.flow_builder import (EdgeRow, NodeRow, build_flows,
+                                         flow_input_hash)
 from code_review_ai.indexer import rebuild, recompute_degrees, _stamp_built_at
 from code_review_ai.parser import (SOURCE_GLOBS, filter_excluded,
                                    is_test_node, list_source_files, parse_file)
@@ -186,16 +187,31 @@ def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
         conn, repo, parsed, changed_set, deleted_set, config)
     _insert_tombstones(conn, tombstone_rows)
     touch = [os.path.join(repo, rel) for rel in changed_set | deleted_set]
+    parsed_qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
+    survivors: dict[str, int] = {}   # qname -> node id kept across the re-parse
     removed_ids: list[int] = []
     for abs_path in touch:
-        path_ids = [r["id"] for r in conn.execute(
-            "SELECT id FROM nodes WHERE file_path=?", (abs_path,))]
-        removed_ids += path_ids
-        deindex_fts(conn, path_ids)   # 必须在 DELETE nodes 之前
+        # Edges are fully replaced below (re-resolved from the fresh parse).
         conn.execute("DELETE FROM edges WHERE file_path=?", (abs_path,))
-        conn.execute("DELETE FROM nodes WHERE file_path=?", (abs_path,))
+        rows = conn.execute(
+            "SELECT id, qualified_name FROM nodes WHERE file_path=?",
+            (abs_path,)).fetchall()
+        for row in rows:
+            if row["qualified_name"] in parsed_qnames:
+                # Same qname re-parsed: keep the node id so flow/community
+                # memberships survive a body-only edit.
+                survivors[row["qualified_name"]] = row["id"]
+                continue
+            removed_ids.append(row["id"])
     if removed_ids:
+        # 单条语句删除全部 removed nodes —— FK 检查在语句结束时进行，
+        # 父子节点同批删除不会触发 parent_id 外键冲突。
+        deindex_fts(conn, removed_ids)   # 必须在 DELETE nodes 之前
+        placeholders = ",".join("?" for _ in removed_ids)
+        conn.execute(
+            f"DELETE FROM nodes WHERE id IN ({placeholders})", removed_ids)
         _delete_memberships(conn, removed_ids)
+    _update_survivors(conn, parsed, survivors, config)
     remaining = {r["qualified_name"]
                  for r in conn.execute("SELECT qualified_name FROM nodes")}
     new_qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
@@ -205,6 +221,30 @@ def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
     _insert_edges(conn, edges)
     recompute_degrees(conn)
     return node_count, len(edges)
+
+
+def _update_survivors(conn, parsed, survivors: dict[str, int], config) -> None:
+    """Refresh surviving nodes' metadata in place, keeping their ids (and thus
+    flow/community memberships) stable across a re-parse. FTS is external-content
+    on `nodes`, so keeping the rowid keeps the index fresh."""
+    updates: list[tuple] = []
+    for pf in parsed:
+        for n in pf.nodes:
+            node_id = survivors.get(n.qualified_name)
+            if node_id is None:
+                continue
+            updates.append((
+                n.kind, n.language, n.file_path, n.start_line, n.end_line,
+                n.signature,
+                1 if is_test_node(n.file_path, n.qualified_name,
+                                  config.test_globs, config.test_names,
+                                  config.repo_path) else 0,
+                json.dumps(n.decorators), node_id))
+    if updates:
+        conn.executemany(
+            "UPDATE nodes SET kind=?, language=?, file_path=?, start_line=?, "
+            "end_line=?, signature=?, is_test=?, decorators=? WHERE id=?",
+            updates)
 
 
 def _insert_nodes(conn, parsed, config, skip_qnames=frozenset()) -> int:
@@ -282,10 +322,23 @@ def needs_flows_update(config, conn, head=None) -> bool:
 
 
 def update_flows(config, conn) -> int:
-    """Rebuild flows from the DB's nodes+edges. No-op if HEAD is unchanged
-    (flows represent the last committed state)."""
+    """Rebuild flows from the DB's nodes+edges. No-op when HEAD is unchanged,
+    or when HEAD moved but the flow input (function/method nodes + resolved
+    call edges) is structurally unchanged — e.g. a body-only edit or a
+    non-source commit. The flows_as_of_head marker advances either way so the
+    next sync no-ops."""
     head = current_head(config)
     if not needs_flows_update(config, conn, head):
+        return 0
+    input_hash = flow_input_hash(conn)
+    stored = conn.execute(
+        "SELECT value FROM build_meta WHERE key='flows_input_hash'").fetchone()
+    if stored is not None and stored["value"] == input_hash:
+        # HEAD moved but the call graph didn't structurally change: skip the
+        # rebuild and just advance the marker.
+        conn.execute(
+            "INSERT OR REPLACE INTO build_meta(key,value) "
+            "VALUES('flows_as_of_head',?)", (head or "",))
         return 0
     nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"], r["kind"])
              for r in conn.execute(
@@ -315,13 +368,24 @@ def update_flows(config, conn) -> int:
         conn.execute(
             "INSERT OR REPLACE INTO build_meta(key,value) "
             "VALUES('flows_as_of_head',?)", (head or "",))
+        conn.execute(
+            "INSERT OR REPLACE INTO build_meta(key,value) "
+            "VALUES('flows_input_hash',?)", (input_hash,))
     return len(flows)
 
 
 def update_communities(config, conn) -> int:
     """Rebuild communities from the DB's structural (non-call) resolved edges.
-    Opt-in via config.community_detection; degrades gracefully if libs missing."""
+    Opt-in via config.community_detection; degrades gracefully if libs missing.
+    No-op when communities_as_of_head already matches HEAD — a full rebuild
+    stamps it when communities were actually produced."""
     if not config.community_detection:
+        return 0
+    head = current_head(config)
+    marker = conn.execute(
+        "SELECT value FROM build_meta "
+        "WHERE key='communities_as_of_head'").fetchone()
+    if marker is not None and marker["value"] == head:
         return 0
     nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"], r["kind"])
              for r in conn.execute(
@@ -362,6 +426,10 @@ def update_communities(config, conn) -> int:
                     "INSERT INTO community_edges(community_id_a,community_id_b,"
                     "weight) VALUES(?,?,?)",
                     [(a, b, w) for (a, b), w in comm_edges.items()])
+        if communities:
+            conn.execute(
+                "INSERT OR REPLACE INTO build_meta(key,value) "
+                "VALUES('communities_as_of_head',?)", (head or "",))
     return len(communities)
 
 

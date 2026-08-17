@@ -9,19 +9,36 @@ import shlex
 import sqlite3
 import subprocess
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
-from code_review_ai.config import Config
+from code_review_ai.changes import detect_changed_symbols
+from code_review_ai.config import Config, load_config
+from code_review_ai.db import connect, init_schema
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
 from code_review_ai.parser import SOURCE_GLOBS, filter_excluded, list_source_files
 
 MODES = ("diff_only", "search_baseline", "graph_agent", "hybrid_agent")
 HYBRID_MAX_CHARS = 12_000
-MCP_TOOL_PREFIX = "mcp__code-review-ai__"
+SHARED_REVIEW_POLICY = (
+    "Apply this review policy regardless of which context tools are available. "
+    "For every changed symbol, first inspect the diff and its local code, then "
+    "decide whether the change is self-contained. Treat comment, formatting, "
+    "rename-only, and function-local implementation changes as self-contained "
+    "only when they do not alter a public signature, return type, exception "
+    "behavior, externally observed semantics, or cross-module calls. For every "
+    "non-self-contained change, inspect upstream callers first. Inspect "
+    "downstream callees when arguments, calls, or consumed return values change. "
+    "Also inspect relevant tests, configuration, routing, dependency injection, "
+    "and public API boundaries when applicable. Use the available context to "
+    "collect only the evidence needed for this process, and do not re-read "
+    "evidence already available to you. "
+)
+_SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 @dataclass(frozen=True)
@@ -31,6 +48,7 @@ class GoldFinding:
     line_start: int | None
     line_end: int | None
     keywords: tuple[str, ...]
+    alternate_files: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -41,6 +59,10 @@ class AgentEvalCase:
     changed_symbols: tuple[str, ...]
     gold_findings: tuple[GoldFinding, ...]
     source_commit: str | None
+    repo_name: str | None = None
+    repo_url: str | None = None
+    mutation_paths: tuple[str, ...] = ()
+    complexity_tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -49,6 +71,16 @@ class AgentRun:
     stdout: str
     stderr: str
     elapsed_ms: float
+
+
+@dataclass
+class _CaseSnapshot:
+    config: Config
+    conn: sqlite3.Connection
+    source_repo: Path
+    worktree: Path
+    diff: str
+    changed_symbols: tuple[str, ...]
 
 
 AgentExecutor = Callable[[list[str], str, str, dict[str, str], int], AgentRun]
@@ -97,8 +129,33 @@ def _parse_case(record: object, position: int) -> AgentEvalCase:
     if source_commit is not None and (not isinstance(source_commit, str)
                                       or not source_commit):
         raise ValueError(f"case {case_id} has invalid source_commit")
-    return AgentEvalCase(case_id, prompt, diff, tuple(symbols), findings,
-                         source_commit)
+    repo_name = record.get("repo_name")
+    repo_url = record.get("repo_url")
+    mutation_paths = record.get("mutation_paths", [])
+    complexity_tags = record.get("complexity_tags", [])
+    if not isinstance(complexity_tags, list) or not all(
+            isinstance(tag, str) and tag for tag in complexity_tags):
+        raise ValueError(f"case {case_id} has invalid complexity_tags")
+    external_fields = (repo_name, repo_url, mutation_paths)
+    is_external = any(value not in (None, []) for value in external_fields)
+    if is_external:
+        valid_paths = isinstance(mutation_paths, list) and mutation_paths and all(
+            isinstance(path, str) and path and not Path(path).is_absolute()
+            and ".." not in Path(path).parts for path in mutation_paths)
+        if not isinstance(repo_name, str) or not _SAFE_NAME.match(repo_name):
+            raise ValueError(f"case {case_id} has invalid repo_name")
+        if not isinstance(repo_url, str) or not repo_url.startswith("https://"):
+            raise ValueError(f"case {case_id} requires an HTTPS repo_url")
+        if source_commit is None:
+            raise ValueError(f"case {case_id} requires source_commit")
+        if not valid_paths:
+            raise ValueError(f"case {case_id} has invalid mutation_paths")
+    return AgentEvalCase(
+        case_id, prompt, diff, tuple(symbols), findings, source_commit,
+        repo_name if is_external else None, repo_url if is_external else None,
+        tuple(mutation_paths) if is_external else (),
+        tuple(complexity_tags),
+    )
 
 
 def _parse_gold(record: object, case_id: str) -> GoldFinding:
@@ -109,19 +166,24 @@ def _parse_gold(record: object, case_id: str) -> GoldFinding:
     line_start = record.get("line_start")
     line_end = record.get("line_end", line_start)
     keywords = record.get("keywords", [])
+    alternate_files = record.get("alternate_files", [])
     valid_lines = ((line_start is None and line_end is None) or
                    (isinstance(line_start, int) and isinstance(line_end, int)
                     and 1 <= line_start <= line_end))
     valid_keywords = isinstance(keywords, list) and all(
         isinstance(keyword, str) and keyword for keyword in keywords)
+    valid_alternates = isinstance(alternate_files, list) and all(
+        isinstance(path, str) and path and not Path(path).is_absolute()
+        and ".." not in Path(path).parts for path in alternate_files)
     if not isinstance(finding_id, str) or not finding_id:
         raise ValueError(f"case {case_id} gold finding requires id")
     if not isinstance(file_path, str) or not file_path or not valid_lines:
         raise ValueError(f"case {case_id} gold finding has invalid file/lines")
-    if not valid_keywords:
+    if not valid_keywords or not valid_alternates:
         raise ValueError(f"case {case_id} gold finding has invalid keywords")
     return GoldFinding(finding_id, _normalize(file_path), line_start, line_end,
-                       tuple(keyword.lower() for keyword in keywords))
+                       tuple(keyword.lower() for keyword in keywords),
+                       tuple(_normalize(path) for path in alternate_files))
 
 
 def run_agent_eval(config: Config, conn: sqlite3.Connection,
@@ -129,23 +191,45 @@ def run_agent_eval(config: Config, conn: sqlite3.Connection,
                    output_dir: str, modes: tuple[str, ...] = MODES,
                    repetitions: int = 1, timeout_seconds: int = 300,
                    workers: int = 1,
+                   repos_dir: str = ".code-review-ai/external-repos",
                    executor: AgentExecutor | None = None) -> dict:
     """Run every case/mode/repetition and return a machine-readable report."""
     _validate_run(cases, command, modes, repetitions, timeout_seconds, workers)
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    rebuild(config, conn)
     execute = executor or _execute_agent
     jobs = []
-    for case in cases:
-        contexts = _case_contexts(config, conn, case)
-        for mode in modes:
-            for repetition in range(1, repetitions + 1):
-                jobs.append((case, mode, repetition, contexts[mode]))
-    results = _execute_jobs(config, jobs, command, output_dir,
-                            timeout_seconds, workers, execute)
+    snapshots: list[_CaseSnapshot] = []
+    try:
+        if any(case.source_commit is None for case in cases):
+            rebuild(config, conn)
+        for case in cases:
+            case_config, case_conn = config, conn
+            context_case = case
+            if case.source_commit is not None:
+                snapshot = _create_case_snapshot(
+                    config, case, Path(output_dir) / ".case-snapshots",
+                    repos_dir=repos_dir)
+                snapshots.append(snapshot)
+                case_config, case_conn = snapshot.config, snapshot.conn
+                context_case = replace(
+                    case, diff=snapshot.diff,
+                    changed_symbols=snapshot.changed_symbols)
+            contexts = _case_contexts(case_config, case_conn, context_case)
+            for mode in modes:
+                for repetition in range(1, repetitions + 1):
+                    jobs.append((context_case, mode, repetition, contexts[mode],
+                                  case_config))
+        results = _execute_jobs(jobs, command, output_dir, timeout_seconds,
+                                workers, execute)
+    finally:
+        for snapshot in reversed(snapshots):
+            _remove_case_snapshot(snapshot)
     return {
         "schema_version": 1,
-        "repository": str(Path(config.repo_path).resolve()),
+        "repository": str(Path(config.repo_path).resolve())
+        if not any(case.repo_url for case in cases) else None,
+        "repositories": sorted({case.repo_name for case in cases
+                                if case.repo_name}),
         "command": command,
         "modes": list(modes),
         "repetitions": repetitions,
@@ -157,27 +241,48 @@ def run_agent_eval(config: Config, conn: sqlite3.Connection,
 
 def preflight_agent_eval(config: Config, conn: sqlite3.Connection,
                          cases: list[AgentEvalCase],
-                         modes: tuple[str, ...] = MODES) -> dict:
+                         modes: tuple[str, ...] = MODES,
+                         repos_dir: str = ".code-review-ai/external-repos") -> dict:
     """Build contexts and validate symbol/budget coverage without an agent call."""
     _validate_run(cases, ["preflight"], modes, 1, 1, 1)
-    rebuild(config, conn)
     results: list[dict] = []
-    for case in cases:
-        contexts = _case_contexts(config, conn, case)
-        found_symbols = _found_symbols(conn, case.changed_symbols)
-        results.append({
-            "case_id": case.case_id, "source_commit": case.source_commit,
-            "changed_symbols": list(case.changed_symbols),
-            "found_symbols": found_symbols,
-            "symbol_found_rate": round(
-                len(found_symbols) / len(case.changed_symbols), 4)
-            if case.changed_symbols else 0.0,
-            "gold_findings": len(case.gold_findings),
-            "contexts": {mode: {
-                "characters": len(contexts[mode]),
-                "files": _context_files(config, contexts[mode]),
-            } for mode in modes},
-        })
+    snapshots: list[_CaseSnapshot] = []
+    try:
+        if any(case.source_commit is None for case in cases):
+            rebuild(config, conn)
+        for case in cases:
+            case_config, case_conn = config, conn
+            context_case = case
+            if case.source_commit is not None:
+                snapshot = _create_case_snapshot(
+                    config, case, Path(config.db_path).resolve().parent /
+                    ".agent-eval-snapshots", repos_dir=repos_dir)
+                snapshots.append(snapshot)
+                case_config, case_conn = snapshot.config, snapshot.conn
+                context_case = replace(
+                    case, diff=snapshot.diff,
+                    changed_symbols=snapshot.changed_symbols)
+            contexts = _case_contexts(case_config, case_conn, context_case)
+            found_symbols = _found_symbols(
+                case_conn, context_case.changed_symbols)
+            results.append({
+                "case_id": case.case_id, "source_commit": case.source_commit,
+                "repo_name": case.repo_name,
+                "complexity_tags": list(case.complexity_tags),
+                "changed_symbols": list(context_case.changed_symbols),
+                "found_symbols": found_symbols,
+                "symbol_found_rate": round(
+                    len(found_symbols) / len(context_case.changed_symbols), 4)
+                if context_case.changed_symbols else 0.0,
+                "gold_findings": len(case.gold_findings),
+                "contexts": {mode: {
+                    "characters": len(contexts[mode]),
+                    "files": _context_files(case_config, contexts[mode]),
+                } for mode in modes},
+            })
+    finally:
+        for snapshot in reversed(snapshots):
+            _remove_case_snapshot(snapshot)
     return {"schema_version": 1, "dry_run": True, "cases": results,
             "aggregate": _preflight_aggregate(results, modes)}
 
@@ -221,18 +326,231 @@ def _validate_run(cases: list[AgentEvalCase], command: list[str],
         raise ValueError("repetitions, timeout, and workers must be at least 1")
 
 
-def _execute_jobs(config: Config, jobs: list[tuple], command: list[str],
-                  output_dir: str, timeout_seconds: int, workers: int,
+def _execute_jobs(jobs: list[tuple], command: list[str], output_dir: str,
+                  timeout_seconds: int, workers: int,
                   executor: AgentExecutor) -> list[dict]:
     def execute(job: tuple) -> dict:
-        case, mode, repetition, context = job
-        return _run_once(config, case, mode, repetition, context, command,
+        case, mode, repetition, context, case_config = job
+        return _run_once(case_config, case, mode, repetition, context, command,
                          output_dir, timeout_seconds, executor)
 
     if workers == 1:
         return [execute(job) for job in jobs]
     with ThreadPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(execute, jobs))
+
+
+def _create_case_snapshot(config: Config, case: AgentEvalCase,
+                          work_root: Path,
+                          repos_dir: str = ".code-review-ai/external-repos"
+                          ) -> _CaseSnapshot:
+    """Materialize a reverse mutation from a historical fix commit."""
+    if case.source_commit is None:
+        raise ValueError(f"case {case.case_id} has no source_commit")
+    source_repo = _case_source_repository(config, case, repos_dir)
+    if not (source_repo / ".git").exists():
+        raise ValueError(f"source_commit requires a git repository: {source_repo}")
+    suffix = uuid.uuid4().hex[:12]
+    worktree = work_root.resolve() / "worktrees" / suffix
+    db_path = work_root.resolve() / "indexes" / f"{suffix}.db"
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    _run_git(["-C", str(source_repo), "cat-file", "-e",
+              f"{case.source_commit}^{{commit}}"])
+    added = False
+    case_conn: sqlite3.Connection | None = None
+    try:
+        _run_git(["-C", str(source_repo), "worktree", "add", "--detach",
+                  str(worktree), case.source_commit])
+        added = True
+        if case.repo_url:
+            mutation_paths = list(case.mutation_paths)
+            for mutation_path in mutation_paths:
+                _restore_parent_version(
+                    worktree, case.source_commit, mutation_path)
+        else:
+            mutation_specs = _review_diff_specs(case.diff)
+            mutation_paths = list(mutation_specs)
+            _reverse_fix_hunks(worktree, source_repo, case.source_commit,
+                               mutation_specs)
+        actual_diff = _run_git(
+            ["-C", str(worktree), "diff", "--no-ext-diff", "--unified=40",
+             "--", *mutation_paths]).stdout
+        if not actual_diff.strip():
+            raise ValueError(f"case {case.case_id} produced an empty mutation")
+        if case.repo_url:
+            case_config = load_config(str(worktree))
+            case_config.repo_path = str(worktree)
+            case_config.db_path = str(db_path)
+            case_config.diff_base = "HEAD"
+            case_config.community_detection = False
+        else:
+            case_config = replace(config, repo_path=str(worktree),
+                                  db_path=str(db_path), diff_base="HEAD")
+        case_conn = connect(str(db_path))
+        init_schema(case_conn)
+        rebuild(case_config, case_conn)
+        changed_symbols = tuple(case.changed_symbols)
+        if case.repo_url:
+            changed_symbols = tuple(detect_changed_symbols(
+                case_config, files=mutation_paths))
+        return _CaseSnapshot(case_config, case_conn, source_repo, worktree,
+                             actual_diff, changed_symbols)
+    except Exception:
+        if case_conn is not None:
+            case_conn.close()
+        if added:
+            _run_git(["-C", str(source_repo), "worktree", "remove", "--force",
+                      str(worktree)], check=False)
+        raise
+
+
+def _remove_case_snapshot(snapshot: _CaseSnapshot) -> None:
+    snapshot.conn.close()
+    _run_git(["-C", str(snapshot.source_repo), "worktree", "remove", "--force",
+              str(snapshot.worktree)], check=False)
+
+
+def _case_source_repository(config: Config, case: AgentEvalCase,
+                            repos_dir: str) -> Path:
+    if not case.repo_url:
+        return Path(config.repo_path).resolve()
+    source = Path(repos_dir).resolve() / str(case.repo_name)
+    source.parent.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        _run_git(["clone", "--filter=blob:none", case.repo_url, str(source)])
+    if not (source / ".git").exists():
+        raise ValueError(f"repository cache is not a git clone: {source}")
+    return source
+
+
+def _restore_parent_version(worktree: Path, commit: str, path: str) -> None:
+    """Restore a canonical case's production path to the fix parent."""
+    parent = subprocess.run(
+        ["git", "-C", str(worktree), "cat-file", "-e", f"{commit}^:{path}"],
+        capture_output=True,
+    )
+    if parent.returncode == 0:
+        _run_git(["-C", str(worktree), "checkout", f"{commit}^", "--", path])
+        _run_git(["-C", str(worktree), "reset", "HEAD", "--", path])
+        return
+    current = subprocess.run(
+        ["git", "-C", str(worktree), "cat-file", "-e", f"{commit}:{path}"],
+        capture_output=True,
+    )
+    if current.returncode != 0:
+        raise ValueError(f"mutation path is absent from fix and parent: {path}")
+    _run_git(["-C", str(worktree), "rm", "--force", "--", path])
+    _run_git(["-C", str(worktree), "reset", "HEAD", "--", path])
+
+
+def _run_git(args: list[str], stdin: str | None = None,
+             check: bool = True) -> subprocess.CompletedProcess:
+    completed = subprocess.run(["git", *args], input=stdin, capture_output=True,
+                               text=True, encoding="utf-8", errors="replace")
+    if check and completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise ValueError(f"git {' '.join(args)} failed: {detail}")
+    return completed
+
+
+def _review_diff_specs(diff: str) -> dict[str, list[int]]:
+    specs: dict[str, list[int]] = {}
+    current_path: str | None = None
+    for line in diff.splitlines():
+        if line.startswith("diff --git a/"):
+            parts = line.split(" ")
+            if len(parts) < 4 or not parts[2].startswith("a/"):
+                raise ValueError(f"invalid review diff file header: {line}")
+            relative = parts[2][2:]
+            path = Path(relative)
+            if path.is_absolute() or ".." in path.parts:
+                raise ValueError(f"unsafe review diff path: {relative}")
+            specs.setdefault(relative, [])
+            current_path = relative
+            continue
+        if line.startswith("@@ "):
+            if current_path is None:
+                raise ValueError("review diff hunk has no file header")
+            match = re.match(r"^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@", line)
+            if match is None:
+                raise ValueError(f"invalid review diff hunk header: {line}")
+            specs[current_path].append(int(match.group(1)))
+    if not specs:
+        raise ValueError("review diff contains no file paths")
+    if any(not starts for starts in specs.values()):
+        raise ValueError("review diff contains a file without hunks")
+    return specs
+
+
+def _reverse_fix_hunks(worktree: Path, source_repo: Path, commit: str,
+                       specs: dict[str, list[int]]) -> None:
+    fix_diff = _run_git([
+        "-C", str(source_repo), "diff", f"{commit}^", commit, "--",
+        *specs.keys(),
+    ]).stdout
+    sections = _split_git_diff(fix_diff)
+    for path, requested_starts in specs.items():
+        section = sections.get(path)
+        if section is None:
+            raise ValueError(f"fix commit does not change mutation path: {path}")
+        header, hunks = section
+        selected: set[int] = set()
+        for requested in requested_starts:
+            distances = [abs(hunk[0] - requested) for hunk in hunks]
+            if not distances:
+                raise ValueError(f"fix commit has no hunks for mutation path: {path}")
+            best_distance = min(distances)
+            best = [index for index, distance in enumerate(distances)
+                    if distance == best_distance]
+            if len(best) != 1:
+                raise ValueError(
+                    f"review hunk is ambiguous against fix commit for {path}")
+            selected.add(best[0])
+        patch_lines = list(header)
+        for index in sorted(selected):
+            patch_lines.extend(hunks[index][1])
+        _run_git(["-C", str(worktree), "apply", "--reverse",
+                  "--whitespace=nowarn", "-"],
+                 stdin="\n".join(patch_lines) + "\n")
+
+
+def _split_git_diff(diff: str) -> dict[str, tuple[list[str],
+                                                   list[tuple[int, list[str]]]]]:
+    sections: dict[str, tuple[list[str], list[tuple[int, list[str]]]]] = {}
+    current_path: str | None = None
+    header: list[str] = []
+    hunks: list[tuple[int, list[str]]] = []
+    current_hunk: tuple[int, list[str]] | None = None
+
+    def flush() -> None:
+        if current_path is not None:
+            sections[current_path] = (list(header), list(hunks))
+
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            flush()
+            parts = line.split(" ")
+            current_path = parts[3][2:] if len(parts) >= 4 else None
+            header = [line]
+            hunks = []
+            current_hunk = None
+            continue
+        if current_path is None:
+            continue
+        if line.startswith("@@ "):
+            match = re.match(
+                r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+            if match is None:
+                raise ValueError(f"invalid fix diff hunk header: {line}")
+            current_hunk = (int(match.group(1)), [line])
+            hunks.append(current_hunk)
+        elif current_hunk is not None:
+            current_hunk[1].append(line)
+        else:
+            header.append(line)
+    flush()
+    return sections
 
 
 def _case_contexts(config: Config, conn: sqlite3.Connection,
@@ -401,6 +719,7 @@ def _run_once(config: Config, case: AgentEvalCase, mode: str, repetition: int,
     result = {
         "case_id": case.case_id, "mode": mode, "repetition": repetition,
         "source_commit": case.source_commit,
+        "complexity_tags": list(case.complexity_tags),
         "success": run.returncode == 0 and parse_error is None,
         "returncode": run.returncode, "elapsed_ms": round(run.elapsed_ms, 3),
         "parse_error": parse_error, **score,
@@ -422,6 +741,7 @@ def _agent_prompt(mode: str, context: str) -> str:
         "usage": {"input_tokens": 0, "output_tokens": 0},
     }
     return (f"You are running a controlled code-review evaluation in {mode} mode.\n"
+            f"{SHARED_REVIEW_POLICY}"
             "Review only from the supplied context. Do not modify the repository.\n"
             "Return exactly one JSON object matching this shape:\n"
             f"{json.dumps(contract)}\n\n{context}")
@@ -513,7 +833,8 @@ def _score(predictions: list[object], golds: tuple[GoldFinding, ...]) -> dict:
 
 
 def _matches(prediction: dict, gold: GoldFinding) -> bool:
-    if _normalize(str(prediction.get("file", ""))) != gold.file:
+    valid_files = (gold.file, *gold.alternate_files)
+    if _normalize(str(prediction.get("file", ""))) not in valid_files:
         return False
     if gold.line_start is not None:
         line = prediction.get("line")
@@ -577,14 +898,19 @@ def _mode_metrics(results: list[dict]) -> dict:
         "macro_recall": _mean(results, lambda result: result["recall"]),
         "macro_f1": _mean(results, lambda result: result["f1"]),
         "mean_elapsed_ms": _mean(results, lambda result: result["elapsed_ms"]),
-        "mean_input_tokens": _mean(results, lambda result: result["usage"]["input_tokens"]),
+        "mean_input_tokens": _mean(
+            results, lambda result: result.get("usage", {}).get("input_tokens", 0)),
         "mean_cache_read_input_tokens": _mean(
-            results, lambda result: result["usage"]["cache_read_input_tokens"]),
+            results, lambda result: result.get("usage", {}).get(
+                "cache_read_input_tokens", 0)),
         "mean_cache_creation_input_tokens": _mean(
-            results, lambda result: result["usage"]["cache_creation_input_tokens"]),
-        "mean_output_tokens": _mean(results, lambda result: result["usage"]["output_tokens"]),
+            results, lambda result: result.get("usage", {}).get(
+                "cache_creation_input_tokens", 0)),
+        "mean_output_tokens": _mean(
+            results, lambda result: result.get("usage", {}).get("output_tokens", 0)),
         "total_cost_usd": round(sum(
-            result["usage"].get("total_cost_usd") or 0.0 for result in results), 6),
+            result.get("usage", {}).get("total_cost_usd") or 0.0
+            for result in results), 6),
         "mean_files_read": _mean(results, lambda result: len(result["files_read"])),
         "mean_context_files": _mean(results, lambda result: len(result["context_files"])),
         "mean_tool_calls": _mean(results, lambda result: len(result["tool_calls"])),

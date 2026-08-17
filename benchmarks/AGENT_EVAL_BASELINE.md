@@ -1,5 +1,10 @@
 # Agentic Eval baseline
 
+This is a component-context ablation. The historical `graph_agent` name means
+the runner precomputes `get_impact` JSON and injects it into the prompt; the
+model cannot call the project's MCP tools. Complete product behavior is
+evaluated separately in `FULL_AGENT_EVAL_REAL_REPOS.md`.
+
 Date: 2026-08-09
 
 This is a reproducible engineering baseline, not a production-accuracy claim.
@@ -115,17 +120,25 @@ Graph's lower total is partly explained by the timed-out run. Hybrid cost about
 All eight issues are fixed in the current runner. Earlier three-case JSON files
 predate some fixes and must not be used for cost or confidence claims.
 
-## Impact routing
+## Impact-routing offline validation
 
-This baseline's "upgrade to `get_impact` only when risk is high" hypothesis
-was tested offline against these transcripts and refuted (Pearson correlation
-of context F1 delta with symbol risk was negative; the >= 60 risk group had
-negative mean deltas). Consequently the numeric risk score was removed
-entirely: "whether to inspect context" and "how deep" now come from the review
-methodology's decision table (see `hooks._build_review_prompt`, whose
-self-containment rules come from the parity-asserted `code-review-methodology`
-skill, also inlined by the eval harness). The historical risk-based validation
-tables are no longer maintained.
+The earlier routing table is invalidated. Those transcripts were generated
+before per-case snapshot isolation: Search and Hybrid read the current checkout,
+Graph used the current HEAD index, and `source_commit` was stored only as
+metadata. They must not be combined with risk scores from historical snapshots
+or used to justify a production threshold.
+
+The corrected runner now checks out each fix commit in an isolated worktree,
+reverses only the selected historical fix hunk, regenerates the prompt diff,
+and builds a per-case graph. A 2026-08-09 dry-run completed all 10 cases with
+10/10 changed symbols resolved. `agent-eval-route-check` also rejects missing
+modes or unequal repetition counts instead of treating absent F1 values as
+zero. A new provider run is required before reporting routing correlations or
+Graph/Hybrid F1 deltas.
+
+Until that rerun exists, `risk` is an ordering and warning signal, not a hard
+`get_impact` gate. The review hook escalates based on unresolved impact
+uncertainty and semantic importance after `query_graph`.
 
 ## Next experiment
 

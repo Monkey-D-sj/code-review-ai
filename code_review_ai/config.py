@@ -23,6 +23,7 @@ DEFAULTS = dict(
     community_weight="plain",
     path_aliases={},  # import specifier prefix -> repo-relative dir, e.g. {"@/": "src/"}
     external_service_url="http://localhost:3000",
+    summary_source="diff",  # "none"|"diff" — attach each changed function's unified diff to the change summary
 )
 
 
@@ -41,6 +42,7 @@ class Config:
     community_weight: str
     path_aliases: dict[str, str]
     external_service_url: str
+    summary_source: str
 
 
 def _load_toml(repo_path: str) -> dict:
