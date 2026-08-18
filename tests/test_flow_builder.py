@@ -1,3 +1,5 @@
+import pytest
+
 from conftest import Q
 from code_review_ai.flow_builder import NodeRow, EdgeRow, build_flows
 
@@ -59,6 +61,49 @@ def test_decorator_marked_method_is_entry():
     assert entries == {0, 1}  # main (name) + list (decorator); helper is not an entry
     list_flow = next(f for f in flows if f.entry_point_id == 1)
     assert list_flow.path == [1, 2]
+
+
+@pytest.mark.parametrize("annotation", [
+    "PostMapping", "PutMapping", "DeleteMapping", "PatchMapping", "RequestMapping",
+])
+def test_spring_mapping_annotations_are_entry(annotation):
+    """Each remaining Spring @*Mapping annotation makes an otherwise-unreachable
+    handler a business entry, exactly like @GetMapping."""
+    nodes = [
+        NodeRow(id=0, qualified_name=Q("m", "main"), file_path="f.java", kind="function"),
+        NodeRow(id=1, qualified_name=Q("m", "handler"), file_path="f.java", kind="method",
+                decorators=[annotation]),
+    ]
+    edges = [EdgeRow(Q("m", "main"), Q("m", "handler"), "resolved")]
+    flows = build_flows(nodes, edges, ["main"], [annotation])
+    assert {f.entry_point_id for f in flows} == {0, 1}
+
+
+def test_entry_decorators_defaults_cover_all_spring_mappings():
+    """The default entry_decorators config carries all six Spring @*Mapping
+    annotations — the parametrized builder test and the real config agree."""
+    from code_review_ai.config import DEFAULTS
+    for annotation in ("GetMapping", "PostMapping", "PutMapping", "DeleteMapping",
+                       "PatchMapping", "RequestMapping"):
+        assert annotation in DEFAULTS["entry_decorators"]
+
+
+def test_class_level_request_mapping_alone_is_not_method_entry():
+    """A type-level @RequestMapping decorates the class, not its methods — a
+    method needs its own mapping annotation (or an entry_name) to be a flow
+    entry. Classes themselves are not flow candidates."""
+    nodes = [
+        NodeRow(id=0, qualified_name=Q("m", "main"), file_path="f.java", kind="function"),
+        NodeRow(id=1, qualified_name=Q("m", "UserController"), file_path="f.java", kind="class",
+                decorators=["RequestMapping"]),
+        NodeRow(id=2, qualified_name=Q("m", "list", Q("m", "UserController")), file_path="f.java",
+                kind="method"),
+    ]
+    edges = [EdgeRow(Q("m", "main"), Q("m", "list", Q("m", "UserController")), "resolved")]
+    flows = build_flows(nodes, edges, ["main"],
+                        ["GetMapping", "PostMapping", "PutMapping", "DeleteMapping",
+                         "PatchMapping", "RequestMapping"])
+    assert {f.entry_point_id for f in flows} == {0}  # main only
 
 
 def test_decorator_off_without_matching_entry_decorators():

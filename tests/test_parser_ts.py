@@ -139,6 +139,58 @@ def test_parse_vue_sfc_lang_selection(tmp_path):
     assert parse_file(str(jsx), str(tmp_path)).language == "javascript"
 
 
+def test_parse_vue_sfc_multiple_script_blocks(tmp_path):
+    """§5.4: a .vue with several <script> blocks — a lang="ts" block anywhere
+    wins the dialect; both blocks' code is concatenated and parsed, and the
+    line numbers of nodes in the later block are preserved (the join must not
+    shift them)."""
+    f = tmp_path / "Mix.vue"
+    f.write_text(
+        '<template><div/></template>\n'
+        '<script>\n'
+        "function plain() {\n"
+        "  return 1;\n"
+        "}\n"
+        "</script>\n"
+        '<script setup lang="ts">\n'
+        "function greet(name: string): string {\n"
+        "  return name;\n"
+        "}\n"
+        "</script>\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(f), str(tmp_path))
+    assert pf.language == "typescript"  # lang="ts" block wins over plain
+    lines = {n.qualified_name: n.start_line for n in pf.nodes}
+    # plain block parses too; both land on their original .vue line numbers
+    assert lines["Mix::plain"] == 3
+    assert lines["Mix::greet"] == 8
+
+
+def test_parse_vue_sfc_template_only(tmp_path):
+    """A .vue with only a <template> has no script dialect — parsing falls back
+    to the path default (typescript) without crashing."""
+    f = tmp_path / "TemplateOnly.vue"
+    f.write_text("<template><div/></template>\n", encoding="utf-8")
+    pf = parse_file(str(f), str(tmp_path))
+    assert pf.language == "typescript"
+
+
+def test_parse_vue_sfc_lang_case_insensitive(tmp_path):
+    """lang=\"TS\" (upper) is normalized to the typescript dialect like lang=\"ts\"."""
+    f = tmp_path / "Upper.vue"
+    f.write_text(
+        '<template><div/></template>\n'
+        '<script setup lang="TS">\n'
+        "function greet(name: string): string { return name; }\n"
+        "</script>\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(f), str(tmp_path))
+    assert pf.language == "typescript"
+    assert any(n.qualified_name == "Upper::greet" for n in pf.nodes)
+
+
 def test_parse_ts_method_in_class():
     """Verify method_definition inside class_declaration gets kind='method'."""
     pf = _parse("auth.ts")
