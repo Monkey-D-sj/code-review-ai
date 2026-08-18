@@ -1,0 +1,2 @@
+# Shared cross-language fixtures land here when a test needs a static repo
+# instead of a tmp_path factory (all current contract tests use tmp_path).
