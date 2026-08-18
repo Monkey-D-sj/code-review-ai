@@ -13,7 +13,7 @@ DEFAULTS = dict(
     watch_debounce_ms=500,
     entry_names=["main"],
     entry_decorators=[
-        "app.route", "click.command",
+        "app.route", "*.route", "click.command",
         "router.get", "router.post", "celery.task",
         # Spring MVC: mapping annotations make an HTTP handler a business entry
         # even though nothing in the repo calls it statically.

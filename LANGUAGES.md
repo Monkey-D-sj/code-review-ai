@@ -124,7 +124,9 @@ flowchart TB
 
 **其他适配点**
 - 继承:`class A(B, C)` → extends 边。
-- 装饰器:`@app.route("/")`、`@click.command()` 捕获(供入口识别 / 路由语义)。
+- 装饰器:`@app.route("/")`、`@click.command()`、`@bp.route`(Flask Blueprint)捕获(供入口识别 / 路由语义;默认 `entry_decorators` 含 `*.route`)。
+- **方法 receiver 绑定**:`self.g()` / `cls.g()` 绑定到封装类 `Class::g`(对齐 Java 的 this./receiver 绑定);裸 `g()` 按 Python LEGB 走模块级,不落 `A.g`。
+- **module-object 语义**:`import a.b` 后 `a.b.fn()` 按模块自身段数消歧 → `a.b::fn`(而非拼错成 `a.b::b.fn`)。
 - **包转发追根**:`from .impl import Session` 经 `__init__.py` 转发时,`from pkg
   import Session` 追到 `pkg.impl::Session`,不停在包名。
 - 测试识别:文件名 glob + 函数短名 glob(`test_*`)+ 装饰器 glob(`test_decorators`,

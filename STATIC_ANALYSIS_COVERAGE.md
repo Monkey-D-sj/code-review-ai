@@ -48,6 +48,7 @@
 - 定义：函数、类、方法，以及赋值给变量的箭头函数或函数表达式。
 - 调用：简单调用、属性调用、其他调用形态。
 - ESM 抽取：具名、默认、命名空间、纯副作用 import，以及 `export { x } from "m"` 的 re-export 记录。
+- 相对说明符（`./auth`、`../lib/x`，含显式扩展名）在 parse 期归一为仓库模块 qname，跨文件调用/import 边直接 resolved；Node 模块解析其余部分（目录 `index`、package `exports`、省略扩展名）不闭合，落空时保留原始说明符的 unresolved 边。
 - 类型继承：`extends` / `implements` 可抽取。
 - TS 路径别名：可从 `tsconfig.json` 的 `compilerOptions.paths` 读取并解析别名前缀。
 
@@ -58,6 +59,9 @@
 - 普通、通配、static import 均可抽取；同 package、普通 import、静态 import 的多种调用可解析。
 - 对已收集声明类型的字段、参数和局部变量，可将 `owner.method()` 绑定到类型上的方法。
 - Spring：抽取常见 Mapping 注解，并能为 `mockMvc.perform(get("/path"))` 与 Controller Mapping 合成调用边。
+- `new Foo()` 补边到真实构造函数 `Foo.Foo`（Java 构造器以类名命名，Python 才是 `__init__`），`实例化 → 构造器 → 构造器内部调用` 全链进图。
+- 注解字段 / 构造器注入建模（`@Autowired` 等按 `di_annotations` 过滤；构造器参数无条件成边，Spring 单构造器隐式注入），DI 服务可被调用方与测试发现。
+- Spring Mapping 注解进默认 `entry_decorators`，handler 被 `build_flows` 认定为 flow 入口并被 dead-code 排除。
 
 ## 4. 已验证的高优先级缺口
 
@@ -123,10 +127,10 @@
 
 ### 5.2 Python 的进一步缺口
 
-- 同类裸方法调用（例如 `class A: def f(self): self.g()` 或 `g()`）不会像 Java 一样按当前类解析；`self.g()` 会是 dynamic，裸 `g()` 不能自动落到 `A.g`。
-- `super().method()`、protocol/ABC 的运行时实现、descriptor、`__getattr__` 等多态机制无建模。
-- `import package.submodule` 后以 `package.submodule.fn()` 访问的完整包层级缺少专门的 module-object 语义。
-- `importlib.import_module`、entry point metadata、Celery 字符串 task、Flask 蓝图动态注册等框架机制无专属 bridge。
+- ✅ 已修复（2026-08-18）：`self.g()` / `cls.g()` 按封装类解析到 `Class.g`（`_resolve_one` 复用 `_enclosing_class`，对齐 Java 的 this./receiver 绑定）。裸 `g()` 仍按 Python LEGB 走模块级（同模块函数已在 `local` 中 resolved）——**不会也不应**落到 `A.g`，那会把 Java 语义套到 Python 上。
+- `super().method()`、protocol/ABC 的运行时实现、descriptor、`__getattr__` 等多态机制无建模。`super()` 可做"解析到基类方法"的部分支持（多重继承/钻石有歧义），其余为运行时语义，静态不可判定。
+- ✅ 已修复（2026-08-18）：`import package.submodule` 后 `package.submodule.fn()` 按"模块自身段数消费"消歧到 `package.submodule::fn`（`resolver._module_member`），不再拼出 `package.submodule::submodule.fn` 这类错误 qname。
+- 🟡 部分：Flask `@bp.route` 已随 `*.route` 加入默认 `entry_decorators`（handler 不再被 dead-code 误报）；`importlib.import_module`、Celery 字符串 task 需要 string→qname bridge（与 MockMvc 同套路，未做）；entry point metadata 读的是安装包元数据，仓库内不可修。
 
 ### 5.3 TypeScript / JavaScript 的进一步缺口
 
@@ -170,11 +174,11 @@ dead-code 以“无 resolved 调用者且不是已知入口/测试”为主条�
 
 | 当前容易造成的理解 | 建议表述 |
 |---|---|
-| “ESM 全形态” | “ESM 语法形态可抽取；相对说明符和 Node 模块解析目前不闭合。” |
+| “ESM 全形态” | ✅ 已对齐：`LANGUAGES.md` 已改为“ESM 语法形态可抽取；相对说明符（含显式扩展名）已在 parse 期闭合；Node 模块解析其余部分（`index` / `exports` / 省略扩展名）不闭合”。 |
 | “注解 DI 边（跨语言通用）” | ✅ 已对齐：`LANGUAGES.md` 已改为“调用式 marker + Java 注解字段/构造器注入”；TS decorator、provider/token 注入仍未建模。 |
 | “`new Foo()` 额外补到 `Foo::__init__`” | ✅ 已对齐：`LANGUAGES.md` 已改为“额外补到真实构造函数 `Foo::Foo.Foo`（Java 构造器以类名命名）”。 |
-| “MockMvc 测试在 flow 里可见” | “可合成测试到 Controller 的边；要进入 testimpact，还需配置 Java 测试识别规则。” |
-| “新增语言下游零改动” | “新增 grammar 后可复用 IR/图层；仍需完成文件发现、module/import 归一、测试约定、类型/框架语义和回归测试。” |
+| “MockMvc 测试在 flow 里可见” | ✅ 已对齐：`LANGUAGES.md` 已注明需路径段匹配 + 方法匹配才合成边；且 Java 测试识别（`*/test/*` / `*Test.java` / `*Tests.java`）已入默认 `test_globs`，testimpact 无需额外配置。 |
+| “新增语言下游零改动” | ✅ 已对齐：`LANGUAGES.md` §6 接入路径已含分支——module/调用形式有本质差异时解析层加专属处理，生态特化形态（`.vue` / MockMvc / 别名）走前置抽取 / 后置桥接。 |
 
 ## 8. 修复优先级建议
 
@@ -227,6 +231,16 @@ dead-code 以“无 resolved 调用者且不是已知入口/测试”为主条�
   `test_flow_builder.py::test_decorator_marked_method_is_entry`（有入边仍为入口）、
   `test_deadcode.py::test_find_dead_code_excludes_spring_mapping`（`@GetMapping` 不在 dead-code 候选）、
   `test_parser_java.py::test_java_annotations_capture_mappings`（方法级注解进 decorators）。
+- Python §5.2 缺口修复（同日）：`_resolve_one` 的 CALL_ATTRIBUTE 分支按 Python 语义修正——
+  `self.g()`/`cls.g()` 经 `_enclosing_class` 绑定到 `Class.g`（对齐 Java 的 this./receiver 绑定，裸 `g()` 仍走 LEGB 模块级）；
+  `import a.b` 后 `a.b.fn()` 经 `_module_member` 消费模块自身段数解析到 `a.b::fn`（不再拼出 `a.b::b.fn`）；
+  顺带修 `head in local` 分支作用域 qname 的 `::` 双分隔缺陷（改用 `_join_target`）；
+  默认 `entry_decorators` 加 `*.route`（Flask `@bp.route` handler 不再被 dead-code 误报）。验证：
+  `test_resolve_self_method_to_enclosing_class`、`test_resolve_module_level_class_receiver`、
+  `test_resolve_import_package_submodule_attribute`、`test_find_dead_code_excludes_flask_blueprint_route`。
+  全量回归：`uv run pytest -q` -> **329 passed**（325 + 4 新单测）。
 - 提交记录：
   - `57bedb9` fix: close P0/P1 static-analysis coverage gaps —— §8 #1（ESM 相对导入）、#2（测试识别）、#3（Java 构造器链）修复 + 新增测试与文档更新。
   - `b6625b9` feat: Spring Controller Mapping annotations are business flow entries —— §8 #4 收尾：Spring Mapping 注解进默认 `entry_decorators`，`build_flows` 装饰器驱动入口，`flow_input_hash` 纳入 decorators，dead-code 不再误报 handler；3 个新单测。
+
+- 与当前 `LANGUAGES.md` 对齐复核（同日）：§3.2 补相对说明符归一、§3.3 补构造器补边 / DI 注入 / 入口识别三条可靠覆盖；§7 对齐表三行从“建议改述”升级为“✅ 已对齐”（ESM 相对说明符已闭合、Java 测试识别已入默认 glob、接入路径分支已入文）。全量回归仍为 `325 passed`。

@@ -206,6 +206,23 @@ def _resolve_di_args(c: RawCall, local: dict, imports: dict,
     return resolved
 
 
+def _module_member(mod: str, rest: str) -> str:
+    """The member name once a module's own segments are consumed from `rest`.
+
+    ``import a.b`` binds ``a`` to module ``a.b``, so the call ``a.b.fn()`` has
+    head ``a`` and rest ``b.fn``; the module already accounts for ``b``, leaving
+    member ``fn`` (target ``a.b::fn``). Single-segment modules (plain
+    ``import m``) leave ``rest`` unchanged.
+    """
+    extra = len(mod.split(".")) - 1
+    if extra <= 0:
+        return rest
+    rest_parts = rest.split(".")
+    if extra <= len(rest_parts):
+        return ".".join(rest_parts[extra:])
+    return rest  # rest shorter than the module's own segments: keep as-is
+
+
 def _resolve_one(c: RawCall, local: dict, imports: dict,
                  existing: set[str], all_import_maps: dict,
                  mod_syms: dict | None = None,
@@ -238,14 +255,23 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
             mod, imp_name, _ = imports[head]
             mod = _module_of(mod, path_aliases, existing)  # alias @/x -> real module
             if imp_name is None:  # import m / import m as head -> m.rest
-                tgt = qname.join(mod, rest)
+                member = _module_member(mod, rest)
+                tgt = qname.join(mod, member) if member else mod
                 if tgt not in existing:
-                    tgt = _resolve_reexport(mod, rest, all_import_maps, existing) or tgt
+                    tgt = _resolve_reexport(mod, member, all_import_maps, existing) or tgt
                 return _resolved(base, tgt, existing)
         if head in local and local[head] in existing:
             cls_qn = local[head]
-            tgt = qname.join(cls_qn, rest)
+            tgt = _join_target(cls_qn, rest)
             return _resolved(base, tgt, existing)
+        if c.language == "python" and head in ("self", "cls"):
+            # method receiver -> enclosing class, mirroring Java's this./type
+            # binding; bare `g()` stays module-scope (Python LEGB), not A.g
+            enclosing = _enclosing_class(c.source_qname)
+            if enclosing:
+                tgt = _join_target(enclosing, rest)
+                if tgt in existing:
+                    return _resolved(base, tgt, existing)
         base.resolution = "dynamic"
         return base
     return base  # other -> unresolved

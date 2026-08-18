@@ -107,6 +107,78 @@ def test_constructor_links_to_init(tmp_path):
     assert ("svc", "svc::Service.__init__", "call", "resolved") in by  # to __init__
 
 
+def test_resolve_self_method_to_enclosing_class(tmp_path):
+    """A Python method calling self.g() resolves to the enclosing class's
+    method (mirrors Java's this./receiver-type binding); a bare g() stays
+    module-scope per LEGB — it must NOT jump to A.g."""
+    mod = tmp_path / "svc.py"
+    mod.write_text(
+        "class UserService:\n"
+        "    def authenticate(self):\n"
+        "        return self._check()\n"
+        "    def _check(self):\n"
+        "        return helper()\n"
+        "def helper():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(mod), str(tmp_path))
+    qnames = {n.qualified_name for n in pf.nodes}
+    edges = resolve_calls([pf], qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    auth = Q("svc", "authenticate", Q("svc", "UserService"))
+    check = Q("svc", "_check", Q("svc", "UserService"))
+    # self._check() -> UserService._check (was dynamic)
+    assert (auth, check, "resolved") in by
+    # bare helper() -> module-level svc::helper, not svc::UserService.helper
+    assert (check, Q("svc", "helper"), "resolved") in by
+    assert not any(e.source == auth and e.target == Q("svc", "helper", Q("svc", "UserService"))
+                   for e in edges)
+
+
+def test_resolve_module_level_class_receiver(tmp_path):
+    """Config.get() where Config is a same-module class resolves to the class
+    method — the `head in local` branch must join the scoped qname with '.' not
+    '::' (qname.join on a prefix already containing '::' would double-separate)."""
+    mod = tmp_path / "svc.py"
+    mod.write_text(
+        "class Config:\n"
+        "    def get():\n"
+        "        return 1\n"
+        "def run():\n"
+        "    return Config.get()\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(mod), str(tmp_path))
+    qnames = {n.qualified_name for n in pf.nodes}
+    edges = resolve_calls([pf], qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert (Q("svc", "run"), Q("svc", "get", Q("svc", "Config")), "resolved") in by
+
+
+def test_resolve_import_package_submodule_attribute(tmp_path):
+    """`import pkg.b` binds `pkg` to module pkg.b, so `pkg.b.fn()` is a
+    module-object walk to pkg.b::fn — not a bogus nested member pkg.b::b.fn."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "b.py").write_text("def fn():\n    return 1\n", encoding="utf-8")
+    main = tmp_path / "main.py"
+    main.write_text(
+        "import pkg.b\n"
+        "def run():\n"
+        "    return pkg.b.fn()\n",
+        encoding="utf-8",
+    )
+    files = [parse_file(str(pkg / "b.py"), str(tmp_path)),
+             parse_file(str(main), str(tmp_path))]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_calls(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert (Q("main", "run"), "pkg.b::fn", "resolved") in by
+    # the old wrong shape (module pkg.b, member b.fn) must not appear as an edge
+    assert not any(e.target == "pkg.b::b.fn" for e in edges)
+
+
 def test_resolve_dedups_repeated_calls_same_target(tmp_path):
     """A function calling the same target N times yields one graph edge, not N.
 
