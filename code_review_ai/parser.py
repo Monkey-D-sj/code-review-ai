@@ -832,6 +832,7 @@ def _walk_inherits(node, module_qname, lang, out: list):
 
 
 def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> ParsedFile:
+    explicit_lang = lang is not None  # caller-passed dict wins over any .vue lang
     if lang is None:
         lang_name, lang, ts_lang = _lang_for_path(file_path)
     else:
@@ -842,7 +843,13 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     original_line_count = 0
     if file_path.endswith(".vue"):
         original_line_count = source.count(b"\n") + 1
-        source, line_offset = _extract_vue_script(source)
+        source, line_offset, vue_lang = _extract_vue_script(source)
+        if vue_lang and not explicit_lang:
+            # pick the JS/TS dialect from the block's `lang` attribute
+            # (plain <script> is Vue's JS default); ts_lang stays the base
+            # TypeScript grammar — JS files already share it.
+            lang_name = vue_lang
+            lang = LANG[vue_lang]
     tree = _parser(ts_lang).parse(source)
     root = tree.root_node
     if lang_name == "java":
@@ -1246,26 +1253,34 @@ def _extract_imports_esm(root, lang, file_path: str,
     return entries
 
 
-_VUE_SCRIPT_RE = re.compile(r"<script[^>]*>(.*?)</script>", re.DOTALL)
+_VUE_SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script>", re.DOTALL)
+_VUE_LANG_RE = re.compile(r"lang\s*=\s*[\"']?([\w-]+)")
 
 
-def _extract_vue_script(source: bytes) -> tuple[bytes, int]:
-    """Extract concatenated <script> blocks from a .vue SFC.
+def _extract_vue_script(source: bytes) -> tuple[bytes, int, str | None]:
+    """Extract concatenated <script> blocks from a .vue SFC, choosing the
+    script dialect from the blocks' `lang` attribute.
 
-    Returns (script_bytes, line_offset) where line_offset is the 0-based
-    line index of the first script block's content, to be added to all
-    line numbers from tree-sitter (which are 0-based).
+    Returns (script_bytes, line_offset, lang_name) — line_offset is the
+    0-based line index of the first block's content, to be added to all
+    tree-sitter line numbers (which are 0-based). lang_name is
+    "typescript" when any block declares lang="ts"/"tsx", "javascript"
+    (Vue's plain-<script> default) otherwise — including lang="js"/"jsx"
+    and blocks with no lang at all. None when the file has no <script>.
     """
     text = source.decode("utf-8")
     match = _VUE_SCRIPT_RE.search(text)
     if match is None:
-        return source, 0
-    # Count newlines before the match end of the opening tag
+        return source, 0, None
+    # Count newlines before the start of the first block's content
     # <script ...>\n  ← content starts here
-    tag_end = match.start(1)  # start of group 1 = start of script content
+    tag_end = match.start(2)
     line_offset = text[:tag_end].count("\n")
-    parts = _VUE_SCRIPT_RE.findall(text)
-    return "\n".join(parts).encode("utf-8"), line_offset
+    parts = _VUE_SCRIPT_RE.findall(text)  # list of (attrs, content)
+    langs = [m.group(1).lower() for attrs, _content in parts
+             if (m := _VUE_LANG_RE.search(attrs))]
+    lang_name = "typescript" if any(l.startswith("ts") for l in langs) else "javascript"
+    return "\n".join(content for _attrs, content in parts).encode("utf-8"), line_offset, lang_name
 
 
 def _find_child(node, child_type: str):

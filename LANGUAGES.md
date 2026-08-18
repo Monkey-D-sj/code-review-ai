@@ -161,7 +161,8 @@ qname -- 与 Python 相对导入同一策略,跨文件调用/import 边直接 re
 - **路径别名**:`tsconfig.json` 的 `compilerOptions.paths` **自动检测**(`"@/*" →
   `src/`);显式配置/env 优先。解析时替换别名前缀,`@/hooks/x` → `hooks.x`。
   未配置时保留原始说明符的 unresolved 边(不静默消失)。
-- **`.vue` SFC**:抽 `<script>` 块按 TS 解析,行号回对齐原文件;template/style
+- **`.vue` SFC**:抽 `<script>` 块按块 `lang` 选 dialect(`<script lang="ts">` → TS;
+  plain `<script>` / `lang="js"` → JS,即 Vue 默认),行号回对齐原文件;template/style
   不进图。
 - 继承:`extends` / `implements`;装饰器:`@Controller`、`@Get()` 捕获。
 

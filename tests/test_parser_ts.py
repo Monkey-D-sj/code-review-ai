@@ -103,6 +103,42 @@ def test_parse_vue_sfc():
     assert imps["ref"].module == "vue"
 
 
+def test_parse_vue_sfc_lang_selection(tmp_path):
+    """§5.4: a .vue script's dialect follows the block's `lang` attribute —
+    lang="ts" → typescript, plain `<script>` / lang="js" → javascript (Vue's
+    plain-<script> default is JS, not TS)."""
+    ts = tmp_path / "Ts.vue"
+    ts.write_text(
+        '<template><div/></template>\n'
+        '<script setup lang="ts">\n'
+        "const n: number = 1;\n"
+        "function greet(name: string): string { return name; }\n"
+        "</script>\n",
+        encoding="utf-8",
+    )
+    assert parse_file(str(ts), str(tmp_path)).language == "typescript"
+
+    js = tmp_path / "Js.vue"
+    js.write_text(
+        '<template><div/></template>\n'
+        '<script setup>\n'
+        "const n = 1;\n"
+        "</script>\n",
+        encoding="utf-8",
+    )
+    assert parse_file(str(js), str(tmp_path)).language == "javascript"
+
+    jsx = tmp_path / "Jsx.vue"
+    jsx.write_text(
+        '<template><div/></template>\n'
+        '<script lang="js">\n'
+        "const n = 1;\n"
+        "</script>\n",
+        encoding="utf-8",
+    )
+    assert parse_file(str(jsx), str(tmp_path)).language == "javascript"
+
+
 def test_parse_ts_method_in_class():
     """Verify method_definition inside class_declaration gets kind='method'."""
     pf = _parse("auth.ts")

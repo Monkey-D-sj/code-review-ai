@@ -26,7 +26,7 @@
 | Python | `.py` | tree-sitter-python | 已覆盖 |
 | TypeScript | `.ts`、`.tsx` | tree-sitter-typescript / TSX | 已覆盖 |
 | JavaScript | `.js`、`.jsx`、`.mjs`、`.cjs` | TypeScript grammar / TSX grammar | 已覆盖基础语法，但没有 JavaScript 专用 grammar |
-| Vue SFC | `.vue` | 抽取 `<script>` 后按 TypeScript | 仅 script，属 TS 附加形态，不是完整 Vue 分析 |
+| Vue SFC | `.vue` | 抽取 `<script>` 后按块 `lang` 选 TypeScript / JavaScript | 仅 script，属 TS/JS 附加形态，不是完整 Vue 分析 |
 | Java | `.java` | tree-sitter-java | 已覆盖 |
 | 其他 | 例如 `.pyi`、`.pyw`、`.mts`、`.cts`、Kotlin、Go、C#、C/C++、Rust、PHP、Ruby、Scala、Groovy、SQL | 无扩展映射或 grammar | 未覆盖，不会进入索引 |
 
@@ -144,7 +144,7 @@
 
 - 仅正则提取 `<script>`；`<template>`、`<style>`、模板事件、组件引用、slot、`ref` 和响应式依赖均不进图。
 - 多个 `<script>` 块会被拼接，却统一使用第一个块的行号偏移；后续块的节点行号会失真。
-- 没有按 `lang` 选择 JS/TS grammar，也不解析 `.vue` 外的模板语言或编译产物。
+- ✅ 已修复（2026-08-18）按 `lang` 选择 dialect：`_extract_vue_script` 读取各 `<script>` 块的 `lang` 属性——任一块 `lang="ts"`/`lang="tsx"` → typescript，plain `<script>` / `lang="js"` / `lang="jsx"` → javascript（Vue 无 `lang` 默认即 JS）。`ts_lang` 仍是基础 TS grammar（`.js` 本就共用）；`.vue` 外的模板语言（如 pug/sass 的对应处理）或编译产物仍未解析。
 
 ### 5.5 Java 的进一步缺口
 
@@ -239,6 +239,11 @@ dead-code 以“无 resolved 调用者且不是已知入口/测试”为主条�
   `test_resolve_self_method_to_enclosing_class`、`test_resolve_module_level_class_receiver`、
   `test_resolve_import_package_submodule_attribute`、`test_find_dead_code_excludes_flask_blueprint_route`。
   全量回归：`uv run pytest -q` -> **329 passed**（325 + 4 新单测）。
+- Vue `lang` 选择（§5.4 #3）：`_extract_vue_script` 返回脚本 dialect——`<script lang="ts">` → typescript，
+  plain `<script>` / `lang="js"` → javascript（Vue 无 `lang` 默认即 JS）；`parse_file` 据此选 `LANG` 配置，
+  `explicit_lang` 保护调用方显式传入的 lang 不被覆盖。验证：
+  `test_parse_vue_sfc_lang_selection`（`lang="ts"`→typescript、plain setup→javascript、`lang="js"`→javascript）。
+  全量回归：`uv run pytest -q` -> **330 passed**（329 + 1 新单测）。
 - 提交记录：
   - `57bedb9` fix: close P0/P1 static-analysis coverage gaps —— §8 #1（ESM 相对导入）、#2（测试识别）、#3（Java 构造器链）修复 + 新增测试与文档更新。
   - `b6625b9` feat: Spring Controller Mapping annotations are business flow entries —— §8 #4 收尾：Spring Mapping 注解进默认 `entry_decorators`，`build_flows` 装饰器驱动入口，`flow_input_hash` 纳入 decorators，dead-code 不再误报 handler；3 个新单测。
