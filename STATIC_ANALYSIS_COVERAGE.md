@@ -247,5 +247,7 @@ dead-code 以“无 resolved 调用者且不是已知入口/测试”为主条�
 - 提交记录：
   - `57bedb9` fix: close P0/P1 static-analysis coverage gaps —— §8 #1（ESM 相对导入）、#2（测试识别）、#3（Java 构造器链）修复 + 新增测试与文档更新。
   - `b6625b9` feat: Spring Controller Mapping annotations are business flow entries —— §8 #4 收尾：Spring Mapping 注解进默认 `entry_decorators`，`build_flows` 装饰器驱动入口，`flow_input_hash` 纳入 decorators，dead-code 不再误报 handler；3 个新单测。
+  - `5972329` fix: resolve Python self.g(), module-object chains, and blueprint routes —— §5.2 可修的一半：`self.g()`/`cls.g()` 经 `_enclosing_class` 绑定到 `Class.g`、`import a.b` + `a.b.fn()` 经 `_module_member` 消歧到 `a.b::fn`、`head in local` 作用域 qname 的 `::` 双分隔缺陷（改 `_join_target`）、默认 `entry_decorators` 加 `*.route`（Flask `@bp.route`）；4 个新单测。
+  - `1c86338` feat: .vue script dialect follows the block's lang attribute —— §5.4 #3：`_extract_vue_script` 按 `<script lang>` 选 dialect（`lang="ts"`→TS，plain/`lang="js"`→JS 即 Vue 默认），`explicit_lang` 保护显式传入的 lang；1 个新单测。
 
 - 与当前 `LANGUAGES.md` 对齐复核（同日）：§3.2 补相对说明符归一、§3.3 补构造器补边 / DI 注入 / 入口识别三条可靠覆盖；§7 对齐表三行从“建议改述”升级为“✅ 已对齐”（ESM 相对说明符已闭合、Java 测试识别已入默认 glob、接入路径分支已入文）。全量回归仍为 `325 passed`。
