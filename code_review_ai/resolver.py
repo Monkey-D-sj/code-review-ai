@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from code_review_ai.parser import (ParsedFile, RawCall, CALL_SIMPLE,
                                    CALL_ATTRIBUTE, CALL_CONSTRUCT,
                                    SOURCE_SUFFIXES)
-
 # Bare identifier or dotted path — the shapes a DI-marker argument takes when it
 # names a dependency (``get_db``, ``services.get_db``). Everything else — calls,
 # literals, keyword args like ``use_cache=False``, ``...`` — is not a dependency
@@ -142,7 +141,7 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                                 var_types=var_types, path_aliases=path_aliases)
             _dedup_append(edges, seen, edge)
             if edge.resolution == "resolved" and edge.target in class_qnames:
-                init_qn = qname.join(qname.module(edge.target), "__init__", edge.target)
+                init_qn = _init_member_qname(edge.target, c.language)
                 if init_qn in existing_qnames:
                     _dedup_append(edges, seen, Edge(
                         source=edge.source, target=init_qn, kind="call",
@@ -158,6 +157,17 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                         source=c.source_qname, target=dep_qn, kind="call",
                         file_path=c.file_path, resolution="resolved"))
     return edges
+
+
+def _init_member_qname(class_qn: str, language: str) -> str:
+    """The constructor member a class-instantiating edge also links to.
+
+    Python classes initialize via ``__init__``; Java constructors are declared
+    with the class's own name, so the member is ``Class.Class`` - reusing the
+    class short name instead of Python's ``__init__`` convention (which never
+    exists in Java and made the extra edge silently unresolvable)."""
+    member = "__init__" if language != "java" else qname.short(class_qn)
+    return qname.join(qname.module(class_qn), member, class_qn)
 
 
 def _is_di_marker(target_expr: str, markers: list[str]) -> bool:
@@ -465,10 +475,51 @@ def _build_inherits(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
     return edges
 
 
+def _is_di_annotated(annotations: list[str], di_annotations: list[str] | None) -> bool:
+    """True when a declaration's annotation matches a configured di_annotations
+    glob (fnmatch against the annotation name, mirroring dependency_markers)."""
+    return any(fnmatch.fnmatch(annotation, pat)
+               for annotation in annotations for pat in (di_annotations or []))
+
+
+def _build_di_edges(parsed: list[ParsedFile], existing: set[str], mod_syms: dict,
+                    all_import_maps: dict,
+                    di_annotations: list[str] | None) -> list[Edge]:
+    """Annotation/constructor DI edges: injection point -> dependency class.
+
+    Field injection (``@Autowired private OwnerRepository owners;``) requires an
+    annotation matching di_annotations; constructor parameters are always
+    candidates (a repo-typed ctor param is a real type dependency, framework or
+    not - Spring injects single-constructor params even unannotated). The dep
+    type must resolve to a repo class (same-package -> import, via
+    _resolve_java_type); primitives/String/external types drop out naturally.
+    kind="call" matches the existing Depends()-marker DI edges, so in_degree /
+    flow / dead-code consume them the same way."""
+    edges: list[Edge] = []
+    seen: set[tuple[str, str, str]] = set()
+    for pf in parsed:
+        if pf.language != "java" or not pf.di_decls:
+            continue
+        imports = all_import_maps.get(pf.module_qname, {})
+        for decl in pf.di_decls:
+            if (decl.mechanism == "field"
+                    and not _is_di_annotated(decl.annotations, di_annotations)):
+                continue
+            class_qn = _resolve_java_type(decl.dep_expr, pf.module_qname,
+                                          imports, mod_syms)
+            if not class_qn or class_qn not in existing:
+                continue
+            _dedup_append(edges, seen, Edge(
+                source=decl.owner_qname, target=class_qn, kind="call",
+                file_path=pf.file_path, resolution="resolved"))
+    return edges
+
+
 def resolve_edges(parsed: list[ParsedFile],
                   existing_qnames: set[str],
                   path_aliases: dict[str, str] | None = None,
-                  dependency_markers: list[str] | None = None) -> list[Edge]:
+                  dependency_markers: list[str] | None = None,
+                  di_annotations: list[str] | None = None) -> list[Edge]:
     """Resolve all edges — call, contains, import, inherits — from parsed files.
 
     This is the single entry point for edge generation. Indexer calls this
@@ -479,6 +530,11 @@ def resolve_edges(parsed: list[ParsedFile],
     edges.extend(_build_contains(parsed, existing_qnames))
     edges.extend(_build_imports(parsed, existing_qnames, path_aliases))
     edges.extend(_build_inherits(parsed, existing_qnames))
+    mod_syms = _module_symbols(parsed)
+    import_maps = {pf.module_qname: _import_map(pf, path_aliases, existing_qnames)
+                   for pf in parsed}
+    edges.extend(_build_di_edges(parsed, existing_qnames, mod_syms,
+                                 import_maps, di_annotations))
     from code_review_ai.java_routing import build_route_edges
     edges.extend(build_route_edges(parsed, existing_qnames))
     return edges

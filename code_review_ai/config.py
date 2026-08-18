@@ -17,9 +17,11 @@ DEFAULTS = dict(
         "router.get", "router.post", "celery.task",
     ],
     dependency_markers=["Depends"],  # DI calls whose callable args become source->arg edges
+    di_annotations=["Autowired", "Inject", "Resource", "MockBean"],  # annotation names tagging a Java field as an injection point
     exclude=["*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
-    test_globs=["*/tests/*", "test_*.py"],  # not */test* — would tag prod files whose name starts with "test" (e.g. testimpact.py)
+    test_globs=["*/tests/*", "test_*.py", "*_test.py", "*/test/*", "*Test.java", "*Tests.java", "*.test.*", "*.spec.*", "*/__tests__/*"],  # per-language defaults; not */test* — would tag prod files whose name starts with "test" (e.g. testimpact.py)
     test_names=["test_*"],
+    test_decorators=["Test", "ParameterizedTest"],  # decorator/annotation names tagging a node as a test (e.g. JUnit 5 @Test), matched like entry_names
     community_detection=False,
     community_weight="plain",
     path_aliases={},  # import specifier prefix -> repo-relative dir, e.g. {"@/": "src/"}
@@ -37,9 +39,11 @@ class Config:
     entry_names: list[str]
     entry_decorators: list[str]
     dependency_markers: list[str]
+    di_annotations: list[str]
     exclude: list[str]
     test_globs: list[str]
     test_names: list[str]
+    test_decorators: list[str]
     community_detection: bool
     community_weight: str
     path_aliases: dict[str, str]
@@ -188,8 +192,8 @@ def load_config(repo_path: str = ".") -> Config:
 
 
 _CONFIG_HASH_KEYS = ("diff_base", "entry_names", "entry_decorators",
-                     "dependency_markers", "exclude",
-                     "test_globs", "test_names",
+                     "dependency_markers", "di_annotations", "exclude",
+                     "test_globs", "test_names", "test_decorators",
                      "community_detection", "community_weight", "path_aliases")
 
 

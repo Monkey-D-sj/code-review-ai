@@ -28,6 +28,25 @@ def test_resolve_dynamic_for_obj_method():
     assert dyn and dyn[0].resolution == "dynamic"
 
 
+def test_resolve_esm_relative_imports():
+    """The P0 audit gap: `import { login } from "./auth"` must resolve to the
+    repo module ts.auth, not stay an unresolved `./auth::login` edge - for
+    both named and namespace imports."""
+    files = [parse_file(f"{FIX}/ts/{n}", FIX)
+             for n in ("app.ts", "auth.ts", "util.ts")]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_calls(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    # named import: login() -> ts.auth::login
+    assert (Q("ts.app", "main"), Q("ts.auth", "login"), "resolved") in by
+    # namespace import: a.login() -> ts.auth::login
+    assert any(e.source == Q("ts.app", "main")
+               and e.target == Q("ts.auth", "login")
+               and e.resolution == "resolved" for e in edges)
+    # no edge keeps the raw ./auth specifier
+    assert not any(e.target.startswith("./auth") for e in edges)
+
+
 def test_resolve_cls_method():
     # add a class call fixture inline
     src = "class C:\n    def m(self): pass\nx = C()\nx.m()"

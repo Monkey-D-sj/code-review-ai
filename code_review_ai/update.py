@@ -218,7 +218,7 @@ def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
     global_set = remaining | new_qnames
     node_count = _insert_nodes(conn, parsed, config, skip_qnames=remaining)
     edges = resolve_edges(parsed, global_set, config.path_aliases,
-                          config.dependency_markers)
+                          config.dependency_markers, config.di_annotations)
     _insert_edges(conn, edges)
     recompute_degrees(conn)
     return node_count, len(edges)
@@ -239,7 +239,8 @@ def _update_survivors(conn, parsed, survivors: dict[str, int], config) -> None:
                 n.signature,
                 1 if is_test_node(n.file_path, n.qualified_name,
                                   config.test_globs, config.test_names,
-                                  config.repo_path) else 0,
+                                  config.repo_path, n.decorators,
+                                  config.test_decorators) else 0,
                 json.dumps(n.decorators), node_id))
     if updates:
         conn.executemany(
@@ -265,7 +266,8 @@ def _insert_nodes(conn, parsed, config, skip_qnames=frozenset()) -> int:
                          n.start_line, n.end_line, n.signature,
                          1 if is_test_node(n.file_path, n.qualified_name,
                                            config.test_globs, config.test_names,
-                                           config.repo_path) else 0,
+                                           config.repo_path, n.decorators,
+                                           config.test_decorators) else 0,
                          json.dumps(n.decorators)))
     conn.executemany(
         "INSERT INTO nodes(qualified_name,kind,language,file_path,start_line,"

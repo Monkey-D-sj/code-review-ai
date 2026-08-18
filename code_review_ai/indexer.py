@@ -61,7 +61,7 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
 
     qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
     all_edges = resolve_edges(parsed, qnames, config.path_aliases,
-                              config.dependency_markers)
+                              config.dependency_markers, config.di_annotations)
     t_resolve = time.perf_counter()
 
     with transaction(conn):
@@ -121,7 +121,8 @@ def _write_nodes(conn, parsed, config) -> tuple[dict[str, int], list]:
                          n.start_line, n.end_line, n.signature,
                          1 if is_test_node(n.file_path, n.qualified_name,
                                            config.test_globs, config.test_names,
-                                           config.repo_path) else 0,
+                                           config.repo_path, n.decorators,
+                                           config.test_decorators) else 0,
                          json.dumps(n.decorators)))
     conn.executemany(
         "INSERT INTO nodes(qualified_name,kind,language,file_path,"

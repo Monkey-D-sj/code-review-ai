@@ -3,7 +3,8 @@
 import os
 
 from conftest import FIXTURES as FIX, Q
-from code_review_ai.parser import parse_file, _lang_for_path
+from code_review_ai.parser import (parse_file, _esm_relative_module,
+                                   _lang_for_path)
 
 
 def _parse(fname: str):
@@ -29,13 +30,13 @@ def test_parse_ts_app():
     pf = _parse("app.ts")
     assert pf.language == "typescript"
 
-    # Imports
+    # Imports - relative specifiers are canonicalized to module qnames
     import_map = {i.local_name: i for i in pf.imports}
-    assert import_map["login"].module == "./auth"
+    assert import_map["login"].module == "ts.auth"
     assert import_map["login"].imported_name == "login"
-    assert import_map["a"].module == "./auth"
+    assert import_map["a"].module == "ts.auth"
     assert import_map["a"].imported_name is None  # namespace import
-    assert import_map["hashPw"].module == "./util"
+    assert import_map["hashPw"].module == "ts.util"
 
     # Calls
     calls = {(c.target_expr, c.call_form) for c in pf.raw_calls}
@@ -46,6 +47,24 @@ def test_parse_ts_app():
     # All calls inside main()
     for c in pf.raw_calls:
         assert c.source_qname == Q("ts.app", "main")
+
+
+def test_esm_relative_module_normalization():
+    """Relative specifiers canonicalize to module qnames with the same
+    conventions as _module_qname (src/ stripped, suffix dropped)."""
+    # ./sibling from ts/app.ts -> ts/auth
+    assert _esm_relative_module("./auth", f"{FIX}/ts/app.ts", FIX) == "ts.auth"
+    # explicit extension is stripped so it agrees with the bare form
+    assert _esm_relative_module("./auth.ts", f"{FIX}/ts/app.ts", FIX) == "ts.auth"
+    # ../ hops up out of the directory
+    assert _esm_relative_module("../lib/api", f"{FIX}/ts/app.ts", FIX) == "lib.api"
+    # a leading src/ segment is dropped like any indexed module
+    assert _esm_relative_module("./auth", f"{FIX}/src/app.ts", FIX) == "auth"
+    assert _esm_relative_module("../root-mod", f"{FIX}/src/a/b.ts", FIX) == "root-mod"
+    # non-relative / escaping specifiers are left alone (-> None)
+    assert _esm_relative_module("vue", f"{FIX}/ts/app.ts", FIX) is None
+    assert _esm_relative_module("@/hooks/x", f"{FIX}/ts/app.ts", FIX) is None
+    assert _esm_relative_module("../../outside", f"{FIX}/ts/app.ts", FIX) is None
 
 
 def test_parse_ts_util_arrow():
