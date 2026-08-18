@@ -138,7 +138,8 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
         for c in pf.raw_calls:
             edge = _resolve_one(c, local, imports, existing_qnames, all_import_maps,
                                 mod_syms=mod_syms, source_module=pf.module_qname,
-                                var_types=var_types, path_aliases=path_aliases)
+                                var_types=var_types, path_aliases=path_aliases,
+                                class_qnames=class_qnames)
             _dedup_append(edges, seen, edge)
             if edge.resolution == "resolved" and edge.target in class_qnames:
                 init_qn = _init_member_qname(edge.target, c.language)
@@ -206,21 +207,25 @@ def _resolve_di_args(c: RawCall, local: dict, imports: dict,
     return resolved
 
 
-def _module_member(mod: str, rest: str) -> str:
-    """The member name once a module's own segments are consumed from `rest`.
+def _module_member(mod: str, rest: str) -> tuple[str, str]:
+    """The (target_module, member) a dotted walk over an imported module lands on.
 
-    ``import a.b`` binds ``a`` to module ``a.b``, so the call ``a.b.fn()`` has
-    head ``a`` and rest ``b.fn``; the module already accounts for ``b``, leaving
-    member ``fn`` (target ``a.b::fn``). Single-segment modules (plain
-    ``import m``) leave ``rest`` unchanged.
+    ``import pkg.b`` binds ``pkg`` to module ``pkg.b``, so the call ``pkg.b.fn()``
+    walks the full module and takes member ``fn`` → (``pkg.b``, ``fn``), while the
+    partial walk ``pkg.fn()`` consumes only the head and resolves on the parent
+    package → (``pkg``, ``fn``). ``rest`` is consumed from the front only while
+    its segments match the module's own path, so a reference that merely reaches
+    the module (``pkg.b`` as a value) lands on the module itself with an empty
+    member. Single-segment modules (plain ``import m``) leave ``rest`` on ``m``.
     """
-    extra = len(mod.split(".")) - 1
-    if extra <= 0:
-        return rest
+    mod_parts = mod.split(".")
     rest_parts = rest.split(".")
-    if extra <= len(rest_parts):
-        return ".".join(rest_parts[extra:])
-    return rest  # rest shorter than the module's own segments: keep as-is
+    i = 0
+    while (i < len(rest_parts) and i + 1 < len(mod_parts)
+           and rest_parts[i] == mod_parts[i + 1]):
+        i += 1
+    member = ".".join(rest_parts[i:])
+    return ".".join(mod_parts[:i + 1]), member
 
 
 def _resolve_one(c: RawCall, local: dict, imports: dict,
@@ -228,12 +233,14 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                  mod_syms: dict | None = None,
                  source_module: str | None = None,
                  var_types: dict | None = None,
-                 path_aliases: dict[str, str] | None = None) -> Edge:
+                 path_aliases: dict[str, str] | None = None,
+                 class_qnames: set[str] | None = None) -> Edge:
     base = Edge(source=c.source_qname, target=c.target_expr, kind="call",
                 file_path=c.file_path, resolution="unresolved")
     if c.language == "java":
         return _resolve_java(c, local, imports, existing, mod_syms,
-                             source_module, base, var_types)
+                             source_module, base, var_types,
+                             class_qnames=class_qnames)
     if c.call_form == CALL_SIMPLE:
         name = c.target_expr
         if name in local:
@@ -255,10 +262,11 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
             mod, imp_name, _ = imports[head]
             mod = _module_of(mod, path_aliases, existing)  # alias @/x -> real module
             if imp_name is None:  # import m / import m as head -> m.rest
-                member = _module_member(mod, rest)
-                tgt = qname.join(mod, member) if member else mod
+                target_mod, member = _module_member(mod, rest)
+                tgt = qname.join(target_mod, member) if member else target_mod
                 if tgt not in existing:
-                    tgt = _resolve_reexport(mod, member, all_import_maps, existing) or tgt
+                    tgt = (_resolve_reexport(target_mod, member, all_import_maps, existing)
+                           if member else None) or tgt
                 return _resolved(base, tgt, existing)
         if head in local and local[head] in existing:
             cls_qn = local[head]
@@ -267,7 +275,7 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
         if c.language == "python" and head in ("self", "cls"):
             # method receiver -> enclosing class, mirroring Java's this./type
             # binding; bare `g()` stays module-scope (Python LEGB), not A.g
-            enclosing = _enclosing_class(c.source_qname)
+            enclosing = _enclosing_class(c.source_qname, class_qnames)
             if enclosing:
                 tgt = _join_target(enclosing, rest)
                 if tgt in existing:
@@ -316,13 +324,30 @@ def _join_target(mod: str, name: str) -> str:
     return qname.join(mod, name)
 
 
-def _enclosing_class(qualified_name: str) -> str | None:
-    """The first scope of a qname (the class containing a method), or None."""
+def _enclosing_class(qualified_name: str,
+                     class_qnames: set[str] | None = None) -> str | None:
+    """The innermost class enclosing a method qname, or None.
+
+    ``Outer.Inner.m`` calling ``self.g()`` binds to ``Outer.Inner``, not the
+    outermost ``Outer`` — the scope chain is walked longest-prefix-first and the
+    first prefix that is a known class wins (function scopes in between, e.g. a
+    closure ``C.m.inner``, are skipped so it still binds to ``C``). Without
+    ``class_qnames`` the previous behaviour is kept: the first scope of the
+    qname.
+    """
     mod = qname.module(qualified_name)
     rest = qualified_name[len(mod) + len(qname.MODULE_SEP):]
     if not rest:
         return None
-    first_scope = rest.split(qname.SCOPE_SEP, 1)[0]
+    scopes = rest.split(qname.SCOPE_SEP)
+    if class_qnames:
+        # longest scope prefix (excluding the leaf) that is a known class
+        for i in range(len(scopes) - 1, 0, -1):
+            prefix = qname.join(mod, qname.SCOPE_SEP.join(scopes[:i]))
+            if prefix in class_qnames:
+                return prefix
+        return None
+    first_scope = scopes[0]
     return qname.join(mod, first_scope)
 
 
@@ -366,7 +391,8 @@ def _resolve_java_type(type_name: str, source_module: str | None,
 
 def _resolve_java(c, local: dict, imports: dict, existing: set[str],
                   mod_syms: dict | None, source_module: str | None,
-                  base: Edge, var_types: dict | None = None) -> Edge:
+                  base: Edge, var_types: dict | None = None,
+                  class_qnames: set[str] | None = None) -> Edge:
     """Java-aware call resolution: simple / attribute / construct forms."""
     if c.call_form == CALL_SIMPLE:
         name = c.target_expr
@@ -381,7 +407,7 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
             same_pkg = mod_syms.get(source_module, {})
             if name in same_pkg:
                 return _resolved(base, same_pkg[name], existing)
-        enclosing = _enclosing_class(c.source_qname)
+        enclosing = _enclosing_class(c.source_qname, class_qnames)
         if enclosing:
             target = _join_target(enclosing, name)
             if target in existing:

@@ -136,6 +136,57 @@ def test_resolve_self_method_to_enclosing_class(tmp_path):
                    for e in edges)
 
 
+def test_resolve_self_in_nested_class_binds_innermost_class(tmp_path):
+    """self.g() inside a nested class's method binds to the innermost class
+    (Outer.Inner._check), not the outermost (Outer) — the enclosing-class chain
+    must walk to the innermost class scope."""
+    mod = tmp_path / "svc.py"
+    mod.write_text(
+        "class Outer:\n"
+        "    class Inner:\n"
+        "        def m(self):\n"
+        "            return self._check()\n"
+        "        def _check(self):\n"
+        "            return 1\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(mod), str(tmp_path))
+    qnames = {n.qualified_name for n in pf.nodes}
+    edges = resolve_calls([pf], qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    inner = Q("svc", "Inner", Q("svc", "Outer"))
+    m = Q("svc", "m", inner)
+    check = Q("svc", "_check", inner)
+    # self._check() -> Outer.Inner._check, resolved (was dynamic: bound to Outer)
+    assert (m, check, "resolved") in by
+    # the wrong outermost-class target must not appear
+    assert not any(e.source == m and e.target == Q("svc", "_check", Q("svc", "Outer"))
+                   for e in edges)
+
+
+def test_resolve_cls_method_receiver(tmp_path):
+    """cls.g() binds like self.g() — the classmethod receiver resolves to the
+    enclosing class's method (regression guard: the `cls` branch is the same
+    code path as `self`)."""
+    mod = tmp_path / "svc.py"
+    mod.write_text(
+        "class UserService:\n"
+        "    @classmethod\n"
+        "    def authenticate(cls):\n"
+        "        return cls._check()\n"
+        "    @classmethod\n"
+        "    def _check(cls):\n"
+        "        return 1\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(mod), str(tmp_path))
+    qnames = {n.qualified_name for n in pf.nodes}
+    edges = resolve_calls([pf], qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    svc = Q("svc", "UserService")
+    assert (Q("svc", "authenticate", svc), Q("svc", "_check", svc), "resolved") in by
+
+
 def test_resolve_module_level_class_receiver(tmp_path):
     """Config.get() where Config is a same-module class resolves to the class
     method — the `head in local` branch must join the scoped qname with '.' not
@@ -177,6 +228,36 @@ def test_resolve_import_package_submodule_attribute(tmp_path):
     assert (Q("main", "run"), "pkg.b::fn", "resolved") in by
     # the old wrong shape (module pkg.b, member b.fn) must not appear as an edge
     assert not any(e.target == "pkg.b::b.fn" for e in edges)
+
+
+def test_resolve_import_partial_module_walk(tmp_path):
+    """`import pkg.b` binds `pkg`; `pkg.fn()` walks only the head and resolves
+    to the package's own module member (pkg::fn), while `pkg.b.fn()` walks the
+    full module (pkg.b::fn) — a partial walk must not collapse to the imported
+    submodule itself."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("def fn():\n    return 1\n", encoding="utf-8")
+    (pkg / "b.py").write_text("def other():\n    return 2\n", encoding="utf-8")
+    main = tmp_path / "main.py"
+    main.write_text(
+        "import pkg.b\n"
+        "def run_pkg():\n"
+        "    return pkg.fn()\n"
+        "def run_sub():\n"
+        "    return pkg.b.other()\n",
+        encoding="utf-8",
+    )
+    files = [parse_file(str(pkg / "__init__.py"), str(tmp_path)),
+             parse_file(str(pkg / "b.py"), str(tmp_path)),
+             parse_file(str(main), str(tmp_path))]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_calls(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert (Q("main", "run_pkg"), "pkg::fn", "resolved") in by
+    assert (Q("main", "run_sub"), "pkg.b::other", "resolved") in by
+    # partial walk must not collapse to the imported submodule itself
+    assert not any(e.source == Q("main", "run_pkg") and e.target == "pkg.b" for e in edges)
 
 
 def test_resolve_dedups_repeated_calls_same_target(tmp_path):
