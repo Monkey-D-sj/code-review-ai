@@ -148,6 +148,45 @@ def test_multi_file_change_runs_leave_one_file_out_folds(tmp_path):
     assert all("all_candidate_files_count" in fold for fold in folds)
 
 
+def test_run_benchmark_reports_symbol_folds(tmp_path):
+    """Multi-symbol changes produce symbol-level folds whose gold is the OTHER
+    changed symbols (production impact surface); single-symbol changes produce
+    none. main calls login, so each reaches the other via impact."""
+    config = _config(tmp_path)
+    conn = connect(config.db_path)
+    init_schema(conn)
+    cases = load_cases(str(_manifest(tmp_path, [{
+        "id": "multi-symbol",
+        "changed_symbols": [Q("app", "main"), Q("auth", "login")],
+        "gold_files": ["auth.py"],
+    }, {
+        "id": "single-symbol",
+        "changed_symbols": [Q("auth", "login")],
+        "gold_files": ["auth.py"],
+    }])))
+
+    report = run_benchmark(config, conn, cases, top_k=5)
+
+    multi = report["cases"][0]
+    folds = multi["changed_symbol_folds"]
+    assert len(folds) == 2
+    assert {fold["seed_symbol"] for fold in folds} == {
+        Q("app", "main"), Q("auth", "login")}
+    # impact(main) reaches login and impact(login) reaches main — the other
+    # changed symbol of the same fix sits on the impact surface.
+    assert all(fold["recall_all"] == 1.0 for fold in folds)
+    assert report["cases"][1]["changed_symbol_folds"] == []
+
+    agg = report["aggregate"]
+    assert agg["changed_symbol_eligible_cases"] == 1
+    assert agg["changed_symbol_folds"] == 2
+    assert agg["macro_changed_symbol_recall_all"] == 1.0
+    assert agg["macro_changed_symbol_recall_at_k"] == 1.0
+    assert "macro_changed_symbol_precision_at_k" in agg
+    assert "macro_changed_symbol_precision_all" in agg
+    assert agg["mean_changed_symbol_candidate_count"] is not None
+
+
 def test_run_benchmark_rejects_invalid_top_k(tmp_path):
     config = _config(tmp_path)
     conn = connect(config.db_path)
@@ -225,3 +264,23 @@ def test_benchmark_includes_test_nodes_in_candidates(tmp_path):
     case = BenchmarkCase("x", ["svc::run"], {}, ["tests/test_svc.py"])
     report = run_benchmark(config, conn, [case], top_k=5)
     assert report["cases"][0]["patch_file_recall_all"] == 1.0
+
+
+def test_agentic_manifest_drives_both_harnesses():
+    """One unified manifest must parse in both the impact harness (benchmark)
+    and the full-agent harness, so a single case set yields both cheap impact
+    metrics and expensive agent F1. Every case needs changed_ranges (impact
+    seeds) and gold_files (gold test files) alongside the agent-side fields."""
+    from code_review_ai.full_agent_eval import load_full_agent_cases
+    manifest = (Path(__file__).resolve().parents[1]
+                / "benchmarks" / "agentic-eval-real-repos.json")
+    impact_cases = load_cases(str(manifest))
+    agent_cases = load_full_agent_cases(str(manifest))
+    assert len(impact_cases) == len(agent_cases) == 12
+    for impact, agent in zip(impact_cases, agent_cases):
+        assert impact.case_id == agent.case_id
+        assert impact.changed_ranges, "impact harness needs changed_ranges"
+        assert impact.gold_files, "impact harness needs gold test files"
+        assert impact.prompt == agent.prompt
+        assert impact.source_commit == agent.source_commit
+        assert impact.gold_findings

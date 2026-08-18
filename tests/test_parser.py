@@ -1,4 +1,5 @@
 from code_review_ai import qname
+from code_review_ai.config import DEFAULTS
 from code_review_ai.parser import parse_file, filter_excluded, is_test_node, CALL_SIMPLE, CALL_ATTRIBUTE, CALL_OTHER
 
 from conftest import FIXTURES as FIX, Q
@@ -48,6 +49,49 @@ def test_is_test_node_default_globs_skip_testish_prod_filenames():
     assert is_test_node("test_auth.py", "test_auth::test_login", globs, names)
 
 
+def test_is_test_node_default_globs_cover_java_and_js():
+    """The P0 audit gap: out of the box the defaults must recognize the common
+    Java and TS/JS test layouts, not only Python naming habits."""
+    globs, names = DEFAULTS["test_globs"], DEFAULTS["test_names"]
+    # Java: Maven/Gradle layout + class-name conventions
+    assert is_test_node("src/test/java/com/foo/LoginTest.java",
+                        "com.foo::LoginTest.checkLogin", globs, names)
+    assert is_test_node("src/main/java/com/foo/LoginTests.java",
+                        "com.foo::LoginTests.verify", globs, names)
+    assert is_test_node("com/foo/UserServiceTest.java",
+                        "com.foo::UserServiceTest.createUser", globs, names)
+    # TS/JS: Jest/Vitest/Mocha patterns
+    assert is_test_node("src/auth.test.ts", "src.auth::works", globs, names)
+    assert is_test_node("src/auth.spec.js", "src.auth::works", globs, names)
+    assert is_test_node("__tests__/auth.ts", "__tests__.auth::works", globs, names)
+    assert is_test_node("src/__tests__/auth.tsx", "src.__tests__.auth::works", globs, names)
+    # Python: *_test.py suffix convention
+    assert is_test_node("services/auth_test.py",
+                        "services.auth_test::check", globs, names)
+    # production code stays production
+    assert not is_test_node("src/main/java/com/foo/LoginService.java",
+                            "com.foo::LoginService.login", globs, names)
+    assert not is_test_node("src/auth.ts", "src.auth::login", globs, names)
+
+
+def test_is_test_node_matches_test_decorators():
+    """Framework annotations are a channel file/name globs can't see - JUnit
+    5's @Test tags a method even in a non-test-named file."""
+    globs, names = DEFAULTS["test_globs"], DEFAULTS["test_names"]
+    decorators = DEFAULTS["test_decorators"]
+    assert is_test_node("src/main/java/com/foo/Checks.java",
+                        "com.foo::Checks.valid", globs, names,
+                        decorators=["Test"], test_decorators=decorators)
+    assert is_test_node("src/main/java/com/foo/Checks.java",
+                        "com.foo::Checks.matrix", globs, names,
+                        decorators=["Override", "ParameterizedTest"],
+                        test_decorators=decorators)
+    # unrelated decorators don't tag
+    assert not is_test_node("src/main/java/com/foo/Checks.java",
+                            "com.foo::Checks.helper", globs, names,
+                            decorators=["Override"], test_decorators=decorators)
+
+
 def test_parse_extracts_nodes():
     pf = parse_file(f"{FIX}/auth.py", FIX)
     qn = {n.qualified_name: n for n in pf.nodes}
@@ -73,6 +117,22 @@ def test_parse_extracts_calls_and_imports():
     assert ("obj.run", CALL_ATTRIBUTE) in calls
     assert ("vals[0]", CALL_OTHER) in calls
     assert all(c.source_qname == Q("app","main") for c in pf.raw_calls)
+
+
+def test_parse_captures_call_arguments(tmp_path):
+    """DI calls in parameter defaults keep their args (Depends(get_db)) so the
+    resolver can link the route to the dependency."""
+    mod = tmp_path / "app.py"
+    mod.write_text(
+        "def get_db():\n"
+        "    return None\n"
+        "def route(user_id: str, db=Depends(get_db, use_cache=False)):\n"
+        "    return db\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(mod), str(tmp_path))
+    depends = [c for c in pf.raw_calls if c.target_expr == "Depends"]
+    assert depends and depends[0].args == ("get_db", "use_cache=False")
 
 
 def test_filter_excluded_nested_directory_patterns():

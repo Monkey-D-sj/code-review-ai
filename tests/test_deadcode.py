@@ -58,6 +58,45 @@ def test_find_dead_code_excludes_entry_decorator(tmp_path):
     assert all(s["qname"] != Q("web", "index") for s in payload["symbols"])
 
 
+def test_find_dead_code_excludes_spring_mapping(tmp_path):
+    """A Spring @GetMapping handler has no static callers (in_degree=0) but the
+    default entry_decorators now include the mapping annotations, so it must
+    not be reported as a dead-code candidate."""
+    cfg = load_config(FIX)
+    cfg.db_path = str(tmp_path / "x.db")
+    cfg.repo_path = str(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    conn.execute(
+        "INSERT INTO nodes(qualified_name,kind,file_path,start_line,signature,"
+        "decorators,in_degree,is_test) VALUES(?,?,?,?,?,?,0,0)",
+        (Q("com.example", "list"), "method", "HomeController.java", 1,
+         "public String list()", json.dumps(["GetMapping"])))
+    conn.commit()
+    payload = find_dead_code(conn, cfg)
+    assert all(s["qname"] != Q("com.example", "list")
+               for s in payload["symbols"])
+
+
+def test_find_dead_code_excludes_flask_blueprint_route(tmp_path):
+    """A Flask Blueprint handler is decorated with the *instance* name
+    (`@bp.route`), which only the default `*.route` entry_decorators pattern
+    matches — the exact `app.route` never would. It must not be dead code."""
+    cfg = load_config(FIX)
+    cfg.db_path = str(tmp_path / "x.db")
+    cfg.repo_path = str(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    conn.execute(
+        "INSERT INTO nodes(qualified_name,kind,file_path,start_line,signature,"
+        "decorators,in_degree,is_test) VALUES(?,?,?,?,?,?,0,0)",
+        (Q("web", "index"), "function", "web.py", 1,
+         "def index():", json.dumps(["bp.route"])))
+    conn.commit()
+    payload = find_dead_code(conn, cfg)
+    assert all(s["qname"] != Q("web", "index") for s in payload["symbols"])
+
+
 def test_find_dead_code_excludes_test_and_entry_name(tmp_path):
     cfg = load_config(FIX)
     cfg.db_path = str(tmp_path / "x.db")

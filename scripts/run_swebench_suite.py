@@ -64,13 +64,44 @@ def _summary(results: list[dict], top_k: int, dataset_name: str) -> dict:
     mean = lambda key: round(sum(result[key] for result in results) / count, 4)
     folds = [fold for result in results for fold in result["production_file_folds"]]
     eligible_cases = sum(bool(result["production_file_folds"]) for result in results)
+    symbol_folds = [fold for result in results
+                    for fold in result["changed_symbol_folds"]]
+    symbol_eligible = sum(bool(result["changed_symbol_folds"]) for result in results)
     return {
         "schema_version": 2,
         "dataset": dataset_name,
-        "metric_target": "gold historical test files",
+        "metric_target": "fix 触及的生产符号集 (impact reachability); 测试召回为诊断指标",
         "top_k": top_k,
         "aggregate": {
             "cases": count,
+            # production impact surface — the review axis (can the graph surface
+            # the fix's touched symbols + their consumers)
+            "changed_symbol_eligible_cases": symbol_eligible,
+            "changed_symbol_folds": len(symbol_folds),
+            "macro_changed_symbol_recall_at_k": _fold_mean(
+                symbol_folds, "recall_at_k"),
+            "macro_changed_symbol_precision_at_k": _fold_mean(
+                symbol_folds, "precision_at_k"),
+            "macro_changed_symbol_recall_all": _fold_mean(
+                symbol_folds, "recall_all"),
+            "macro_changed_symbol_precision_all": _fold_mean(
+                symbol_folds, "precision_all"),
+            "mean_changed_symbol_candidate_count": _fold_mean(
+                symbol_folds, "candidate_count"),
+            "production_file_eligible_cases": eligible_cases,
+            "production_file_folds": len(folds),
+            "macro_related_production_file_recall_at_k": _fold_mean(
+                folds, "recall_at_k"),
+            "macro_related_production_file_precision_at_k": _fold_mean(
+                folds, "precision_at_k"),
+            "macro_related_production_file_recall_all": _fold_mean(
+                folds, "recall_all"),
+            "macro_related_production_file_precision_all": _fold_mean(
+                folds, "precision_all"),
+            "mean_production_all_candidate_files": _fold_mean(
+                folds, "all_candidate_files_count"),
+            # diagnostic — test recall serves CI regression selection, not the
+            # review axis (see benchmark module docstring)
             "macro_test_file_recall_at_k": mean("patch_file_recall_at_k"),
             "macro_test_file_precision_at_k": mean("patch_file_precision_at_k"),
             "macro_test_file_recall_all": mean("patch_file_recall_all"),
@@ -90,18 +121,6 @@ def _summary(results: list[dict], top_k: int, dataset_name: str) -> dict:
             "mean_resolved_call_rate": round(sum(
                 result["index"]["resolved_call_rate"] for result in results
             ) / count, 4),
-            "production_file_eligible_cases": eligible_cases,
-            "production_file_folds": len(folds),
-            "macro_related_production_file_recall_at_k": _fold_mean(
-                folds, "recall_at_k"),
-            "macro_related_production_file_precision_at_k": _fold_mean(
-                folds, "precision_at_k"),
-            "macro_related_production_file_recall_all": _fold_mean(
-                folds, "recall_all"),
-            "macro_related_production_file_precision_all": _fold_mean(
-                folds, "precision_all"),
-            "mean_production_all_candidate_files": _fold_mean(
-                folds, "all_candidate_files_count"),
         },
         "cases": results,
     }

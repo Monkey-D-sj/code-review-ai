@@ -40,29 +40,43 @@ Options: `--scope user|project|local`, `--name <server-name>`, `--from <source>`
 claude mcp add code-review-ai -s user -- uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai-mcp
 ```
 
-### Register with Codex
+### Install into the Codex user environment
+
+Run the project installer to register the MCP server in the installing user's
+`~/.codex/config.toml`, deploy the six review skills to `~/.codex/skills`, and
+refresh the global `~/.codex/AGENTS.md` usage instructions:
 
 ```bash
 code-review-ai install --platform codex
 ```
 
-This deploys the four review skills to `~/.codex/skills/` and appends the MCP
-tool-usage docs to `~/.codex/AGENTS.md` (marker-guarded, idempotent). Codex
-has no `codex mcp add` CLI, so MCP registration is manual — add a block to
-`~/.codex/config.toml`:
+Restart Codex after installation. The command uses Codex's supported
+`codex mcp add` flow, so the ChatGPT desktop app, Codex CLI, and IDE extension
+share the configured MCP server.
+
+### Install the Codex plugin (optional)
+
+The repository root is also the Codex plugin. Its `skills/` entry is a link to
+the same `code_review_ai/skills` files that the Python installer deploys, so
+there is only one skill source. Add its repo-local marketplace, then install
+**Code Review AI** from the Codex plugin UI:
+
+```bash
+codex plugin marketplace add .
+```
+
+The plugin bundles six review skills (`code-review-langs`,
+`code-review-methodology`, and the Python, TypeScript, JavaScript, and Java
+language rules) and registers the MCP server through `uvx`. After installation,
+start a new Codex task so the skills and tools are available together.
+
+For manual or CI-only MCP registration without the skills, configure:
 
 ```toml
 [mcp_servers.code-review-ai]
 command = "uvx"
 args = ["--from", "git+https://github.com/Monkey-D-sj/code-review-ai", "code-review-ai-mcp"]
-type = "stdio"
 ```
-
-Both installs also deploy four user-scope code-review skills:
-`code-review-langs` (entry/router) plus `code-review-python`,
-`code-review-typescript`, and `code-review-javascript`, each carrying the
-static review rules for its language. They coexist with any existing
-`code-review` skill and never call the MCP graph tools.
 
 ## MCP tools
 

@@ -1,3 +1,6 @@
+import fnmatch
+import re
+
 from code_review_ai import qname
 
 from dataclasses import dataclass
@@ -5,6 +8,11 @@ from dataclasses import dataclass
 from code_review_ai.parser import (ParsedFile, RawCall, CALL_SIMPLE,
                                    CALL_ATTRIBUTE, CALL_CONSTRUCT,
                                    SOURCE_SUFFIXES)
+# Bare identifier or dotted path — the shapes a DI-marker argument takes when it
+# names a dependency (``get_db``, ``services.get_db``). Everything else — calls,
+# literals, keyword args like ``use_cache=False``, ``...`` — is not a dependency
+# reference and is skipped.
+_DI_ARG_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*")
 
 
 @dataclass
@@ -114,7 +122,8 @@ def _dedup_append(edges: list[Edge], seen: set[tuple[str, str, str]],
 
 
 def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
-                  path_aliases: dict[str, str] | None = None) -> list[Edge]:
+                  path_aliases: dict[str, str] | None = None,
+                  dependency_markers: list[str] | None = None) -> list[Edge]:
     mod_syms = _module_symbols(parsed_files)
     all_import_maps = {pf.module_qname: _import_map(pf, path_aliases, existing_qnames)
                        for pf in parsed_files}
@@ -132,13 +141,86 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                                 var_types=var_types, path_aliases=path_aliases)
             _dedup_append(edges, seen, edge)
             if edge.resolution == "resolved" and edge.target in class_qnames:
-                init_qn = qname.join(qname.module(edge.target), "__init__", edge.target)
+                init_qn = _init_member_qname(edge.target, c.language)
                 if init_qn in existing_qnames:
                     _dedup_append(edges, seen, Edge(
                         source=edge.source, target=init_qn, kind="call",
                         file_path=edge.file_path,
                         resolution="resolved"))
+            if dependency_markers and _is_di_marker(c.target_expr, dependency_markers):
+                for dep_qn in _resolve_di_args(c, local, imports, existing_qnames,
+                                               all_import_maps, mod_syms=mod_syms,
+                                               source_module=pf.module_qname,
+                                               var_types=var_types,
+                                               path_aliases=path_aliases):
+                    _dedup_append(edges, seen, Edge(
+                        source=c.source_qname, target=dep_qn, kind="call",
+                        file_path=c.file_path, resolution="resolved"))
     return edges
+
+
+def _init_member_qname(class_qn: str, language: str) -> str:
+    """The constructor member a class-instantiating edge also links to.
+
+    Python classes initialize via ``__init__``; Java constructors are declared
+    with the class's own name, so the member is ``Class.Class`` - reusing the
+    class short name instead of Python's ``__init__`` convention (which never
+    exists in Java and made the extra edge silently unresolvable)."""
+    member = "__init__" if language != "java" else qname.short(class_qn)
+    return qname.join(qname.module(class_qn), member, class_qn)
+
+
+def _is_di_marker(target_expr: str, markers: list[str]) -> bool:
+    """True when a call's target short name matches a dependency_markers glob
+    (mirrors entry_names matching: fnmatch against qname.short)."""
+    return any(fnmatch.fnmatch(qname.short(target_expr), pat) for pat in markers)
+
+
+def _resolve_di_args(c: RawCall, local: dict, imports: dict,
+                     existing: set[str], all_import_maps: dict,
+                     mod_syms: dict | None = None,
+                     source_module: str | None = None,
+                     var_types: dict | None = None,
+                     path_aliases: dict[str, str] | None = None) -> list[str]:
+    """Resolve the callable arguments of a DI-marker call (``Depends(get_db)``)
+    to qnames by reusing _resolve_one on a fabricated RawCall — the same
+    local/import/reexport machinery as any normal call.
+
+    Only bare-identifier / dotted-path args qualify; expressions (nested calls,
+    literals, keyword args) yield nothing — nested calls like ``Depends(make_db())``
+    are already captured by the parser as their own RawCall, so only the bare
+    dependency-reference gap is filled here.
+    """
+    resolved: list[str] = []
+    for arg in c.args:
+        if not _DI_ARG_RE.fullmatch(arg):
+            continue
+        fake = RawCall(source_qname=c.source_qname, target_expr=arg,
+                       call_form=CALL_SIMPLE if "." not in arg else CALL_ATTRIBUTE,
+                       file_path=c.file_path, language=c.language)
+        edge = _resolve_one(fake, local, imports, existing, all_import_maps,
+                            mod_syms=mod_syms, source_module=source_module,
+                            var_types=var_types, path_aliases=path_aliases)
+        if edge.resolution == "resolved":
+            resolved.append(edge.target)
+    return resolved
+
+
+def _module_member(mod: str, rest: str) -> str:
+    """The member name once a module's own segments are consumed from `rest`.
+
+    ``import a.b`` binds ``a`` to module ``a.b``, so the call ``a.b.fn()`` has
+    head ``a`` and rest ``b.fn``; the module already accounts for ``b``, leaving
+    member ``fn`` (target ``a.b::fn``). Single-segment modules (plain
+    ``import m``) leave ``rest`` unchanged.
+    """
+    extra = len(mod.split(".")) - 1
+    if extra <= 0:
+        return rest
+    rest_parts = rest.split(".")
+    if extra <= len(rest_parts):
+        return ".".join(rest_parts[extra:])
+    return rest  # rest shorter than the module's own segments: keep as-is
 
 
 def _resolve_one(c: RawCall, local: dict, imports: dict,
@@ -173,14 +255,23 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
             mod, imp_name, _ = imports[head]
             mod = _module_of(mod, path_aliases, existing)  # alias @/x -> real module
             if imp_name is None:  # import m / import m as head -> m.rest
-                tgt = qname.join(mod, rest)
+                member = _module_member(mod, rest)
+                tgt = qname.join(mod, member) if member else mod
                 if tgt not in existing:
-                    tgt = _resolve_reexport(mod, rest, all_import_maps, existing) or tgt
+                    tgt = _resolve_reexport(mod, member, all_import_maps, existing) or tgt
                 return _resolved(base, tgt, existing)
         if head in local and local[head] in existing:
             cls_qn = local[head]
-            tgt = qname.join(cls_qn, rest)
+            tgt = _join_target(cls_qn, rest)
             return _resolved(base, tgt, existing)
+        if c.language == "python" and head in ("self", "cls"):
+            # method receiver -> enclosing class, mirroring Java's this./type
+            # binding; bare `g()` stays module-scope (Python LEGB), not A.g
+            enclosing = _enclosing_class(c.source_qname)
+            if enclosing:
+                tgt = _join_target(enclosing, rest)
+                if tgt in existing:
+                    return _resolved(base, tgt, existing)
         base.resolution = "dynamic"
         return base
     return base  # other -> unresolved
@@ -410,18 +501,66 @@ def _build_inherits(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
     return edges
 
 
+def _is_di_annotated(annotations: list[str], di_annotations: list[str] | None) -> bool:
+    """True when a declaration's annotation matches a configured di_annotations
+    glob (fnmatch against the annotation name, mirroring dependency_markers)."""
+    return any(fnmatch.fnmatch(annotation, pat)
+               for annotation in annotations for pat in (di_annotations or []))
+
+
+def _build_di_edges(parsed: list[ParsedFile], existing: set[str], mod_syms: dict,
+                    all_import_maps: dict,
+                    di_annotations: list[str] | None) -> list[Edge]:
+    """Annotation/constructor DI edges: injection point -> dependency class.
+
+    Field injection (``@Autowired private OwnerRepository owners;``) requires an
+    annotation matching di_annotations; constructor parameters are always
+    candidates (a repo-typed ctor param is a real type dependency, framework or
+    not - Spring injects single-constructor params even unannotated). The dep
+    type must resolve to a repo class (same-package -> import, via
+    _resolve_java_type); primitives/String/external types drop out naturally.
+    kind="call" matches the existing Depends()-marker DI edges, so in_degree /
+    flow / dead-code consume them the same way."""
+    edges: list[Edge] = []
+    seen: set[tuple[str, str, str]] = set()
+    for pf in parsed:
+        if pf.language != "java" or not pf.di_decls:
+            continue
+        imports = all_import_maps.get(pf.module_qname, {})
+        for decl in pf.di_decls:
+            if (decl.mechanism == "field"
+                    and not _is_di_annotated(decl.annotations, di_annotations)):
+                continue
+            class_qn = _resolve_java_type(decl.dep_expr, pf.module_qname,
+                                          imports, mod_syms)
+            if not class_qn or class_qn not in existing:
+                continue
+            _dedup_append(edges, seen, Edge(
+                source=decl.owner_qname, target=class_qn, kind="call",
+                file_path=pf.file_path, resolution="resolved"))
+    return edges
+
+
 def resolve_edges(parsed: list[ParsedFile],
                   existing_qnames: set[str],
-                  path_aliases: dict[str, str] | None = None) -> list[Edge]:
+                  path_aliases: dict[str, str] | None = None,
+                  dependency_markers: list[str] | None = None,
+                  di_annotations: list[str] | None = None) -> list[Edge]:
     """Resolve all edges — call, contains, import, inherits — from parsed files.
 
     This is the single entry point for edge generation. Indexer calls this
     once and gets the complete edge list.
     """
-    edges = resolve_calls(parsed, existing_qnames, path_aliases)
+    edges = resolve_calls(parsed, existing_qnames, path_aliases,
+                          dependency_markers)
     edges.extend(_build_contains(parsed, existing_qnames))
     edges.extend(_build_imports(parsed, existing_qnames, path_aliases))
     edges.extend(_build_inherits(parsed, existing_qnames))
+    mod_syms = _module_symbols(parsed)
+    import_maps = {pf.module_qname: _import_map(pf, path_aliases, existing_qnames)
+                   for pf in parsed}
+    edges.extend(_build_di_edges(parsed, existing_qnames, mod_syms,
+                                 import_maps, di_annotations))
     from code_review_ai.java_routing import build_route_edges
     edges.extend(build_route_edges(parsed, existing_qnames))
     return edges

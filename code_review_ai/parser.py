@@ -1,6 +1,7 @@
 
 import fnmatch
 import os
+import posixpath
 import re
 import subprocess
 import threading
@@ -199,12 +200,15 @@ class RawCall:
     source_qname — who makes the call (qualified name of enclosing function/module)
     target_expr — the raw text of the call target, e.g. ``login``, ``a.login``, ``vals[0]``
     call_form  — CALL_SIMPLE / CALL_ATTRIBUTE / CALL_OTHER
+    args       — raw texts of the call's top-level arguments (``Depends(get_db)`` → ``("get_db",)``);
+                 consumed by the resolver to link DI-marker args (see dependency_markers)
     """
     source_qname: str
     target_expr: str
     call_form: str
     file_path: str
     language: str = "python"
+    args: tuple[str, ...] = ()
 
 
 @dataclass
@@ -224,6 +228,26 @@ class ImportEntry:
 
 
 @dataclass
+class DiDecl:
+    """A dependency-injection declaration extracted from AST, before resolution.
+
+    owner_qname - who receives the dependency: the class (field injection) or
+                  the constructor (constructor-injection parameters)
+    dep_expr    - declared type name of the injected dependency
+    annotations - decorator/annotation names on the declaration; empty for
+                  unannotated constructor params (Spring's implicit injection)
+    mechanism   - "field" | "constructor"
+
+    Kept config-free at parse time; the resolver filters field declarations by
+    the configured di_annotations and drops deps whose type is not a repo class.
+    """
+    owner_qname: str
+    dep_expr: str
+    annotations: list[str] = field(default_factory=list)
+    mechanism: str = "field"
+
+
+@dataclass
 class ParsedFile:
     file_path: str
     module_qname: str
@@ -233,6 +257,7 @@ class ParsedFile:
     imports: list[ImportEntry] = field(default_factory=list)
     inherits: list[RawInherit] = field(default_factory=list)
     var_types: dict[str, dict[str, str]] = field(default_factory=dict)
+    di_decls: list[DiDecl] = field(default_factory=list)
 
 
 def list_source_files(repo_path: str, extensions: list[str] | None = None) -> list[str]:
@@ -281,7 +306,8 @@ def filter_excluded(files: list[str], patterns: list[str]) -> list[str]:
 
 def is_test_node(file_path: str, qualified_name: str,
                  test_globs: list[str], test_names: list[str],
-                 repo_root: str = "") -> bool:
+                 repo_root: str = "", decorators: list[str] | None = None,
+                 test_decorators: list[str] | None = None) -> bool:
     """True if a node lives in a test file or has a test-style short name.
 
     File-path globs (``test_globs``) are matched against the **repo-relative**
@@ -292,13 +318,20 @@ def is_test_node(file_path: str, qualified_name: str,
     directory chain; the ``*/``-stripped pattern is also matched against the
     path and the bare filename so ``*/test*`` catches a top-level
     ``test_auth.py``. Name globs (``test_names``) match the node's short name
-    (e.g. ``test_*`` -> ``test_login``). Either match wins.
+    (e.g. ``test_*`` -> ``test_login``). Decorator globs (``test_decorators``)
+    match the node's decorator names (e.g. JUnit 5 ``@Test`` -> ``"Test"``) -
+    the framework-annotation channel that file/name conventions can't see.
+    Either match wins.
     """
     rel = _repo_relative_path(file_path, repo_root)
     if _matches_test_globs(rel, test_globs):
         return True
     short = qname.short(qualified_name)
-    return any(fnmatch.fnmatch(short, pat) for pat in test_names)
+    if any(fnmatch.fnmatch(short, pat) for pat in test_names):
+        return True
+    return bool(decorators and test_decorators
+                and any(fnmatch.fnmatch(dec, pat)
+                        for dec in decorators for pat in test_decorators))
 
 
 def _repo_relative_path(file_path: str, repo_root: str) -> str:
@@ -445,6 +478,67 @@ def _java_locals(node, scope) -> None:
                     if name_node is not None:
                         scope[name_node.text.decode("utf-8")] = type_name
         _java_locals(child, scope)
+
+
+def _collect_java_di(root, module_qname, lang) -> list[DiDecl]:
+    """Java DI declarations per file: annotated fields + constructor params.
+
+    Field declarations are collected only when annotated (which annotation
+    qualifies is the resolver's config call, so parse stays config-free);
+    constructor params are collected unconditionally - a constructor holding
+    a repo-typed dependency is a real type dependency regardless of framework
+    (Spring injects single-constructor params even without @Autowired)."""
+    out: list[DiDecl] = []
+    class_defs = lang.get("class_def_nodes")
+    for child in root.children:
+        if class_defs and child.type in class_defs:
+            _java_class_di(child, module_qname, lang, out)
+    return out
+
+
+def _java_class_di(node, module_qname, lang, out) -> None:
+    """Collect one class's DI declarations: annotated fields (owner = class)
+    and constructor parameters (owner = the constructor qname, so DI edges
+    chain off the `new Foo()` -> constructor edge)."""
+    body = node.child_by_field_name("body")
+    members = body.children if body is not None else []
+    cls_name_node = node.child_by_field_name("name")
+    if cls_name_node is None:
+        return
+    cls_qname = qname.join(module_qname, cls_name_node.text.decode("utf-8"))
+    deco_types = _decorator_types(lang)
+    for member in members:
+        if member.type == "field_declaration":
+            annotations = [_decorator_name(a)
+                           for a in _annotation_children(member, deco_types, lang)]
+            if not annotations:
+                continue  # unannotated fields are not injection points
+            type_name = _type_base_name(member.child_by_field_name("type"))
+            if type_name is not None:
+                out.append(DiDecl(cls_qname, type_name, annotations, "field"))
+        elif member.type == "constructor_declaration":
+            _java_ctor_di(member, module_qname, cls_qname, lang, deco_types, out)
+
+
+def _java_ctor_di(member, module_qname, cls_qname, lang, deco_types,
+                  out) -> None:
+    """DiDecls for one constructor's parameters (owner = constructor qname)."""
+    ctor_name = member.child_by_field_name("name")
+    if ctor_name is None:
+        return
+    ctor_qname = qname.join(module_qname, ctor_name.text.decode("utf-8"), cls_qname)
+    params_node = member.child_by_field_name("parameters")
+    if params_node is None:
+        return
+    for param in params_node.children:
+        if param.type != "formal_parameter":
+            continue
+        type_name = _type_base_name(param.child_by_field_name("type"))
+        if type_name is None:
+            continue  # primitive / var - never a repo class
+        annotations = [_decorator_name(a)
+                       for a in _annotation_children(param, deco_types, lang)]
+        out.append(DiDecl(ctor_qname, type_name, annotations, "constructor"))
 
 
 def _collect_java_mappings(root, module_qname, lang) -> dict[str, list[tuple[str, str]]]:
@@ -738,6 +832,7 @@ def _walk_inherits(node, module_qname, lang, out: list):
 
 
 def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> ParsedFile:
+    explicit_lang = lang is not None  # caller-passed dict wins over any .vue lang
     if lang is None:
         lang_name, lang, ts_lang = _lang_for_path(file_path)
     else:
@@ -748,7 +843,13 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     original_line_count = 0
     if file_path.endswith(".vue"):
         original_line_count = source.count(b"\n") + 1
-        source, line_offset = _extract_vue_script(source)
+        source, line_offset, vue_lang = _extract_vue_script(source)
+        if vue_lang and not explicit_lang:
+            # pick the JS/TS dialect from the block's `lang` attribute
+            # (plain <script> is Vue's JS default); ts_lang stays the base
+            # TypeScript grammar — JS files already share it.
+            lang_name = vue_lang
+            lang = LANG[vue_lang]
     tree = _parser(ts_lang).parse(source)
     root = tree.root_node
     if lang_name == "java":
@@ -770,11 +871,13 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     # handle edges
     mockmvc_requests: list[tuple[str, tuple[str, str]]] = []
     _walk_calls(root, module_qname, None, lang, pf.raw_calls, mockmvc_requests)
-    pf.imports = _extract_imports(root, module_qname, lang, lang_name, file_path)
+    pf.imports = _extract_imports(root, module_qname, lang, lang_name,
+                                  file_path, repo_root)
     # handle inheritance
     _walk_inherits(root, module_qname, lang, pf.inherits)
     if lang_name == "java":
         pf.var_types = _collect_java_var_types(root, module_qname, lang)
+        pf.di_decls = _collect_java_di(root, module_qname, lang)
         mappings = _collect_java_mappings(root, module_qname, lang)
         for n in pf.nodes:
             if n.qualified_name in mappings:
@@ -827,6 +930,29 @@ def _call_target(func_node) -> tuple[str, str]:
     if t in ("attribute", "member_expression"):
         return func_node.text.decode("utf-8"), CALL_ATTRIBUTE
     return func_node.text.decode("utf-8"), CALL_OTHER
+
+
+_ARG_PUNCT = {"(", ")", "[", "]", ",", "comment"}
+
+
+def _call_args(node, lang) -> tuple[str, ...]:
+    """Raw texts of a call's top-level arguments, or () when none.
+
+    TS/JS/Java name the container as an ``arguments`` field; Python's is a bare
+    ``argument_list`` child node. Both hold the args plus punctuation/separator
+    nodes, which are filtered out. Texts are kept verbatim (identifiers, keyword
+    args like ``use_cache=False``, nested calls, literals) — the resolver decides
+    which are dependency references.
+    """
+    args_node = node.child_by_field_name("arguments")
+    if args_node is None:
+        args_node = next((c for c in node.children
+                          if c.type == "argument_list"), None)
+    if args_node is None:
+        return ()
+    return tuple(child.text.decode("utf-8")
+                 for child in args_node.children
+                 if child.type not in _ARG_PUNCT)
 
 
 def _call_target_for(node, lang) -> tuple[str | None, str | None]:
@@ -908,6 +1034,7 @@ def _walk_calls(node, module_qname, cur_scope, lang, out,
                     source_qname=cur_scope or module_qname,
                     target_expr=expr, call_form=form,
                     file_path="",
+                    args=_call_args(child, lang),
                 ))
             if mockmvc_requests is not None and lang.get("mockmvc_capture"):
                 request = _mockmvc_request(child, lang)
@@ -947,12 +1074,12 @@ def _dotted(node) -> str:
 
 
 def _extract_imports(root, module_qname, lang, lang_name: str,
-                     file_path: str) -> list[ImportEntry]:
+                     file_path: str, repo_root: str = "") -> list[ImportEntry]:
     if lang_name == "python":
         return _extract_imports_python(root, module_qname, lang, file_path)
     if lang_name == "java":
         return _extract_imports_java(root, lang)
-    return _extract_imports_esm(root, lang)
+    return _extract_imports_esm(root, lang, file_path, repo_root)
 
 
 def _extract_imports_java(root, lang) -> list[ImportEntry]:
@@ -1031,8 +1158,47 @@ def _extract_imports_python(root, module_qname, lang,
     return entries
 
 
-def _extract_imports_esm(root, lang) -> list[ImportEntry]:
+def _esm_relative_module(spec: str, file_path: str, repo_root: str) -> str | None:
+    """Canonical module qname for a relative ESM specifier (``./auth``,
+    ``../lib/x``), or None for non-relative specs / specs escaping the repo.
+
+    Mirrors ``_module_qname``'s path-to-qname conventions: a known source
+    suffix is stripped from the last segment (so explicit ``./auth.ts`` and
+    bare ``./auth`` agree), a leading ``src/`` segment is dropped. Directory
+    ``index`` files are not resolved (deferred) - a bare-directory spec yields
+    the directory's qname, which simply stays unresolved if no such module
+    exists. Path-based (not module-qname-parts-based) so imports that hop out
+    of a stripped ``src/`` tree still land on the right root-level module.
+    """
+    if not spec.startswith("."):
+        return None
+    rel = _repo_relative_path(file_path, repo_root)
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(rel), spec))
+    if target.startswith(".."):
+        return None  # escapes the repo root - keep the raw specifier
+    parts = [part for part in target.split("/") if part not in ("", ".")]
+    if not parts:
+        return None
+    for ext in SOURCE_SUFFIXES:
+        if parts[-1].endswith(ext):
+            parts[-1] = parts[-1][: -len(ext)]
+            break
+    if parts and parts[0] == "src":
+        parts = parts[1:]
+    if not parts:
+        return None
+    return ".".join(parts)
+
+
+def _extract_imports_esm(root, lang, file_path: str,
+                         repo_root: str) -> list[ImportEntry]:
     """Extract ES module imports: import/export statements.
+
+    Relative specifiers (./auth, ../lib/x) are canonicalized to the imported
+    module's qname at parse time - the same policy as Python relative imports -
+    so call/import resolution matches real repo modules instead of keeping the
+    raw "./auth" text. Non-relative specifiers (package names, configured path
+    aliases) pass through unchanged.
 
     Handles:
       import {a, b} from "mod"     → imported_name per specifier
@@ -1040,10 +1206,13 @@ def _extract_imports_esm(root, lang) -> list[ImportEntry]:
       import d from "mod"          → default (imported_name="default")
       export {x} from "mod"        → re-export (treated as import)
     """
+    def _mod(source: str) -> str:
+        return _esm_relative_module(source, file_path, repo_root) or source
+
     entries: list[ImportEntry] = []
     for node in root.children:
         if node.type == "import_statement":
-            source = _esm_source(node)
+            source = _mod(_esm_source(node))
             clause = _find_child(node, "import_clause")
             if clause is None and source:
                 # side-effect import: import "mod"
@@ -1068,7 +1237,7 @@ def _extract_imports_esm(root, lang) -> list[ImportEntry]:
                     # default import: import foo from "mod"
                     entries.append(ImportEntry(child.text.decode("utf-8"), source, "default", False))
         elif node.type == "export_statement":
-            source = _esm_source(node)
+            source = _mod(_esm_source(node))
             if not source:
                 continue
             # re-exports: export {x} from "mod"
@@ -1084,26 +1253,34 @@ def _extract_imports_esm(root, lang) -> list[ImportEntry]:
     return entries
 
 
-_VUE_SCRIPT_RE = re.compile(r"<script[^>]*>(.*?)</script>", re.DOTALL)
+_VUE_SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script>", re.DOTALL)
+_VUE_LANG_RE = re.compile(r"lang\s*=\s*[\"']?([\w-]+)")
 
 
-def _extract_vue_script(source: bytes) -> tuple[bytes, int]:
-    """Extract concatenated <script> blocks from a .vue SFC.
+def _extract_vue_script(source: bytes) -> tuple[bytes, int, str | None]:
+    """Extract concatenated <script> blocks from a .vue SFC, choosing the
+    script dialect from the blocks' `lang` attribute.
 
-    Returns (script_bytes, line_offset) where line_offset is the 0-based
-    line index of the first script block's content, to be added to all
-    line numbers from tree-sitter (which are 0-based).
+    Returns (script_bytes, line_offset, lang_name) — line_offset is the
+    0-based line index of the first block's content, to be added to all
+    tree-sitter line numbers (which are 0-based). lang_name is
+    "typescript" when any block declares lang="ts"/"tsx", "javascript"
+    (Vue's plain-<script> default) otherwise — including lang="js"/"jsx"
+    and blocks with no lang at all. None when the file has no <script>.
     """
     text = source.decode("utf-8")
     match = _VUE_SCRIPT_RE.search(text)
     if match is None:
-        return source, 0
-    # Count newlines before the match end of the opening tag
+        return source, 0, None
+    # Count newlines before the start of the first block's content
     # <script ...>\n  ← content starts here
-    tag_end = match.start(1)  # start of group 1 = start of script content
+    tag_end = match.start(2)
     line_offset = text[:tag_end].count("\n")
-    parts = _VUE_SCRIPT_RE.findall(text)
-    return "\n".join(parts).encode("utf-8"), line_offset
+    parts = _VUE_SCRIPT_RE.findall(text)  # list of (attrs, content)
+    langs = [m.group(1).lower() for attrs, _content in parts
+             if (m := _VUE_LANG_RE.search(attrs))]
+    lang_name = "typescript" if any(l.startswith("ts") for l in langs) else "javascript"
+    return "\n".join(content for _attrs, content in parts).encode("utf-8"), line_offset, lang_name
 
 
 def _find_child(node, child_type: str):

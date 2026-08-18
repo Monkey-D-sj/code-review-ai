@@ -217,7 +217,8 @@ def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
     new_qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
     global_set = remaining | new_qnames
     node_count = _insert_nodes(conn, parsed, config, skip_qnames=remaining)
-    edges = resolve_edges(parsed, global_set, config.path_aliases)
+    edges = resolve_edges(parsed, global_set, config.path_aliases,
+                          config.dependency_markers, config.di_annotations)
     _insert_edges(conn, edges)
     recompute_degrees(conn)
     return node_count, len(edges)
@@ -238,7 +239,8 @@ def _update_survivors(conn, parsed, survivors: dict[str, int], config) -> None:
                 n.signature,
                 1 if is_test_node(n.file_path, n.qualified_name,
                                   config.test_globs, config.test_names,
-                                  config.repo_path) else 0,
+                                  config.repo_path, n.decorators,
+                                  config.test_decorators) else 0,
                 json.dumps(n.decorators), node_id))
     if updates:
         conn.executemany(
@@ -264,7 +266,8 @@ def _insert_nodes(conn, parsed, config, skip_qnames=frozenset()) -> int:
                          n.start_line, n.end_line, n.signature,
                          1 if is_test_node(n.file_path, n.qualified_name,
                                            config.test_globs, config.test_names,
-                                           config.repo_path) else 0,
+                                           config.repo_path, n.decorators,
+                                           config.test_decorators) else 0,
                          json.dumps(n.decorators)))
     conn.executemany(
         "INSERT INTO nodes(qualified_name,kind,language,file_path,start_line,"
@@ -321,6 +324,17 @@ def needs_flows_update(config, conn, head=None) -> bool:
     return stored != head
 
 
+def _decorators(raw: str | None) -> list[str]:
+    """Decode the decorators JSON column, tolerating NULL / empty / bad JSON."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
+
+
 def update_flows(config, conn) -> int:
     """Rebuild flows from the DB's nodes+edges. No-op when HEAD is unchanged,
     or when HEAD moved but the flow input (function/method nodes + resolved
@@ -340,13 +354,16 @@ def update_flows(config, conn) -> int:
             "INSERT OR REPLACE INTO build_meta(key,value) "
             "VALUES('flows_as_of_head',?)", (head or "",))
         return 0
-    nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"], r["kind"])
+    nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"], r["kind"],
+                     _decorators(r["decorators"]))
              for r in conn.execute(
-                 "SELECT id,qualified_name,file_path,kind FROM nodes")]
+                 "SELECT id,qualified_name,file_path,kind,decorators "
+                 "FROM nodes")]
     erows = [EdgeRow(r["source"], r["target"], r["resolution"])
              for r in conn.execute(
                  "SELECT source,target,resolution FROM edges WHERE kind='call'")]
-    flows = build_flows(nodes, erows, config.entry_names)
+    flows = build_flows(nodes, erows, config.entry_names,
+                        config.entry_decorators)
     id_to_qname = {n.id: n.qualified_name for n in nodes}
     with transaction(conn):
         conn.execute("DELETE FROM flow_memberships")

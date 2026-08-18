@@ -12,6 +12,7 @@ def test_load_config_defaults(tmp_path):
     assert cfg.repo_path == "."
     assert cfg.diff_base == "origin/main"        # default
     assert cfg.entry_names == ["main"]            # default heuristic
+    assert cfg.dependency_markers == ["Depends"]  # default DI marker
     assert cfg.path_aliases == {}                 # default: no aliases
 
 
@@ -74,3 +75,11 @@ def test_path_aliases_env_json(monkeypatch, tmp_path):
         f'[tool.code-review-ai]\nrepo_path = "{tmp_path.as_posix()}"\n', encoding="utf-8"
     )
     assert load_config(str(tmp_path)).path_aliases == {"@/": "src/"}
+
+
+def test_dependency_markers_env_comma_split(monkeypatch, tmp_path):
+    monkeypatch.setenv("CRAI_DEPENDENCY_MARKERS", "Depends,Inject")
+    (tmp_path / "pyproject.toml").write_text(
+        f'[tool.code-review-ai]\nrepo_path = "{tmp_path.as_posix()}"\n', encoding="utf-8"
+    )
+    assert load_config(str(tmp_path)).dependency_markers == ["Depends", "Inject"]

@@ -120,6 +120,40 @@ def test_java_class_level_requestmapping_prefix(tmp_path):
     assert by["com.example::PetController.processCreationForm"] == [("POST", "/owners/{ownerId}/pets/new")]
 
 
+def test_java_di_decls_collected(tmp_path):
+    """DI IR: annotated fields (owner = class) + constructor params (owner =
+    constructor, annotations may be empty); unannotated fields are skipped."""
+    src = tmp_path / "OwnerController.java"
+    src.write_text(
+        "package com.example;\n"
+        "class OwnerController {\n"
+        "    @Autowired\n"
+        "    private OwnerRepository owners;\n"
+        "    @SuppressWarnings(\"unused\")\n"
+        "    private AuditService audit;\n"
+        "    private String unused;\n"
+        "    public OwnerController(OwnerRepository repo) {\n"
+        "        this.owners = repo;\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(src), str(tmp_path))
+    by = {(d.owner_qname, d.dep_expr, tuple(d.annotations), d.mechanism)
+          for d in pf.di_decls}
+    # annotated fields: owner = class, annotation name kept for config filtering
+    assert ("com.example::OwnerController", "OwnerRepository",
+            ("Autowired",), "field") in by
+    assert ("com.example::OwnerController", "AuditService",
+            ("SuppressWarnings",), "field") in by
+    # unannotated field is not an injection point
+    assert not any(d.dep_expr == "String" and d.mechanism == "field"
+                   for d in pf.di_decls)
+    # constructor param: owner = constructor qname, unannotated is fine
+    assert ("com.example::OwnerController.OwnerController", "OwnerRepository",
+            (), "constructor") in by
+
+
 def test_java_var_types_collected(tmp_path):
     src = tmp_path / "OwnerController.java"
     src.write_text(
@@ -194,3 +228,10 @@ def test_java_annotations_capture_mappings(tmp_path):
     assert by["com.example::HomeController.rm"] == [("POST", "/r")]
     cls = next(n for n in pf.nodes if n.qualified_name == "com.example::HomeController")
     assert "Controller" in cls.decorators
+    # 方法级注解也进 decorators —— 入口识别（entry_decorators）依赖这条通道
+    list_node = next(n for n in pf.nodes
+                     if n.qualified_name == "com.example::HomeController.list")
+    assert "GetMapping" in list_node.decorators
+    rm_node = next(n for n in pf.nodes
+                   if n.qualified_name == "com.example::HomeController.rm")
+    assert "RequestMapping" in rm_node.decorators

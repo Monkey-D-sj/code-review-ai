@@ -60,7 +60,8 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
     t_parse = time.perf_counter()
 
     qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
-    all_edges = resolve_edges(parsed, qnames, config.path_aliases)
+    all_edges = resolve_edges(parsed, qnames, config.path_aliases,
+                              config.dependency_markers, config.di_annotations)
     t_resolve = time.perf_counter()
 
     with transaction(conn):
@@ -120,7 +121,8 @@ def _write_nodes(conn, parsed, config) -> tuple[dict[str, int], list]:
                          n.start_line, n.end_line, n.signature,
                          1 if is_test_node(n.file_path, n.qualified_name,
                                            config.test_globs, config.test_names,
-                                           config.repo_path) else 0,
+                                           config.repo_path, n.decorators,
+                                           config.test_decorators) else 0,
                          json.dumps(n.decorators)))
     conn.executemany(
         "INSERT INTO nodes(qualified_name,kind,language,file_path,"
@@ -174,11 +176,12 @@ def _write_flows(conn, parsed, edges, qname_to_id: dict[str, int],
     persist flows row-by-row (each needs its lastrowid) then memberships in one
     batch. Returns the flow count."""
     nodes = [NodeRow(qname_to_id[n.qualified_name], n.qualified_name,
-                     n.file_path, n.kind)
+                     n.file_path, n.kind, n.decorators)
              for pf in parsed for n in pf.nodes]
     erows = [EdgeRow(e.source, e.target, e.resolution) for e in edges]
     id_to_qname = {n.id: n.qualified_name for n in nodes}
-    flows = build_flows(nodes, erows, config.entry_names)
+    flows = build_flows(nodes, erows, config.entry_names,
+                        config.entry_decorators)
 
     membership_rows: list[tuple[int, int, int]] = []
     for f in flows:
