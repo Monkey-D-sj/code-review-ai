@@ -1,0 +1,27 @@
+{
+  "name": "code-review-ai",
+  "version": "0.1.0",
+  "description": "Impact-aware code review skills and MCP tools for Codex.",
+  "author": {
+    "name": "Monkey-D-sj",
+    "url": "https://github.com/Monkey-D-sj"
+  },
+  "homepage": "https://github.com/Monkey-D-sj/code-review-ai",
+  "repository": "https://github.com/Monkey-D-sj/code-review-ai",
+  "license": "MIT",
+  "keywords": ["code-review", "impact-analysis", "mcp", "tree-sitter"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Code Review AI",
+    "shortDescription": "Impact-aware code review for Codex.",
+    "longDescription": "Analyze Python, TypeScript, JavaScript, and Java changes with language-specific review skills and an MCP call-graph index.",
+    "developerName": "Monkey-D-sj",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": [
+      "Review my current code changes with code-review-ai.",
+      "Assess the impact of my modified symbols before I make a change."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}
