@@ -25,6 +25,12 @@ class BenchmarkCase:
     gold_files: list[str]
     repo: str | None = None
     base_commit: str | None = None
+    # Optional full-agent fields: present when the same manifest drives both the
+    # impact line (benchmark) and the full-agent line (full_agent_eval), so one
+    # case set yields both cheap impact metrics and expensive agent F1.
+    prompt: str | None = None
+    source_commit: str | None = None
+    gold_findings: tuple[dict, ...] = ()
 
 
 def load_cases(path: str) -> list[BenchmarkCase]:
@@ -48,10 +54,16 @@ def _parse_case(record: object, position: int) -> BenchmarkCase:
         raise ValueError(f"case {case_id} has invalid symbols or gold_files")
     if not symbols and not changed_ranges:
         raise ValueError(f"case {case_id} requires changed_symbols or changed_ranges")
+    findings = record.get("gold_findings", [])
+    if not _optional_dict_list(findings):
+        raise ValueError(f"case {case_id} has invalid gold_findings")
     return BenchmarkCase(case_id, symbols, changed_ranges,
                          [_normalize(path) for path in gold_files],
                          _optional_string(record.get("repo")),
-                         _optional_string(record.get("base_commit")))
+                         _optional_string(record.get("base_commit")),
+                         _optional_string(record.get("prompt")),
+                         _optional_string(record.get("source_commit")),
+                         tuple(findings))
 
 
 def _string_list(value: object) -> bool:
@@ -68,6 +80,12 @@ def _optional_string_list(value: object) -> bool:
 
 def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _optional_dict_list(value: object) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(item, dict) for item in value
+    )
 
 
 def _parse_ranges(value: object, case_id: object) -> dict[str, list[tuple[int, int]]]:

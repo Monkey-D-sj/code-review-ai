@@ -225,3 +225,23 @@ def test_benchmark_includes_test_nodes_in_candidates(tmp_path):
     case = BenchmarkCase("x", ["svc::run"], {}, ["tests/test_svc.py"])
     report = run_benchmark(config, conn, [case], top_k=5)
     assert report["cases"][0]["patch_file_recall_all"] == 1.0
+
+
+def test_agentic_manifest_drives_both_harnesses():
+    """One unified manifest must parse in both the impact harness (benchmark)
+    and the full-agent harness, so a single case set yields both cheap impact
+    metrics and expensive agent F1. Every case needs changed_ranges (impact
+    seeds) and gold_files (gold test files) alongside the agent-side fields."""
+    from code_review_ai.full_agent_eval import load_full_agent_cases
+    manifest = (Path(__file__).resolve().parents[1]
+                / "benchmarks" / "agentic-eval-real-repos.json")
+    impact_cases = load_cases(str(manifest))
+    agent_cases = load_full_agent_cases(str(manifest))
+    assert len(impact_cases) == len(agent_cases) == 12
+    for impact, agent in zip(impact_cases, agent_cases):
+        assert impact.case_id == agent.case_id
+        assert impact.changed_ranges, "impact harness needs changed_ranges"
+        assert impact.gold_files, "impact harness needs gold test files"
+        assert impact.prompt == agent.prompt
+        assert impact.source_commit == agent.source_commit
+        assert impact.gold_findings
