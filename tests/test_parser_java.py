@@ -228,3 +228,10 @@ def test_java_annotations_capture_mappings(tmp_path):
     assert by["com.example::HomeController.rm"] == [("POST", "/r")]
     cls = next(n for n in pf.nodes if n.qualified_name == "com.example::HomeController")
     assert "Controller" in cls.decorators
+    # 方法级注解也进 decorators —— 入口识别（entry_decorators）依赖这条通道
+    list_node = next(n for n in pf.nodes
+                     if n.qualified_name == "com.example::HomeController.list")
+    assert "GetMapping" in list_node.decorators
+    rm_node = next(n for n in pf.nodes
+                   if n.qualified_name == "com.example::HomeController.rm")
+    assert "RequestMapping" in rm_node.decorators

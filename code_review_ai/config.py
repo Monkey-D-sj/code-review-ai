@@ -15,6 +15,10 @@ DEFAULTS = dict(
     entry_decorators=[
         "app.route", "click.command",
         "router.get", "router.post", "celery.task",
+        # Spring MVC: mapping annotations make an HTTP handler a business entry
+        # even though nothing in the repo calls it statically.
+        "GetMapping", "PostMapping", "PutMapping", "DeleteMapping",
+        "PatchMapping", "RequestMapping",
     ],
     dependency_markers=["Depends"],  # DI calls whose callable args become source->arg edges
     di_annotations=["Autowired", "Inject", "Resource", "MockBean"],  # annotation names tagging a Java field as an injection point

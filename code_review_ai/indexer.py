@@ -176,11 +176,12 @@ def _write_flows(conn, parsed, edges, qname_to_id: dict[str, int],
     persist flows row-by-row (each needs its lastrowid) then memberships in one
     batch. Returns the flow count."""
     nodes = [NodeRow(qname_to_id[n.qualified_name], n.qualified_name,
-                     n.file_path, n.kind)
+                     n.file_path, n.kind, n.decorators)
              for pf in parsed for n in pf.nodes]
     erows = [EdgeRow(e.source, e.target, e.resolution) for e in edges]
     id_to_qname = {n.id: n.qualified_name for n in nodes}
-    flows = build_flows(nodes, erows, config.entry_names)
+    flows = build_flows(nodes, erows, config.entry_names,
+                        config.entry_decorators)
 
     membership_rows: list[tuple[int, int, int]] = []
     for f in flows:

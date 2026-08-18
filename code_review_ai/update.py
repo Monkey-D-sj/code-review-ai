@@ -324,6 +324,17 @@ def needs_flows_update(config, conn, head=None) -> bool:
     return stored != head
 
 
+def _decorators(raw: str | None) -> list[str]:
+    """Decode the decorators JSON column, tolerating NULL / empty / bad JSON."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
+
+
 def update_flows(config, conn) -> int:
     """Rebuild flows from the DB's nodes+edges. No-op when HEAD is unchanged,
     or when HEAD moved but the flow input (function/method nodes + resolved
@@ -343,13 +354,16 @@ def update_flows(config, conn) -> int:
             "INSERT OR REPLACE INTO build_meta(key,value) "
             "VALUES('flows_as_of_head',?)", (head or "",))
         return 0
-    nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"], r["kind"])
+    nodes = [NodeRow(r["id"], r["qualified_name"], r["file_path"], r["kind"],
+                     _decorators(r["decorators"]))
              for r in conn.execute(
-                 "SELECT id,qualified_name,file_path,kind FROM nodes")]
+                 "SELECT id,qualified_name,file_path,kind,decorators "
+                 "FROM nodes")]
     erows = [EdgeRow(r["source"], r["target"], r["resolution"])
              for r in conn.execute(
                  "SELECT source,target,resolution FROM edges WHERE kind='call'")]
-    flows = build_flows(nodes, erows, config.entry_names)
+    flows = build_flows(nodes, erows, config.entry_names,
+                        config.entry_decorators)
     id_to_qname = {n.id: n.qualified_name for n in nodes}
     with transaction(conn):
         conn.execute("DELETE FROM flow_memberships")

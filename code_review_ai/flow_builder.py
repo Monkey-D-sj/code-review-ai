@@ -1,8 +1,9 @@
 
 import fnmatch
 import hashlib
+import json
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from code_review_ai import qname
 
@@ -13,6 +14,7 @@ class NodeRow:
     qualified_name: str
     file_path: str
     kind: str
+    decorators: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -32,26 +34,41 @@ class FlowRecord:
     path: list[int]
 
 
+def _decorators(raw: str | None) -> list[str]:
+    """Decode the decorators JSON column, tolerating NULL / empty / bad JSON."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
+
+
 def flow_input_hash(conn) -> str:
     """Stable hash of exactly what build_flows consumes: entry-candidate
-    function/method nodes (qname, kind, file) plus resolved call edges. Same
-    input -> same flows, so update_flows can skip a rebuild when the call graph
-    didn't structurally change (e.g. a body-only edit that alters no edges)."""
+    function/method nodes (qname, kind, file, decorators) plus resolved call
+    edges. Same input -> same flows, so update_flows can skip a rebuild when the
+    call graph didn't structurally change (e.g. a body-only edit that alters no
+    edges). Decorators are included because entry_decorators drives entry
+    selection — an annotation-only edit must invalidate the flows."""
     nodes = conn.execute(
-        "SELECT qualified_name, kind, file_path FROM nodes "
+        "SELECT qualified_name, kind, file_path, decorators FROM nodes "
         "WHERE kind IN ('function','method') ORDER BY qualified_name").fetchall()
     edges = conn.execute(
         "SELECT source, target FROM edges "
         "WHERE kind='call' AND resolution='resolved' ORDER BY source, target"
     ).fetchall()
     parts = [f"n:{row['qualified_name']}|{row['kind']}|{row['file_path']}"
+             f"|{sorted(_decorators(row['decorators']))}"
              for row in nodes]
     parts += [f"e:{row['source']}->{row['target']}" for row in edges]
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
 def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
-                entry_names: list[str]) -> list[FlowRecord]:
+                entry_names: list[str],
+                entry_decorators: list[str] | None = None) -> list[FlowRecord]:
     qname_to_id = {n.qualified_name: n.id for n in nodes}
     id_to_file = {n.id: n.file_path for n in nodes}
     adj: dict[int, list[int]] = defaultdict(list)  # adjacency list: target → [source]
@@ -76,8 +93,11 @@ def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
         if entry_id is None:
             continue
         name_match = any(fnmatch.fnmatch(short, pat) for pat in entry_names)
+        deco_match = any(
+            fnmatch.fnmatch(dec, pat)
+            for dec in n.decorators for pat in (entry_decorators or []))
         is_root = entry_id not in has_incoming
-        if not name_match and not is_root:
+        if not name_match and not deco_match and not is_root:
             continue
 
         # BFS from entry, collect all reachable nodes into one flat path

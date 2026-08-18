@@ -208,6 +208,9 @@ owner.getPets()
 
 **⑦ Spring 生态特化**
 - 收集方法级映射(`@GetMapping("/pets")`),拼接类级 `@RequestMapping` 前缀成完整路径。
+- **入口识别**:Mapping 注解名进入方法 `decorators`,默认 `entry_decorators` 覆盖
+  (`GetMapping`/`PostMapping`/`PutMapping`/`DeleteMapping`/`PatchMapping`/`RequestMapping`),
+  被 `build_flows` 认定为 flow 入口、被 dead-code 排除 —— HTTP handler 不再当删码候选。
 - **MockMvc 桥接**:`mockMvc.perform(get("/owners"))` 提取 HTTP 方法 + 路径,与
   controller 映射做**路径段匹配(支持 `{id}` 模板)**,合成
   `test_method → controller_method` 的 resolved call 边 —— 改 controller 方法,

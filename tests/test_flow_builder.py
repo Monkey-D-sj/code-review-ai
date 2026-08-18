@@ -39,6 +39,43 @@ def test_cycle_handled():
     assert flow_a.path == [0, 1]  # a → b, no infinite loop
 
 
+def test_decorator_marked_method_is_entry():
+    """A node whose decorator matches entry_decorators is a business entry even
+    when it has incoming edges (not a root) and its short name matches no
+    entry_names pattern — e.g. a Spring @GetMapping handler nothing calls
+    statically."""
+    nodes = [
+        NodeRow(id=0, qualified_name=Q("m", "main"), file_path="f.py", kind="function"),
+        NodeRow(id=1, qualified_name=Q("m", "list"), file_path="f.py", kind="method",
+                decorators=["GetMapping"]),
+        NodeRow(id=2, qualified_name=Q("m", "helper"), file_path="f.py", kind="method"),
+    ]
+    # main -> list -> helper: list has incoming edges (not a root)
+    edges = [EdgeRow(Q("m", "main"), Q("m", "list"), "resolved"),
+             EdgeRow(Q("m", "list"), Q("m", "helper"), "resolved")]
+    # entry_names matches only "main"; list qualifies solely via its decorator
+    flows = build_flows(nodes, edges, ["main"], ["GetMapping"])
+    entries = {f.entry_point_id for f in flows}
+    assert entries == {0, 1}  # main (name) + list (decorator); helper is not an entry
+    list_flow = next(f for f in flows if f.entry_point_id == 1)
+    assert list_flow.path == [1, 2]
+
+
+def test_decorator_off_without_matching_entry_decorators():
+    """Without a matching entry_decorators pattern the same node is not an
+    entry — only name matches and true roots remain."""
+    nodes = [
+        NodeRow(id=0, qualified_name=Q("m", "main"), file_path="f.py", kind="function"),
+        NodeRow(id=1, qualified_name=Q("m", "list"), file_path="f.py", kind="method",
+                decorators=["GetMapping"]),
+        NodeRow(id=2, qualified_name=Q("m", "helper"), file_path="f.py", kind="method"),
+    ]
+    edges = [EdgeRow(Q("m", "main"), Q("m", "list"), "resolved"),
+             EdgeRow(Q("m", "list"), Q("m", "helper"), "resolved")]
+    flows = build_flows(nodes, edges, ["main"], [])  # no decorator channel
+    assert {f.entry_point_id for f in flows} == {0}  # only main
+
+
 def test_unresolved_edges_excluded():
     edges = [EdgeRow(Q("m","a"), Q("m","b"), "resolved"), EdgeRow(Q("m","b"), Q("m","c"), "unresolved")]
     flows = build_flows(_nodes(), edges, ["a"])

@@ -2,7 +2,7 @@
 
 > 审计日期：2026-08-18  
 > 范围：`code_review_ai/parser.py`、`resolver.py`、`java_routing.py`、`config.py` 及其测试。  
-> 结论：项目已具备 Python、TypeScript、JavaScript、Java 的**语法解析入口**，但“可解析”不等于“调用图可准确闭合”。ESM 相对导入与跨语言测试识别已修复（见 §4 P0），Java 注解/构造器注入与构造器语义已建模（见 §4 P1）；目前最影响实际召回的是框架/运行时语义（入口识别、动态与反射分派、`@Bean`/component scan）和 TS/JS 模块解析的其余部分。
+> 结论：项目已具备 Python、TypeScript、JavaScript、Java 的**语法解析入口**，但“可解析”不等于“调用图可准确闭合”。ESM 相对导入与跨语言测试识别已修复（见 §4 P0），Java 注解/构造器注入、构造器语义与 Spring Controller Mapping 入口识别已建模（见 §4 P1）；目前最影响实际召回的是框架/运行时语义（未配置的框架入口、动态与反射分派、`@Bean`/component scan）和 TS/JS 模块解析的其余部分。
 
 ## 1. 判定口径
 
@@ -146,7 +146,7 @@
 
 - receiver 类型绑定只依赖显式收集的字段、参数、局部变量声明类型；`var`、返回值类型推断、泛型实际类型、多态分派、interface/abstract 的真实实现均不做 call target 选择。
 - Spring Mapping + MockMvc bridge 只匹配常量路径、HTTP 方法和等长 path segment；变量路径构造、前缀来自配置、WebFlux、`RestTemplate`/`WebTestClient`、安全过滤器、异常处理器不覆盖。
-- Spring Controller Mapping 不会自动被 `entry_names` / `entry_decorators` 认定为入口。仅由 HTTP 触发且没有静态调用者的方法，可能被 dead-code 报为候选。
+- Spring Controller Mapping 方法现按 `entry_decorators`（默认含 `GetMapping`/`PostMapping`/`PutMapping`/`DeleteMapping`/`PatchMapping`/`RequestMapping`）被 `build_flows` 认定为入口并被 dead-code 排除；但 `@Bean`、component scan、`@RestControllerAdvice`、异常处理器、定时任务等其它框架入口仍未识别。
 - 注解字段/构造器注入已建模（`@Autowired` 等按 `di_annotations` 过滤的字段、构造器参数无条件成边，见 §4 P1），但 `@Bean`、component scan、AOP、反射、JPA repository proxy 等框架依赖仍未建模。
 - import 的通配符不会解析到具体类；外部 classpath/JAR 也不进入图。
 
@@ -158,7 +158,7 @@
 
 ### 6.2 入口推断偏保守且与框架脱节
 
-flow root 由“短名命中 `entry_names` 或没有 resolved 入边”的函数/方法产生；装饰器只用于 dead-code 的入口排除，并不会直接驱动 `build_flows`。因此 HTTP handler、CLI command、consumer、cron job、Lambda/Cloud Function 等框架入口需要配置或专用 bridge 才能有稳定语义。
+flow root 由“短名命中 `entry_names`、装饰器命中 `entry_decorators`（如 Spring Mapping 注解），或没有 resolved 入边”的函数/方法产生。因此 Spring Controller handler、Python `app.route` / `click.command` / `celery.task` 等已配置的框架入口有稳定语义；未配置的 consumer、cron job、Lambda/Cloud Function 等仍需要配置或专用 bridge。
 
 ### 6.3 dead-code 是候选，不是删除依据
 
@@ -181,7 +181,7 @@ dead-code 以“无 resolved 调用者且不是已知入口/测试”为主条�
 1. ✅ **已完成（2026-08-18）—— 先修 ESM 相对导入**：parse 期把相对说明符归一为模块 qname（`parser._esm_relative_module`），跨文件调用/import 边直接 resolved。
 2. ✅ **已完成（2026-08-18）—— 提供按语言的默认测试 profile**：`test_globs` 覆盖 Java `*/test/*` / `*Test.java` / `*Tests.java` 与 TS/JS `*.test.*`、`*.spec.*`、`__tests__`；`test_decorators` 覆盖 JUnit `@Test` / `@ParameterizedTest`。
 3. ✅ **已完成（2026-08-18）—— 修正 Java constructor 语义**，并新增“实例化 → 构造函数 → 构造函数内部调用”的端到端测试（`test_instantiation_to_constructor_internal_call_end_to_end`）。
-4. 🟡 **部分完成 —— 将 DI 显式建模**：Spring `@Autowired` 字段注入与构造器注入已建边（`di_annotations` / `DiDecl` / `_build_di_edges`）；Controller Mapping 入口识别仍未实现。
+4. ✅ **已完成（2026-08-18）—— 将 DI 和框架入口显式建模**：Spring `@Autowired` 字段注入与构造器注入已建边（`di_annotations` / `DiDecl` / `_build_di_edges`）；Spring Controller Mapping 方法现被 `entry_decorators` 认定为入口——`build_flows` 新增装饰器入口通道，dead-code 自动排除，`list_entry_points` 可见。
 5. ⬜ **待做 —— 完善 TS/JS 模块解析**：CommonJS、`baseUrl`、`extends`、index/package exports；再考虑类型辅助的 receiver 绑定。
 6. ⬜ **待做 —— 补齐回归矩阵**：每项语言能力都至少覆盖“文件发现 → parse IR → resolve edge → index → impact/testimpact/dead-code”链路，而不只测试 parser。
 
@@ -204,7 +204,7 @@ dead-code 以“无 resolved 调用者且不是已知入口/测试”为主条�
 
 ## 10. 修复后验证（2026-08-18）
 
-- P0 / P1 修复后全量回归：`uv run pytest -q` -> **322 passed**（P0 阶段 316 + P1 阶段 5 个新单测 + 1 个端到端链测试）。
+- P0 / P1 / 入口识别修复后全量回归：`uv run pytest -q` -> **325 passed**（P0 阶段 316 + P1 阶段 6 个新单测 + Spring 入口识别 3 个新单测）。
 - ESM 相对导入端到端：`tests/test_resolver.py::test_resolve_esm_relative_imports` 断言
   `ts.app::main -> ts.auth::login`（具名与命名空间导入）均为 `resolved`，且不再存在
   以 `./auth` 为 target 的边 -- 第 4 节 P0-1 的复现用例已翻绿。
@@ -221,3 +221,9 @@ dead-code 以“无 resolved 调用者且不是已知入口/测试”为主条�
   resolved 边，`@SuppressWarnings` 字段不建边）、
   `test_di_field_injection_off_without_matching_annotation`（未配置 `di_annotations` 时不建边）、
   `test_di_constructor_param_resolves`（构造器参数无条件成边，`构造函数 -> OwnerRepository`）。
+- Spring 入口识别（§8 #4 收尾）：默认 `entry_decorators` 增加 Spring Mapping 注解；`build_flows`
+  新增 `entry_decorators` 参数，装饰器命中即产生 flow root（`NodeRow.decorators` 纳入
+  `flow_input_hash`，只改注解也会触发 flow 重建）。验证：
+  `test_flow_builder.py::test_decorator_marked_method_is_entry`（有入边仍为入口）、
+  `test_deadcode.py::test_find_dead_code_excludes_spring_mapping`（`@GetMapping` 不在 dead-code 候选）、
+  `test_parser_java.py::test_java_annotations_capture_mappings`（方法级注解进 decorators）。
