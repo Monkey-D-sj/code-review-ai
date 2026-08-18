@@ -5,7 +5,8 @@ import pytest
 from code_review_ai.installer import (
     DEFAULT_MCP_ENTRY, DEFAULT_NAME, DEFAULT_SOURCE,
     MCP_DOC_END, MCP_DOC_START, SKILL_NAMES,
-    _claude_add_command, _claude_executable, _global_context_file, _global_skills_dir,
+    _claude_add_command, _claude_executable, _codex_add_command, _codex_executable,
+    _global_context_file, _global_skills_dir,
     _launch_command, append_usage_docs, deploy_skills, install,
 )
 
@@ -21,6 +22,14 @@ def test_claude_add_command_shape():
     cmd = _claude_add_command("code-review-ai", "user", launch)
     assert cmd == [
         "claude", "mcp", "add", "code-review-ai", "-s", "user", "--",
+        "uvx", "--from", "SRC", "code-review-ai-mcp",
+    ]
+
+
+def test_codex_add_command_shape():
+    launch = ["uvx", "--from", "SRC", "code-review-ai-mcp"]
+    assert _codex_add_command("code-review-ai", launch) == [
+        "codex", "mcp", "add", "code-review-ai", "--",
         "uvx", "--from", "SRC", "code-review-ai-mcp",
     ]
 
@@ -105,6 +114,15 @@ def test_claude_executable_posix_keeps_path(monkeypatch):
     assert _claude_executable() == "/usr/local/bin/claude"
 
 
+def test_codex_executable_resolves_cmd_shim_on_windows(monkeypatch):
+    monkeypatch.setattr("code_review_ai.installer.os.name", "nt")
+    monkeypatch.setattr(
+        "code_review_ai.installer.shutil.which",
+        lambda name: {"codex": "C:/nvm/nodejs/codex",
+                      "codex.cmd": "C:/nvm/nodejs/codex.cmd"}.get(name))
+    assert _codex_executable() == "C:/nvm/nodejs/codex.cmd"
+
+
 def test_append_usage_docs_is_idempotent(monkeypatch, tmp_path):
     md = tmp_path / "CLAUDE.md"
     monkeypatch.setattr("code_review_ai.installer._global_context_file",
@@ -180,23 +198,42 @@ def test_deploy_skills_missing_resource_returns_none(monkeypatch, tmp_path):
     assert deploy_skills() is None
 
 
-def test_install_codex_skips_subprocess_and_deploys(monkeypatch, tmp_path):
-    calls = []
-
-    def fake_run(*args, **kwargs):
-        calls.append(args)
-        return None
-
-    monkeypatch.setattr("code_review_ai.installer.subprocess.run", fake_run)
+def test_install_codex_registers_mcp_and_deploys(monkeypatch, tmp_path):
+    monkeypatch.setattr("code_review_ai.installer._codex_executable",
+                        lambda: "/usr/bin/codex")
     monkeypatch.setattr("code_review_ai.installer.append_usage_docs",
                         lambda platform="codex": tmp_path / "AGENTS.md")
     monkeypatch.setattr("code_review_ai.installer.deploy_skills",
                         lambda platform="codex", skills_root=None: tmp_path / "codex-skills")
+
+    class _P:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _P()
+
+    monkeypatch.setattr("code_review_ai.installer.subprocess.run", fake_run)
     res = install(platform="codex")
     assert res.success is True
-    assert calls == []  # codex 不执行任何 MCP 注册子进程
-    assert "manual" in res.message.lower()
+    assert captured["cmd"] == [
+        "/usr/bin/codex", "mcp", "add", DEFAULT_NAME, "--",
+        "uvx", "--from", DEFAULT_SOURCE, DEFAULT_MCP_ENTRY,
+    ]
+    assert "Registered" in res.message
     assert f"Deployed {len(SKILL_NAMES)} review skills" in res.message
+
+
+def test_install_codex_not_found(monkeypatch):
+    monkeypatch.setattr("code_review_ai.installer._codex_executable", lambda: None)
+    res = install(platform="codex")
+    assert res.success is False
+    assert "codex CLI not found" in res.message
+    assert res.command[:4] == ["codex", "mcp", "add", DEFAULT_NAME]
 
 
 @pytest.mark.parametrize("platform,suffix", [

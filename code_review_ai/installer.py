@@ -1,10 +1,8 @@
 """Self-installation: register the MCP server with an AI tool's config and
 deploy the bundled review skills + usage docs.
 
-The subprocess / external-CLI coupling (``claude mcp add``) is isolated here so
+The subprocess / external-CLI coupling (``claude mcp add`` / ``codex mcp add``) is isolated here so
 ``cli.py`` stays thin and the install logic is unit-testable without shelling out.
-Codex has no ``mcp add`` CLI, so ``install --platform codex`` deploys skills and
-usage docs only; MCP registration stays manual (see README).
 
 The registered launch command is ``uvx --from <source> <mcp-entry>``: self-contained,
 so an outsider needs only ``uv`` (which also fetches the required Python 3.14) and the
@@ -70,19 +68,30 @@ class InstallResult:
     command: list[str]
 
 
-def _claude_executable() -> str | None:
-    """The claude CLI as a full path subprocess can spawn, or None if missing.
+def _cli_executable(name: str) -> str | None:
+    """Return a CLI's full executable path, or ``None`` if it is unavailable.
+
     On Windows npm installs an extensionless shell script plus claude.cmd /
-    claude.ps1 shims; the bare 'claude' name makes CreateProcess pick the
+    codex.cmd shims; the bare name can make CreateProcess pick the
     extensionless script and fail (WinError 2), so resolve the .cmd shim."""
-    path = shutil.which("claude")
+    path = shutil.which(name)
     if path is None:
         return None
     if os.name == "nt":
-        cmd = shutil.which("claude.cmd")
+        cmd = shutil.which(f"{name}.cmd")
         if cmd:
             return cmd
     return path
+
+
+def _claude_executable() -> str | None:
+    """The Claude CLI as a full path subprocess can spawn, or ``None`` if missing."""
+    return _cli_executable("claude")
+
+
+def _codex_executable() -> str | None:
+    """The Codex CLI as a full path subprocess can spawn, or ``None`` if missing."""
+    return _cli_executable("codex")
 
 
 def _global_context_file(platform: str) -> Path:
@@ -155,15 +164,33 @@ def _deploy_docs_and_skills(platform: str, msg: str) -> str:
     return msg
 
 
-def _install_codex() -> InstallResult:
-    """Codex has no ``codex mcp add`` CLI: deploy skills + usage docs only,
-    MCP registration stays manual (edit ~/.codex/config.toml)."""
+def _install_codex(source: str, name: str, mcp_entry: str) -> InstallResult:
+    """Register the MCP server with Codex, then deploy docs and skills."""
+    add_cmd = _codex_add_command(name, _launch_command(source, mcp_entry))
+    codex = _codex_executable()
+    if codex is None:
+        return InstallResult(
+            False,
+            "codex CLI not found on PATH. Install Codex, then run:\n  "
+            + " ".join(add_cmd),
+            add_cmd,
+        )
+    add_cmd = [codex, *add_cmd[1:]]
+    proc = subprocess.run(add_cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        return InstallResult(
+            False,
+            f"codex mcp add failed (exit {proc.returncode}):\n{detail}\n"
+            f"If '{name}' already exists, remove it first: codex mcp remove {name}",
+            add_cmd,
+        )
     msg = _deploy_docs_and_skills(
         "codex",
-        "Registered review skills with Codex. MCP registration is manual: "
-        "add a [mcp_servers.code-review-ai] block to ~/.codex/config.toml "
-        "(see README).",
+        f"Registered '{name}' with Codex.",
     )
+    msg += " Restart Codex to see the tools."
     return InstallResult(True, msg, [])
 
 
@@ -207,7 +234,7 @@ def install(platform: str = "claude-code", source: str = DEFAULT_SOURCE,
     if platform not in SUPPORTED_PLATFORMS:
         return InstallResult(False, f"unsupported platform: {platform}", [])
     if platform == "codex":
-        return _install_codex()
+        return _install_codex(source, name, mcp_entry)
     return _install_claude(source, scope, name, mcp_entry)
 
 
@@ -218,3 +245,8 @@ def _launch_command(source: str, mcp_entry: str) -> list[str]:
 
 def _claude_add_command(name: str, scope: str, launch_cmd: list[str]) -> list[str]:
     return ["claude", "mcp", "add", name, "-s", scope, "--", *launch_cmd]
+
+
+def _codex_add_command(name: str, launch_cmd: list[str]) -> list[str]:
+    """Build Codex's user-level stdio MCP registration command."""
+    return ["codex", "mcp", "add", name, "--", *launch_cmd]

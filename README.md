@@ -40,7 +40,21 @@ Options: `--scope user|project|local`, `--name <server-name>`, `--from <source>`
 claude mcp add code-review-ai -s user -- uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai-mcp
 ```
 
-### Install the Codex plugin
+### Install into the Codex user environment
+
+Run the project installer to register the MCP server in the installing user's
+`~/.codex/config.toml`, deploy the six review skills to `~/.codex/skills`, and
+refresh the global `~/.codex/AGENTS.md` usage instructions:
+
+```bash
+code-review-ai install --platform codex
+```
+
+Restart Codex after installation. The command uses Codex's supported
+`codex mcp add` flow, so the ChatGPT desktop app, Codex CLI, and IDE extension
+share the configured MCP server.
+
+### Install the Codex plugin (optional)
 
 The repository ships a Codex plugin that packages the review skills and the
 `code-review-ai` MCP server together. Add its repo-local marketplace, then
