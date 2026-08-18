@@ -8,7 +8,7 @@
       "name": "code-review-ai",
       "source": {
         "source": "local",
-        "path": "./plugins/code-review-ai"
+        "path": "./"
       },
       "policy": {
         "installation": "AVAILABLE",

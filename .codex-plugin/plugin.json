@@ -1,6 +1,6 @@
 {
   "name": "code-review-ai",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260818075641",
   "description": "Impact-aware code review skills and MCP tools for Codex.",
   "author": {
     "name": "Monkey-D-sj",
@@ -9,7 +9,12 @@
   "homepage": "https://github.com/Monkey-D-sj/code-review-ai",
   "repository": "https://github.com/Monkey-D-sj/code-review-ai",
   "license": "MIT",
-  "keywords": ["code-review", "impact-analysis", "mcp", "tree-sitter"],
+  "keywords": [
+    "code-review",
+    "impact-analysis",
+    "mcp",
+    "tree-sitter"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Code Review AI",

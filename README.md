@@ -56,12 +56,13 @@ share the configured MCP server.
 
 ### Install the Codex plugin (optional)
 
-The repository ships a Codex plugin that packages the review skills and the
-`code-review-ai` MCP server together. Add its repo-local marketplace, then
-install **Code Review AI** from the Codex plugin UI:
+The repository root is also the Codex plugin. Its `skills/` entry is a link to
+the same `code_review_ai/skills` files that the Python installer deploys, so
+there is only one skill source. Add its repo-local marketplace, then install
+**Code Review AI** from the Codex plugin UI:
 
 ```bash
-codex plugin marketplace add .agents/plugins
+codex plugin marketplace add .
 ```
 
 The plugin bundles six review skills (`code-review-langs`,
