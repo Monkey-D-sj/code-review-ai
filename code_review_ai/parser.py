@@ -199,12 +199,15 @@ class RawCall:
     source_qname — who makes the call (qualified name of enclosing function/module)
     target_expr — the raw text of the call target, e.g. ``login``, ``a.login``, ``vals[0]``
     call_form  — CALL_SIMPLE / CALL_ATTRIBUTE / CALL_OTHER
+    args       — raw texts of the call's top-level arguments (``Depends(get_db)`` → ``("get_db",)``);
+                 consumed by the resolver to link DI-marker args (see dependency_markers)
     """
     source_qname: str
     target_expr: str
     call_form: str
     file_path: str
     language: str = "python"
+    args: tuple[str, ...] = ()
 
 
 @dataclass
@@ -829,6 +832,29 @@ def _call_target(func_node) -> tuple[str, str]:
     return func_node.text.decode("utf-8"), CALL_OTHER
 
 
+_ARG_PUNCT = {"(", ")", "[", "]", ",", "comment"}
+
+
+def _call_args(node, lang) -> tuple[str, ...]:
+    """Raw texts of a call's top-level arguments, or () when none.
+
+    TS/JS/Java name the container as an ``arguments`` field; Python's is a bare
+    ``argument_list`` child node. Both hold the args plus punctuation/separator
+    nodes, which are filtered out. Texts are kept verbatim (identifiers, keyword
+    args like ``use_cache=False``, nested calls, literals) — the resolver decides
+    which are dependency references.
+    """
+    args_node = node.child_by_field_name("arguments")
+    if args_node is None:
+        args_node = next((c for c in node.children
+                          if c.type == "argument_list"), None)
+    if args_node is None:
+        return ()
+    return tuple(child.text.decode("utf-8")
+                 for child in args_node.children
+                 if child.type not in _ARG_PUNCT)
+
+
 def _call_target_for(node, lang) -> tuple[str | None, str | None]:
     """Language-aware call-target extraction.
 
@@ -908,6 +934,7 @@ def _walk_calls(node, module_qname, cur_scope, lang, out,
                     source_qname=cur_scope or module_qname,
                     target_expr=expr, call_form=form,
                     file_path="",
+                    args=_call_args(child, lang),
                 ))
             if mockmvc_requests is not None and lang.get("mockmvc_capture"):
                 request = _mockmvc_request(child, lang)

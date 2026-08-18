@@ -217,7 +217,8 @@ def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
     new_qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
     global_set = remaining | new_qnames
     node_count = _insert_nodes(conn, parsed, config, skip_qnames=remaining)
-    edges = resolve_edges(parsed, global_set, config.path_aliases)
+    edges = resolve_edges(parsed, global_set, config.path_aliases,
+                          config.dependency_markers)
     _insert_edges(conn, edges)
     recompute_degrees(conn)
     return node_count, len(edges)

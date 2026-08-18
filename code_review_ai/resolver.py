@@ -1,3 +1,6 @@
+import fnmatch
+import re
+
 from code_review_ai import qname
 
 from dataclasses import dataclass
@@ -5,6 +8,12 @@ from dataclasses import dataclass
 from code_review_ai.parser import (ParsedFile, RawCall, CALL_SIMPLE,
                                    CALL_ATTRIBUTE, CALL_CONSTRUCT,
                                    SOURCE_SUFFIXES)
+
+# Bare identifier or dotted path — the shapes a DI-marker argument takes when it
+# names a dependency (``get_db``, ``services.get_db``). Everything else — calls,
+# literals, keyword args like ``use_cache=False``, ``...`` — is not a dependency
+# reference and is skipped.
+_DI_ARG_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*")
 
 
 @dataclass
@@ -114,7 +123,8 @@ def _dedup_append(edges: list[Edge], seen: set[tuple[str, str, str]],
 
 
 def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
-                  path_aliases: dict[str, str] | None = None) -> list[Edge]:
+                  path_aliases: dict[str, str] | None = None,
+                  dependency_markers: list[str] | None = None) -> list[Edge]:
     mod_syms = _module_symbols(parsed_files)
     all_import_maps = {pf.module_qname: _import_map(pf, path_aliases, existing_qnames)
                        for pf in parsed_files}
@@ -138,7 +148,52 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                         source=edge.source, target=init_qn, kind="call",
                         file_path=edge.file_path,
                         resolution="resolved"))
+            if dependency_markers and _is_di_marker(c.target_expr, dependency_markers):
+                for dep_qn in _resolve_di_args(c, local, imports, existing_qnames,
+                                               all_import_maps, mod_syms=mod_syms,
+                                               source_module=pf.module_qname,
+                                               var_types=var_types,
+                                               path_aliases=path_aliases):
+                    _dedup_append(edges, seen, Edge(
+                        source=c.source_qname, target=dep_qn, kind="call",
+                        file_path=c.file_path, resolution="resolved"))
     return edges
+
+
+def _is_di_marker(target_expr: str, markers: list[str]) -> bool:
+    """True when a call's target short name matches a dependency_markers glob
+    (mirrors entry_names matching: fnmatch against qname.short)."""
+    return any(fnmatch.fnmatch(qname.short(target_expr), pat) for pat in markers)
+
+
+def _resolve_di_args(c: RawCall, local: dict, imports: dict,
+                     existing: set[str], all_import_maps: dict,
+                     mod_syms: dict | None = None,
+                     source_module: str | None = None,
+                     var_types: dict | None = None,
+                     path_aliases: dict[str, str] | None = None) -> list[str]:
+    """Resolve the callable arguments of a DI-marker call (``Depends(get_db)``)
+    to qnames by reusing _resolve_one on a fabricated RawCall — the same
+    local/import/reexport machinery as any normal call.
+
+    Only bare-identifier / dotted-path args qualify; expressions (nested calls,
+    literals, keyword args) yield nothing — nested calls like ``Depends(make_db())``
+    are already captured by the parser as their own RawCall, so only the bare
+    dependency-reference gap is filled here.
+    """
+    resolved: list[str] = []
+    for arg in c.args:
+        if not _DI_ARG_RE.fullmatch(arg):
+            continue
+        fake = RawCall(source_qname=c.source_qname, target_expr=arg,
+                       call_form=CALL_SIMPLE if "." not in arg else CALL_ATTRIBUTE,
+                       file_path=c.file_path, language=c.language)
+        edge = _resolve_one(fake, local, imports, existing, all_import_maps,
+                            mod_syms=mod_syms, source_module=source_module,
+                            var_types=var_types, path_aliases=path_aliases)
+        if edge.resolution == "resolved":
+            resolved.append(edge.target)
+    return resolved
 
 
 def _resolve_one(c: RawCall, local: dict, imports: dict,
@@ -412,13 +467,15 @@ def _build_inherits(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
 
 def resolve_edges(parsed: list[ParsedFile],
                   existing_qnames: set[str],
-                  path_aliases: dict[str, str] | None = None) -> list[Edge]:
+                  path_aliases: dict[str, str] | None = None,
+                  dependency_markers: list[str] | None = None) -> list[Edge]:
     """Resolve all edges — call, contains, import, inherits — from parsed files.
 
     This is the single entry point for edge generation. Indexer calls this
     once and gets the complete edge list.
     """
-    edges = resolve_calls(parsed, existing_qnames, path_aliases)
+    edges = resolve_calls(parsed, existing_qnames, path_aliases,
+                          dependency_markers)
     edges.extend(_build_contains(parsed, existing_qnames))
     edges.extend(_build_imports(parsed, existing_qnames, path_aliases))
     edges.extend(_build_inherits(parsed, existing_qnames))

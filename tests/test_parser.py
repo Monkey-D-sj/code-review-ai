@@ -75,6 +75,22 @@ def test_parse_extracts_calls_and_imports():
     assert all(c.source_qname == Q("app","main") for c in pf.raw_calls)
 
 
+def test_parse_captures_call_arguments(tmp_path):
+    """DI calls in parameter defaults keep their args (Depends(get_db)) so the
+    resolver can link the route to the dependency."""
+    mod = tmp_path / "app.py"
+    mod.write_text(
+        "def get_db():\n"
+        "    return None\n"
+        "def route(user_id: str, db=Depends(get_db, use_cache=False)):\n"
+        "    return db\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(mod), str(tmp_path))
+    depends = [c for c in pf.raw_calls if c.target_expr == "Depends"]
+    assert depends and depends[0].args == ("get_db", "use_cache=False")
+
+
 def test_filter_excluded_nested_directory_patterns():
     """A leading ``*/`` must match nested directories: ``*/alembic/*`` excludes
     ``app/alembic/env.py``, and ``*/test*`` excludes files under any test dir."""

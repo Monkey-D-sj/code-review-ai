@@ -16,6 +16,7 @@ DEFAULTS = dict(
         "app.route", "click.command",
         "router.get", "router.post", "celery.task",
     ],
+    dependency_markers=["Depends"],  # DI calls whose callable args become source->arg edges
     exclude=["*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
     test_globs=["*/tests/*", "test_*.py"],  # not */test* — would tag prod files whose name starts with "test" (e.g. testimpact.py)
     test_names=["test_*"],
@@ -35,6 +36,7 @@ class Config:
     watch_debounce_ms: int
     entry_names: list[str]
     entry_decorators: list[str]
+    dependency_markers: list[str]
     exclude: list[str]
     test_globs: list[str]
     test_names: list[str]
@@ -185,7 +187,8 @@ def load_config(repo_path: str = ".") -> Config:
     return Config(**raw)
 
 
-_CONFIG_HASH_KEYS = ("diff_base", "entry_names", "entry_decorators", "exclude",
+_CONFIG_HASH_KEYS = ("diff_base", "entry_names", "entry_decorators",
+                     "dependency_markers", "exclude",
                      "test_globs", "test_names",
                      "community_detection", "community_weight", "path_aliases")
 

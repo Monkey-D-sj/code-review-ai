@@ -1,4 +1,16 @@
-"""Reproducible evaluation against historical change manifests."""
+"""Reproducible evaluation against historical change manifests.
+
+Primary metric is the production impact surface: given a fix's changed symbols,
+can the graph's impact reachability surface the rest of the fix (the touched
+functions and their consumers)? That is the review-axis measure — the evidence a
+reviewer acts on is diff + real call/callee chains, not test files.
+
+Test-file recall is retained as a diagnostic metric for CI regression
+selection, not as a proxy for review quality: on annotation-heavy repos it
+sits at the static reachability ceiling (tests wired via framework DI / API
+constructors share no call edges with the changed symbols), so it cannot
+predict full-agent F1.
+"""
 
 from __future__ import annotations
 
@@ -199,6 +211,7 @@ def _evaluate_case(config: Config, conn: sqlite3.Connection,
         "production_file_folds": _production_folds(
             config, conn, case.changed_ranges, top_k
         ),
+        "changed_symbol_folds": _symbol_folds(config, conn, symbols, top_k),
     }
 
 
@@ -253,6 +266,53 @@ def _production_folds(config: Config, conn: sqlite3.Connection,
                       "precision_all": all_score["precision"],
                       "query_ms": query_ms})
     return folds
+
+
+def _symbol_folds(config: Config, conn: sqlite3.Connection,
+                  changed_symbols: list[str], top_k: int) -> list[dict]:
+    """Per-seed-symbol co-change folds: does impact(seed) reach the OTHER
+    changed symbols of the same fix? This is the review-axis metric — the
+    graph's production impact surface (touched symbols + their consumers),
+    not test recall. Needs >=2 changed symbols to leave one out."""
+    if len(changed_symbols) < 2:
+        return []
+    folds: list[dict] = []
+    gold_set = set(changed_symbols)
+    for seed in changed_symbols:
+        started = time.perf_counter()
+        impacts = _all_impacts(conn, [seed])
+        query_ms = round((time.perf_counter() - started) * 1000, 3)
+        reached: list[str] = [seed]
+        for impact in impacts:
+            for direction in ("upstream", "downstream"):
+                reached.extend(node["qname"] for node in impact[direction])
+        # reached is ordered seed, direct callers first, then downstream — the
+        # top_k slice is the graph's most-direct production surface.
+        candidates = reached[1:]
+        gold = [symbol for symbol in changed_symbols if symbol != seed]
+        hits = [symbol for symbol in candidates if symbol in gold_set]
+        folds.append({
+            "seed_symbol": seed,
+            "gold_symbols": gold,
+            "reached_symbols": reached,
+            "hits": hits,
+            "recall_at_k": _symbol_recall(candidates[:top_k], gold),
+            "precision_at_k": _symbol_precision(candidates[:top_k], gold),
+            "recall_all": _symbol_recall(candidates, gold),
+            "precision_all": _symbol_precision(candidates, gold),
+            "candidate_count": len(candidates),
+            "query_ms": query_ms,
+        })
+    return folds
+
+
+def _symbol_recall(candidates: list[str], gold: list[str]) -> float:
+    return round(len(set(candidates) & set(gold)) / len(gold), 4) if gold else 0.0
+
+
+def _symbol_precision(candidates: list[str], gold: list[str]) -> float:
+    return round(len(set(candidates) & set(gold)) / len(candidates), 4) \
+        if candidates else 0.0
 
 
 def _score_candidates(candidates: list[str], gold_files: list[str]) -> dict:
@@ -351,6 +411,8 @@ def _aggregate(results: list[dict]) -> dict:
     case_count = len(results)
     production_folds = [fold for result in results
                         for fold in result["production_file_folds"]]
+    symbol_folds = [fold for result in results
+                    for fold in result["changed_symbol_folds"]]
     return {
         "cases": case_count,
         "macro_patch_file_recall_at_k": round(sum(
@@ -388,6 +450,19 @@ def _aggregate(results: list[dict]) -> dict:
             production_folds, "precision_all"),
         "mean_production_all_candidate_files": _fold_mean(
             production_folds, "all_candidate_files_count"),
+        "changed_symbol_eligible_cases": sum(
+            bool(result["changed_symbol_folds"]) for result in results),
+        "changed_symbol_folds": len(symbol_folds),
+        "macro_changed_symbol_recall_at_k": _fold_mean(
+            symbol_folds, "recall_at_k"),
+        "macro_changed_symbol_precision_at_k": _fold_mean(
+            symbol_folds, "precision_at_k"),
+        "macro_changed_symbol_recall_all": _fold_mean(
+            symbol_folds, "recall_all"),
+        "macro_changed_symbol_precision_all": _fold_mean(
+            symbol_folds, "precision_all"),
+        "mean_changed_symbol_candidate_count": _fold_mean(
+            symbol_folds, "candidate_count"),
     }
 
 

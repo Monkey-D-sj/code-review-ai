@@ -136,6 +136,55 @@ def test_src_layout_test_reaches_changed_symbol(tmp_path):
     assert ("tests.test_app::test_login", "app.service::login", "resolved") in by
 
 
+# ── annotation dependency-injection edges (dependency_markers) ────────
+
+
+def _di_fixture(tmp_path, route_sig: str):
+    mod = tmp_path / "app.py"
+    mod.write_text(
+        "def get_db():\n"
+        "    return None\n"
+        f"def route({route_sig}):\n"
+        "    return get_db\n",
+        encoding="utf-8",
+    )
+    return parse_file(str(mod), str(tmp_path))
+
+
+def test_di_marker_arg_emits_resolved_dependency_edge(tmp_path):
+    """Depends(get_db) in a parameter default links route -> app::get_db as a
+    resolved call edge (so flow/impact can reach the dependency's consumers).
+    Without dependency_markers the dependency stays invisible."""
+    pf = _di_fixture(tmp_path, "db=Depends(get_db)")
+    qnames = {n.qualified_name for n in pf.nodes}
+    with_markers = {(e.source, e.target, e.kind, e.resolution)
+                    for e in resolve_calls([pf], qnames, dependency_markers=["Depends"])}
+    assert (Q("app", "route"), Q("app", "get_db"), "call", "resolved") in with_markers
+    plain = resolve_calls([pf], qnames)
+    assert not any(e.source == Q("app", "route") and e.target == Q("app", "get_db")
+                   for e in plain)
+
+
+def test_di_marker_matches_dotted_target_by_short_name(tmp_path):
+    """fastapi.Depends(get_db) matches the marker on qname.short, not the full
+    expression."""
+    pf = _di_fixture(tmp_path, "db=fastapi.Depends(get_db)")
+    qnames = {n.qualified_name for n in pf.nodes}
+    by = {(e.source, e.target, e.kind, e.resolution)
+          for e in resolve_calls([pf], qnames, dependency_markers=["Depends"])}
+    assert (Q("app", "route"), Q("app", "get_db"), "call", "resolved") in by
+
+
+def test_non_marker_param_config_emits_no_di_edge(tmp_path):
+    """Query(min_length=1) is parameter config, not a dependency: no marker
+    match, and its keyword arg must never become a callee."""
+    pf = _di_fixture(tmp_path, "q: str = Query(min_length=1)")
+    qnames = {n.qualified_name for n in pf.nodes}
+    edges = resolve_calls([pf], qnames, dependency_markers=["Depends"])
+    assert not any(e.target == "min_length" for e in edges)
+    assert any(e.target == "Query" for e in edges)  # the call itself is kept
+
+
 # ── path-alias (tsconfig @/* -> src/*) resolution ─────────────────────
 
 
