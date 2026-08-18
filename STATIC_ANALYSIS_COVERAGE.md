@@ -227,3 +227,6 @@ dead-code 以“无 resolved 调用者且不是已知入口/测试”为主条�
   `test_flow_builder.py::test_decorator_marked_method_is_entry`（有入边仍为入口）、
   `test_deadcode.py::test_find_dead_code_excludes_spring_mapping`（`@GetMapping` 不在 dead-code 候选）、
   `test_parser_java.py::test_java_annotations_capture_mappings`（方法级注解进 decorators）。
+- 提交记录：
+  - `57bedb9` fix: close P0/P1 static-analysis coverage gaps —— §8 #1（ESM 相对导入）、#2（测试识别）、#3（Java 构造器链）修复 + 新增测试与文档更新。
+  - `b6625b9` feat: Spring Controller Mapping annotations are business flow entries —— §8 #4 收尾：Spring Mapping 注解进默认 `entry_decorators`，`build_flows` 装饰器驱动入口，`flow_input_hash` 纳入 decorators，dead-code 不再误报 handler；3 个新单测。
