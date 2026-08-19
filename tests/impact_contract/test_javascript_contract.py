@@ -180,6 +180,36 @@ def test_javascript_mjs_and_cjs_dialects(tmp_path):
     assert modules.get("legacy") == "javascript"
 
 
+def test_javascript_bare_extension_and_index(tmp_path):
+    """JS-M09/M10 through the impact layer: a bare specifier resolving via
+    extension probing and a directory import resolving via the index probe
+    both land in flows."""
+    _, conn = build_index(tmp_path, {
+        "src/util.js": (
+            "export function helper() {\n"
+            "  return 1;\n"
+            "}\n"
+        ),
+        "src/lib/index.js": (
+            "export function find() {\n"
+            "  return 2;\n"
+            "}\n"
+        ),
+        "src/app.js": (
+            "import { helper } from './util';\n"
+            "import { find } from './lib';\n"
+            "export function main() {\n"
+            "  return helper() + find();\n"
+            "}\n"
+        ),
+    })
+    for symbol in (Q("util", "helper"), Q("lib.index", "find")):
+        res = get_impact(conn, [symbol])[0]
+        assert res["found"]
+        assert Q("app", "main") in qname_set(res["upstream"])
+        assert res["affected_entries"] == [Q("app", "main")]
+
+
 def test_javascript_incremental_equals_rebuild(tmp_path):
     """modify + add + delete: incremental sync leaves impact identical to rebuild."""
     cfg, conn = build_index(tmp_path,GRAPH)

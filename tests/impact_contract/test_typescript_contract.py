@@ -162,6 +162,41 @@ def test_typescript_cycle_and_diamond(tmp_path):
     assert res["affected_entries"] == [Q("graph", "main")]
 
 
+def test_typescript_default_and_barrel_flow(tmp_path):
+    """JS-M02/M07 through the impact layer: a default import and a `export *`
+    barrel both land on the real callee, so flows reach the business entry."""
+    _, conn = build_index(tmp_path, {
+        "src/auth.ts": (
+            "export default function login(): boolean {\n"
+            "  return true;\n"
+            "}\n"
+            "export function helper(): boolean {\n"
+            "  return true;\n"
+            "}\n"
+        ),
+        "src/barrel.ts": (
+            "export * from './auth';\n"
+        ),
+        "src/app.ts": (
+            "import login from './auth';\n"
+            "import { helper } from './barrel';\n"
+            "export function main(): boolean {\n"
+            "  return login() && helper();\n"
+            "}\n"
+        ),
+    })
+    # the default-imported callee reaches main directly
+    default_impact = get_impact(conn, [Q("auth", "login")])[0]
+    assert default_impact["found"]
+    assert Q("app", "main") in qname_set(default_impact["upstream"])
+    assert default_impact["affected_entries"] == [Q("app", "main")]
+    # the barrel re-export reaches main too
+    barrel_impact = get_impact(conn, [Q("auth", "helper")])[0]
+    assert barrel_impact["found"]
+    assert Q("app", "main") in qname_set(barrel_impact["upstream"])
+    assert barrel_impact["affected_entries"] == [Q("app", "main")]
+
+
 def test_typescript_incremental_equals_rebuild(tmp_path):
     """modify + add + delete: incremental sync leaves impact identical to rebuild."""
     cfg, conn = build_index(tmp_path,GRAPH)

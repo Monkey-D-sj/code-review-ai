@@ -931,6 +931,8 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
                                   file_path, repo_root)
     if lang_name == "python":
         pf.module_all = _extract_module_all(root)
+    elif lang_name in ("typescript", "javascript"):
+        pf.default_export = _extract_esm_default_export(root, module_qname)
     # handle inheritance
     _walk_inherits(root, module_qname, lang, pf.inherits)
     if lang_name == "java":
@@ -1144,7 +1146,7 @@ def _extract_imports(root, module_qname, lang, lang_name: str,
         return _extract_imports_python(root, module_qname, lang, file_path)
     if lang_name == "java":
         return _extract_imports_java(root, lang)
-    return _extract_imports_esm(root, lang, file_path, repo_root)
+    return _extract_imports_esm(root, lang, file_path, repo_root, module_qname)
 
 
 def _extract_imports_java(root, lang) -> list[ImportEntry]:
@@ -1266,11 +1268,13 @@ def _esm_relative_module(spec: str, file_path: str, repo_root: str) -> str | Non
 
     Mirrors ``_module_qname``'s path-to-qname conventions: a known source
     suffix is stripped from the last segment (so explicit ``./auth.ts`` and
-    bare ``./auth`` agree), a leading ``src/`` segment is dropped. Directory
-    ``index`` files are not resolved (deferred) - a bare-directory spec yields
-    the directory's qname, which simply stays unresolved if no such module
-    exists. Path-based (not module-qname-parts-based) so imports that hop out
-    of a stripped ``src/`` tree still land on the right root-level module.
+    bare ``./auth`` agree), a leading ``src/`` segment is dropped. A bare
+    specifier is probed on disk first: ``./auth`` → ``auth.ts`` (extension
+    resolution, JS-M09) and ``./dir`` → ``dir/index.ts`` (directory index
+    resolution, JS-M10) land on the real module qname instead of a module that
+    may not exist. Path-based (not module-qname-parts-based) so imports that
+    hop out of a stripped ``src/`` tree still land on the right root-level
+    module.
     """
     if not spec.startswith("."):
         return None
@@ -1281,6 +1285,14 @@ def _esm_relative_module(spec: str, file_path: str, repo_root: str) -> str | Non
     parts = [part for part in target.split("/") if part not in ("", ".")]
     if not parts:
         return None
+    if not _has_source_suffix(parts[-1]):
+        for ext in SOURCE_SUFFIXES:
+            with_ext = parts[:-1] + [parts[-1] + ext]
+            if _path_exists(repo_root, with_ext):
+                return _parts_to_module(with_ext)
+            index = parts + ["index" + ext]
+            if _path_exists(repo_root, index):
+                return _parts_to_module(index)
     for ext in SOURCE_SUFFIXES:
         if parts[-1].endswith(ext):
             parts[-1] = parts[-1][: -len(ext)]
@@ -1292,8 +1304,31 @@ def _esm_relative_module(spec: str, file_path: str, repo_root: str) -> str | Non
     return ".".join(parts)
 
 
-def _extract_imports_esm(root, lang, file_path: str,
-                         repo_root: str) -> list[ImportEntry]:
+def _has_source_suffix(name: str) -> bool:
+    """True when the last path segment already carries a source suffix."""
+    return any(name.endswith(ext) for ext in SOURCE_SUFFIXES)
+
+
+def _path_exists(repo_root: str, parts: list[str]) -> bool:
+    """True when ``repo_root/parts`` exists as a file (relative-module probe)."""
+    return Path(repo_root).joinpath(*parts).is_file()
+
+
+def _parts_to_module(parts: list[str]) -> str:
+    """Path parts → module qname, mirroring _module_qname (strip a source suffix
+    from the last segment, drop a leading src/, join with dots)."""
+    if parts and _has_source_suffix(parts[-1]):
+        for ext in SOURCE_SUFFIXES:
+            if parts[-1].endswith(ext):
+                parts[-1] = parts[-1][: -len(ext)]
+                break
+    if parts and parts[0] == "src":
+        parts = parts[1:]
+    return ".".join(parts)
+
+
+def _extract_imports_esm(root, lang, file_path: str, repo_root: str,
+                         module_qname: str = "") -> list[ImportEntry]:
     """Extract ES module imports: import/export statements.
 
     Relative specifiers (./auth, ../lib/x) are canonicalized to the imported
@@ -1307,6 +1342,8 @@ def _extract_imports_esm(root, lang, file_path: str,
       import * as ns from "mod"    → namespace (imported_name=None)
       import d from "mod"          → default (imported_name="default")
       export {x} from "mod"        → re-export (treated as import)
+      export {x}                   → local re-export binding back to this module
+      export * from "mod"          → star re-export (barrel)
     """
     def _mod(source: str) -> str:
         return _esm_relative_module(source, file_path, repo_root) or source
@@ -1345,21 +1382,59 @@ def _extract_imports_esm(root, lang, file_path: str,
                                                source, "default", False,
                                                span=_span(node)))
         elif node.type == "export_statement":
+            export_clause = _find_child(node, "export_clause")
             source = _mod(_esm_source(node))
-            if not source:
-                continue
-            # re-exports: export {x} from "mod"
-            for child in node.children:
-                if child.type == "export_clause":
-                    for spec in child.children:
-                        if spec.type == "export_specifier":
-                            name_node = spec.child_by_field_name("name")
-                            alias_node = spec.child_by_field_name("alias")
-                            name = name_node.text.decode("utf-8") if name_node else ""
-                            local = alias_node.text.decode("utf-8") if alias_node else name
-                            entries.append(ImportEntry(local, source, name, False,
-                                                       span=_span(node)))
+            if export_clause is not None:
+                # export {x} from "mod" / export {x} — re-export bindings. A
+                # local re-export points back at this module so the re-export
+                # chain closes through _resolve_reexport.
+                reexport_module = source or module_qname
+                for spec in export_clause.children:
+                    if spec.type == "export_specifier":
+                        name_node = spec.child_by_field_name("name")
+                        alias_node = spec.child_by_field_name("alias")
+                        name = name_node.text.decode("utf-8") if name_node else ""
+                        local = alias_node.text.decode("utf-8") if alias_node else name
+                        entries.append(ImportEntry(local, reexport_module, name, False,
+                                                   span=_span(node)))
+            elif source and any(
+                    child.type == "*" and not child.is_named
+                    for child in node.children):
+                # export * from "mod" — a star re-export (barrel). The grammar
+                # exposes the '*' as an anonymous child, not a named node.
+                entries.append(ImportEntry("*", source, None, True,
+                                           span=_span(node)))
     return entries
+
+
+def _extract_esm_default_export(root, module_qname: str) -> str | None:
+    """The qname a module's ``export default`` names, or None.
+
+    Handles ``export default function foo()`` / ``export default class Foo``
+    (the declared qname) and ``export default foo`` (reference to a local). A
+    constant/expression default (``export default 42``) has no stable qname →
+    None, so a default import of it degrades to unresolved. The qname is stored
+    even before it exists in the graph; resolution checks existence.
+    """
+    for node in root.children:
+        if node.type != "export_statement":
+            continue
+        if _find_child(node, "export_clause") is not None:
+            continue  # export {x} — not a default export
+        if any(child.type == "*" and not child.is_named for child in node.children):
+            continue  # export * from — not a default export
+        declaration = _find_child(node, "function_declaration")
+        if declaration is None:
+            declaration = _find_child(node, "class_declaration")
+        if declaration is not None:
+            name = declaration.child_by_field_name("name")
+            if name is not None:
+                return qname.join(module_qname, name.text.decode("utf-8"))
+            continue
+        for child in node.children:
+            if child.type == "identifier":
+                return qname.join(module_qname, child.text.decode("utf-8"))
+    return None
 
 
 _VUE_SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script>", re.DOTALL)

@@ -212,6 +212,8 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                 if any(imp.is_star for imp in pf.imports)}
     module_alls = {pf.module_qname: pf.module_all
                    for pf in parsed_files if pf.module_all is not None}
+    default_exports = {pf.module_qname: pf.default_export
+                       for pf in parsed_files if pf.default_export}
     var_types = {qn: types for pf in parsed_files
                  for qn, types in pf.var_types.items()}
     class_qnames = {n.qualified_name for f in parsed_files for n in f.nodes if n.kind == "class"}
@@ -225,7 +227,8 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                                      mod_syms=mod_syms, source_module=pf.module_qname,
                                      var_types=var_types, path_aliases=path_aliases,
                                      class_qnames=class_qnames, star_map=star_map,
-                                     module_alls=module_alls):
+                                     module_alls=module_alls,
+                                     default_exports=default_exports):
                 _dedup_append(edges, seen, edge)
                 if edge.resolution == "resolved" and edge.target in class_qnames:
                     init_qn = _init_member_qname(edge.target, c.language)
@@ -345,10 +348,18 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
             mod, imp_name, _star = imports[name]
             mod = _module_of(mod, path_aliases, existing)  # alias @/x -> real module
             if imp_name:  # from m import name
+                if imp_name == "default":
+                    # TS/JS default import binds to the module's export default
+                    tgt = (default_exports or {}).get(mod)
+                    return [_resolved(base, tgt, existing)] if tgt else [base]
                 tgt = qname.join(mod, imp_name)
                 if tgt not in existing:
-                    tgt = _resolve_reexport(mod, imp_name, all_import_maps,
-                                            existing, star_map=star_map) or tgt
+                    hits = _resolve_reexport(mod, imp_name, all_import_maps,
+                                             existing, star_map=star_map)
+                    if len(hits) == 1:
+                        tgt = hits[0]
+                    elif len(hits) > 1:  # barrel re-exports it from several modules
+                        return _candidates(base, hits)
                 return [_resolved(base, tgt, existing)]
             return [_resolved(base, mod, existing)]  # imported module itself
         if star_modules:  # from m import * -> unique / multi-candidate / unresolved
@@ -367,11 +378,21 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
             if imp_name is None:  # import m / import m as head -> m.rest
                 target_mod, member = _module_member(mod, rest)
                 tgt = qname.join(target_mod, member) if member else target_mod
-                if tgt not in existing:
-                    tgt = (_resolve_reexport(target_mod, member, all_import_maps, existing,
-                                             star_map=star_map)
-                           if member else None) or tgt
+                if tgt not in existing and member:
+                    hits = _resolve_reexport(target_mod, member, all_import_maps,
+                                             existing, star_map=star_map)
+                    if len(hits) == 1:
+                        tgt = hits[0]
+                    elif len(hits) > 1:
+                        return _candidates(base, hits)
                 return [_resolved(base, tgt, existing)]
+            if imp_name == "default":
+                # default import receiver: foo.bar() -> <default-export>.bar
+                default_qn = (default_exports or {}).get(mod)
+                if default_qn:
+                    tgt = _join_target(default_qn, rest)
+                    if tgt in existing:
+                        return [_resolved(base, tgt, existing)]
         if head in local and local[head] in existing:
             cls_qn = local[head]
             tgt = _join_target(cls_qn, rest)
@@ -397,30 +418,31 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
 
 def _resolve_reexport(current: str, name: str, all_import_maps: dict,
                       existing: set[str], seen: set[str] | None = None,
-                      star_map: dict | None = None) -> str | None:
-    """Follow a module's own import bindings to where `name` is re-exported from.
+                      star_map: dict | None = None) -> list[str]:
+    """All qnames `name` is re-exported to from `current`.
 
     binding is (module, imported_name, is_star); imported_name is the EXPORTED
     name (aliases like `from .m import X as Y` make it differ from the local
-    name), so recursion carries binding[1], not `name`. When no single binding
-    names it, the module's star re-exports (`export * from` / `from m import *`)
-    are probed — a barrel can re-export many modules at once.
+    name), so recursion carries binding[1], not `name`. A single binding chain
+    resolves to at most one qname; when no single binding names it, the module's
+    star re-exports (`export * from` / `from m import *`) are all probed — a
+    barrel can re-export many modules at once, and the caller decides resolved
+    (1) vs candidate (many) vs unresolved (0).
     """
     tgt = qname.join(current, name)
     if tgt in existing:
-        return tgt
+        return [tgt]
     if current in (seen or set()):
-        return None  # import cycle
+        return []  # import cycle
     binding = (all_import_maps.get(current) or {}).get(name)
     if binding and binding[1]:
         return _resolve_reexport(binding[0], binding[1], all_import_maps,
                                  existing, (seen or set()) | {current}, star_map)
+    hits: list[str] = []
     for module in (star_map or {}).get(current, []):
-        hit = _resolve_reexport(module, name, all_import_maps, existing,
-                                (seen or set()) | {current}, star_map)
-        if hit:
-            return hit
-    return None  # no binding / module import / unresolved star re-export
+        hits.extend(_resolve_reexport(module, name, all_import_maps, existing,
+                                      (seen or set()) | {current}, star_map))
+    return hits
 
 
 def _resolved(base: Edge, target: str, existing: set[str]) -> Edge:
