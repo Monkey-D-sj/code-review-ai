@@ -1,0 +1,11 @@
+{
+  "case_id": "java_call_overload_and_scope",
+  "language": "java",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.scope::OverloadA.process",
+  "edge_kind": "call",
+  "direction": "both",
+  "expected_in": ["com.acme.p0.calls::OverloadCaller.run"],
+  "expected_out": []
+}

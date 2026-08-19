@@ -1,0 +1,15 @@
+{
+  "case_id": "java_contains_edges",
+  "language": "java",
+  "p0_capabilities": ["P0-G02"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.classes::Container",
+  "edge_kind": "contains",
+  "direction": "both",
+  "expected_in": ["com.acme.p0.classes"],
+  "expected_out": [
+    "com.acme.p0.classes::Container.Container",
+    "com.acme.p0.classes::Container.Inner",
+    "com.acme.p0.classes::Container.member"
+  ]
+}

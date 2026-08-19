@@ -1,0 +1,18 @@
+{
+  "case_id": "java_query_contract",
+  "language": "java",
+  "p0_capabilities": ["P0-G07"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::Recursion.direct",
+  "edge_kind": "call",
+  "direction": "both",
+  "expected_in": ["com.acme.p0.calls::Recursion.direct"],
+  "expected_out": ["com.acme.p0.calls::Recursion.direct"],
+  "contract_checks": {
+    "missing_qname": "com.acme.p0.missing::symbol",
+    "limited_qname": "com.acme.p0.calls::FlowCaller.run",
+    "limited_edge_kind": "call",
+    "limited_direction": "in",
+    "max_per_dir": 2
+  }
+}

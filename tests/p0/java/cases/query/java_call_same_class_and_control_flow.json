@@ -1,0 +1,27 @@
+{
+  "case_id": "java_call_same_class_and_control_flow",
+  "language": "java",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::FlowCaller.run",
+  "edge_kind": "call",
+  "direction": "both",
+  "expected_in": [],
+  "expected_out": [
+    "com.acme.p0.calls::FlowCaller.bareTarget",
+    "com.acme.p0.calls::FlowCaller.catchTarget",
+    "com.acme.p0.calls::FlowCaller.elseTarget",
+    "com.acme.p0.calls::FlowCaller.finallyTarget",
+    "com.acme.p0.calls::FlowCaller.forTarget",
+    "com.acme.p0.calls::FlowCaller.ifTarget",
+    "com.acme.p0.calls::FlowCaller.thisTarget",
+    "com.acme.p0.calls::FlowCaller.tryTarget",
+    "com.acme.p0.calls::FlowCaller.whileTarget",
+    "com.acme.p0.calls::FlowTarget",
+    "com.acme.p0.calls::FlowTarget.FlowTarget",
+    "com.acme.p0.calls::FlowTarget.staticTarget",
+    "com.acme.p0.imports::StaticImports.staticLoad",
+    "com.acme.p0.imports::StaticImports.staticSave",
+    "com.acme.p0.imports::TargetService.save"
+  ]
+}
