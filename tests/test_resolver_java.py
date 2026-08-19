@@ -170,6 +170,26 @@ def test_di_field_injection_off_without_matching_annotation(tmp_path):
                    and e.source == "com.example::OwnerController" for e in edges)
 
 
+def test_di_edges_carry_type_rule_provenance(tmp_path):
+    """Phase 2: DI edges carry origin='type', the JAVA-F04/F05 rule id, and
+    structured evidence (mechanism, dep_type, annotations)."""
+    files = _di_repo(tmp_path)
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames, None, None, ["Autowired"])
+    by_rule = {e.rule_id: e for e in edges
+               if e.origin == "type" and e.rule_id is not None}
+    field = by_rule["JAVA-F05"]
+    assert field.source == "com.example::OwnerController"
+    assert field.target == "com.example::OwnerRepository"
+    assert field.evidence_json == {
+        "mechanism": "field", "dep_type": "OwnerRepository",
+        "annotations": ["Autowired"]}
+    ctor = by_rule["JAVA-F04"]
+    assert ctor.source == "com.example::OwnerController.OwnerController"
+    assert ctor.evidence_json["mechanism"] == "constructor"
+    assert ctor.evidence_json["dep_type"] == "OwnerRepository"
+
+
 def test_di_constructor_param_resolves(tmp_path):
     """Constructor params are unconditional injection points (Spring injects
     single-constructor params unannotated); the edge chains off the

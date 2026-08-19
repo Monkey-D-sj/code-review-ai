@@ -71,8 +71,12 @@ def norm(path: str) -> str:
 
 
 def _edge_snapshot(conn) -> set[tuple]:
+    """(source,target,kind,resolution,file_path,origin,rule_id,confidence,
+    evidence_json,site_id) — provenance included so incremental equality also
+    verifies the Phase 2 evidence columns survive the sync."""
     return {tuple(r) for r in conn.execute(
-        "SELECT source, target, kind, resolution, file_path FROM edges")}
+        "SELECT source, target, kind, resolution, file_path, origin, rule_id,"
+        " confidence, evidence_json, site_id FROM edges")}
 
 
 def _flow_snapshot(conn) -> set[tuple]:

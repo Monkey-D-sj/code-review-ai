@@ -28,6 +28,36 @@ def test_resolve_dynamic_for_obj_method():
     assert dyn and dyn[0].resolution == "dynamic"
 
 
+def test_dynamic_edge_carries_call_form_evidence():
+    """Phase 2: a dynamic edge keeps the unbound expression and call form as
+    syntax evidence, so the AI reviewer sees what stayed unresolved and why."""
+    edges = _resolve()
+    dyn = [e for e in edges if e.target == "obj.run"]
+    assert dyn and dyn[0].resolution == "dynamic"
+    assert dyn[0].origin == "syntax"
+    assert dyn[0].evidence_json == {
+        "call_form": "attribute", "target_expr": "obj.run"}
+
+
+def test_structural_edges_carry_origin(tmp_path):
+    """Phase 2: import edges carry origin='module' and inherits origin='type'."""
+    mod = tmp_path / "app.py"
+    mod.write_text(
+        "import auth\n"
+        "class Base:\n"
+        "    pass\n"
+        "class User(Base):\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(mod), str(tmp_path))
+    qnames = {n.qualified_name for n in pf.nodes}
+    edges = resolve_edges([pf], qnames)
+    by = {(e.kind, e.source, e.target, e.origin) for e in edges}
+    assert ("import", "app", "auth", "module") in by
+    assert ("extends", "app::User", "app::Base", "type") in by
+
+
 def test_resolve_esm_relative_imports():
     """The P0 audit gap: `import { login } from "./auth"` must resolve to the
     repo module ts.auth, not stay an unresolved `./auth::login` edge - for

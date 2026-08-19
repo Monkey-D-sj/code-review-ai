@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Bumped whenever the schema or its meaning changes in a way that makes an
 # older index.db incompatible; indexers check this before rebuilding.
-INDEX_VERSION = 6
+INDEX_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (
@@ -29,7 +29,12 @@ CREATE TABLE IF NOT EXISTS edges (
     target TEXT,
     kind TEXT,
     file_path TEXT,
-    resolution TEXT
+    resolution TEXT,
+    origin TEXT,
+    rule_id TEXT,
+    confidence REAL,
+    evidence_json TEXT,
+    site_id TEXT
 );
 CREATE TABLE IF NOT EXISTS flows (
     id INTEGER PRIMARY KEY,
@@ -141,16 +146,28 @@ def _migrate_nodes(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_edges(conn: sqlite3.Connection) -> None:
-    """Drop the unused call_line column from pre-existing DBs.
+    """Drop the unused call_line column and add provenance columns to
+    pre-existing DBs.
 
     CREATE TABLE IF NOT EXISTS won't alter an existing table, so an older
-    index.db keeps the call_line column even though nothing writes or reads
-    it anymore. Edge identity is (source, target, kind); the call site line
-    number carried no topological meaning and was never consumed by any query.
+    index.db keeps call_line (nothing reads it anymore) and lacks the Phase 2
+    provenance columns. Edge identity is (source, target, kind); the call site
+    line number carried no topological meaning, while origin/rule_id/confidence/
+    evidence_json/site_id carry the evidence the AI reviewer now consumes.
     """
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(edges)")}
     if "call_line" in cols:
         conn.execute("ALTER TABLE edges DROP COLUMN call_line")
+    if "origin" not in cols:
+        conn.execute("ALTER TABLE edges ADD COLUMN origin TEXT")
+    if "rule_id" not in cols:
+        conn.execute("ALTER TABLE edges ADD COLUMN rule_id TEXT")
+    if "confidence" not in cols:
+        conn.execute("ALTER TABLE edges ADD COLUMN confidence REAL")
+    if "evidence_json" not in cols:
+        conn.execute("ALTER TABLE edges ADD COLUMN evidence_json TEXT")
+    if "site_id" not in cols:
+        conn.execute("ALTER TABLE edges ADD COLUMN site_id TEXT")
 
 
 @contextmanager

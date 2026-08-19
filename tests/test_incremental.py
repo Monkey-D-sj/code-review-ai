@@ -260,7 +260,8 @@ def test_sync_nothing_changed_is_noop(tmp_path):
 
 def _edge_set(conn):
     return {tuple(r) for r in conn.execute(
-        "SELECT source,target,kind,resolution,file_path FROM edges")}
+        "SELECT source,target,kind,resolution,file_path,origin,rule_id,"
+        "confidence,evidence_json,site_id FROM edges")}
 
 
 def _flow_set(conn):

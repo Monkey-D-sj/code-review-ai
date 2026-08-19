@@ -31,6 +31,28 @@ def _routing_repo(tmp_path):
             parse_file(str(test), str(tmp_path))]
 
 
+def test_route_edges_carry_framework_provenance(tmp_path):
+    """Phase 2: MockMvc route edges carry origin='framework', rule JAVA-F01,
+    and the matched (method, path) as evidence."""
+    files = _routing_repo(tmp_path)
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames)
+    route = [e for e in edges if e.rule_id == "JAVA-F01"]
+    assert len(route) == 3
+    for e in route:
+        assert e.origin == "framework"
+        assert {"method", "path"} <= set(e.evidence_json)
+        assert e.evidence_json["method"] in {"GET", "POST"}
+    by = {(e.source, e.evidence_json["method"], e.evidence_json["path"])
+          for e in route}
+    assert ("com.example::HomeControllerTests.listOk", "GET",
+            "/owners?page=1") in by
+    assert ("com.example::HomeControllerTests.showOk", "GET",
+            "/owners/7") in by
+    assert ("com.example::HomeControllerTests.createOk", "POST",
+            "/owners") in by
+
+
 def test_route_edges_synthesized(tmp_path):
     files = _routing_repo(tmp_path)
     qnames = {n.qualified_name for f in files for n in f.nodes}

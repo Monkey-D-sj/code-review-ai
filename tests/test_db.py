@@ -58,7 +58,7 @@ def test_files_table_and_busy_timeout(tmp_path):
         "INSERT INTO files(path,mtime,size,file_hash) VALUES('a.py', 1.0, 3, 'x')")
     row = conn.execute("SELECT * FROM files").fetchone()
     assert row["path"] == "a.py" and row["size"] == 3
-    assert INDEX_VERSION == 6
+    assert INDEX_VERSION == 7
     # busy_timeout 生效（PRAGMA 返回毫秒）
     assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     conn.close()
@@ -90,6 +90,35 @@ def test_init_schema_migrates_decorators_column(tmp_path):
         "SELECT decorators FROM nodes WHERE qualified_name='mod::old'"
     ).fetchone()
     assert row["decorators"] is None
+
+
+def test_init_schema_migrates_legacy_edges(tmp_path):
+    """An index.db from before the Phase 2 provenance columns gains them via
+    ALTER TABLE (CREATE TABLE IF NOT EXISTS won't touch it)."""
+    db = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE edges ("
+        "id INTEGER PRIMARY KEY, source TEXT, target TEXT, kind TEXT,"
+        "file_path TEXT, resolution TEXT);"
+    )
+    conn.execute("INSERT INTO edges(source,target,kind,file_path,resolution)"
+                 " VALUES('mod::a','mod::b','call','app.py','resolved')")
+    conn.commit()
+    conn.close()
+
+    conn = connect(str(db))
+    init_schema(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(edges)")}
+    assert {"origin", "rule_id", "confidence", "evidence_json", "site_id"} <= cols
+    # the legacy row keeps its identity; new columns default to NULL
+    row = conn.execute(
+        "SELECT resolution, origin, rule_id, confidence, evidence_json, site_id"
+        " FROM edges").fetchone()
+    assert row["resolution"] == "resolved"
+    assert row["origin"] is None and row["rule_id"] is None
+    assert row["confidence"] is None and row["site_id"] is None
+    assert row["evidence_json"] is None
 
 
 def test_init_schema_creates_tombstones_table(tmp_path):

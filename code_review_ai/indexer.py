@@ -144,10 +144,13 @@ def _write_nodes(conn, parsed, config) -> tuple[dict[str, int], list]:
 
 def _write_edges(conn, edges) -> None:
     conn.executemany(
-        "INSERT INTO edges(source,target,kind,file_path,resolution)"
-        " VALUES(?,?,?,?,?)",
-        [(e.source, e.target, e.kind, e.file_path, e.resolution)
-         for e in edges],
+        "INSERT INTO edges(source,target,kind,file_path,resolution,"
+        "origin,rule_id,confidence,evidence_json,site_id)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?)",
+        [(e.source, e.target, e.kind, e.file_path, e.resolution,
+          e.origin, e.rule_id, e.confidence,
+          json.dumps(e.evidence_json) if e.evidence_json else None,
+          e.site_id) for e in edges],
     )
 
 

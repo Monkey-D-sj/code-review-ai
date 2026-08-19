@@ -39,6 +39,11 @@ def build_route_edges(parsed_files: list[ParsedFile],
                             file_path=test_file,
                             resolution="resolved" if ctrl_qn in existing_qnames
                             else "unresolved",
+                            origin="framework",
+                            rule_id="JAVA-F01",
+                            evidence_json={
+                                "method": request_method, "path": request_path,
+                            },
                         ))
                     break
     return edges

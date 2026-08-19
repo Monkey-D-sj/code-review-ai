@@ -22,12 +22,35 @@ class Edge:
     source     — caller qualified name
     target     — callee: resolved qname (if resolution=resolved), raw expr otherwise
     resolution — resolved / dynamic / unresolved
+    origin     — how the edge was derived: syntax|module|type|framework|heuristic
+    rule_id    — the framework/heuristic rule that produced it (e.g. JAVA-F04);
+                 None for plain syntax-derived edges
+    confidence — 0.0..1.0; how sure we are of the resolution
+    evidence_json — structured evidence (JSON-serializable dict); serialized at
+                 write time, e.g. {"call_form", "target_expr"} for dynamic edges
+    site_id    — groups the candidate edges of one call site (Phase 4); None today
     """
     source: str
     target: str
     kind: str
     file_path: str
     resolution: str
+    origin: str = "syntax"
+    rule_id: str | None = None
+    confidence: float = 1.0
+    evidence_json: dict | None = None
+    site_id: str | None = None
+
+
+def _mark_dynamic(base: Edge, call_form: str, target_expr: str) -> Edge:
+    """Mark an attribute-call edge as dynamic with syntax evidence.
+
+    The receiver type is not statically known, so the target depends on a
+    runtime value. The raw expression and call form are kept as evidence so the
+    AI reviewer can see exactly what was left unbound."""
+    base.resolution = "dynamic"
+    base.evidence_json = {"call_form": call_form, "target_expr": target_expr}
+    return base
 
 
 def _module_symbols(parsed_files: list[ParsedFile]) -> dict:
@@ -280,8 +303,7 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                 tgt = _join_target(enclosing, rest)
                 if tgt in existing:
                     return _resolved(base, tgt, existing)
-        base.resolution = "dynamic"
-        return base
+        return _mark_dynamic(base, c.call_form, c.target_expr)
     return base  # other -> unresolved
 
 
@@ -419,8 +441,7 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
             expr = expr[len("this."):]
         head, sep, rest = expr.partition(".")
         if not sep:
-            base.resolution = "dynamic"
-            return base
+            return _mark_dynamic(base, c.call_form, c.target_expr)
         # Java receiver type binding: bare identifier whose declared type we know
         if var_types:
             scope_types = var_types.get(c.source_qname, {})
@@ -444,8 +465,7 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
             target = _resolve_java_dotted(c.target_expr, mod_syms, existing)
             if target:
                 return _resolved(base, target, existing)
-        base.resolution = "dynamic"
-        return base
+        return _mark_dynamic(base, c.call_form, c.target_expr)
     if c.call_form == CALL_CONSTRUCT:
         name = c.target_expr
         candidates: list[str] = []
@@ -503,6 +523,7 @@ def _build_imports(parsed: list[ParsedFile], qnames: set[str],
                 source=pf.module_qname, target=tgt, kind="import",
                 file_path=pf.file_path,
                 resolution="resolved" if resolved else "unresolved",
+                origin="module",
             ))
     return edges
 
@@ -523,6 +544,7 @@ def _build_inherits(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
                 source=ih.class_qname, target=tgt, kind=ih.relation,
                 file_path=pf.file_path,
                 resolution="resolved" if resolved else "unresolved",
+                origin="type",
             ))
     return edges
 
@@ -563,7 +585,14 @@ def _build_di_edges(parsed: list[ParsedFile], existing: set[str], mod_syms: dict
                 continue
             _dedup_append(edges, seen, Edge(
                 source=decl.owner_qname, target=class_qn, kind="call",
-                file_path=pf.file_path, resolution="resolved"))
+                file_path=pf.file_path, resolution="resolved",
+                origin="type",
+                rule_id="JAVA-F04" if decl.mechanism == "constructor" else "JAVA-F05",
+                evidence_json={
+                    "mechanism": decl.mechanism,
+                    "dep_type": decl.dep_expr,
+                    "annotations": decl.annotations,
+                }))
     return edges
 
 
