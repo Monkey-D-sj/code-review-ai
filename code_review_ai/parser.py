@@ -172,6 +172,53 @@ CALL_ATTRIBUTE = "attribute"  # dotted:     a.login()
 CALL_OTHER     = "other"      # subscript, call-chain, etc.: vals[0]()  f()()
 CALL_CONSTRUCT = "construct"  # new Foo()
 
+# ── source spans (evidence provenance) ──────────────────────────────
+
+
+@dataclass(frozen=True)
+class SourceSpan:
+    """1-based source location of an IR record, for evidence provenance.
+
+    file_path is filled by parse_file's batch pass (walkers run with ""), and
+    the same pass shifts the line numbers by the .vue script-block offset so
+    spans always point at the original file, not the extracted script."""
+
+    file_path: str
+    start_line: int
+    start_col: int
+    end_line: int
+    end_col: int
+
+
+def _span(node) -> SourceSpan:
+    """SourceSpan for an AST node, from its raw tree-sitter points (0-based).
+
+    file_path is left empty here — parse_file's batch pass stamps it and the
+    .vue line offset."""
+    return SourceSpan(
+        file_path="",
+        start_line=node.start_point[0] + 1,
+        start_col=node.start_point[1] + 1,
+        end_line=node.end_point[0] + 1,
+        end_col=node.end_point[1] + 1,
+    )
+
+
+def _offset_span(span: SourceSpan | None, file_path: str,
+                 line_offset: int) -> SourceSpan | None:
+    """Stamp a walker-built span with its real file and shift its lines onto
+    the original file when the source was extracted (e.g. .vue script block)."""
+    if span is None:
+        return None
+    return SourceSpan(
+        file_path=file_path,
+        start_line=span.start_line + line_offset,
+        start_col=span.start_col,
+        end_line=span.end_line + line_offset,
+        end_col=span.end_col,
+    )
+
+
 # ── helpers ──────────────────────────────────────────────────────────
 
 def _is_scope(node_type: str, lang: dict) -> bool:
@@ -209,6 +256,7 @@ class RawCall:
     file_path: str
     language: str = "python"
     args: tuple[str, ...] = ()
+    span: SourceSpan | None = None
 
 
 @dataclass
@@ -217,6 +265,7 @@ class RawInherit:
     class_qname: str   # the subclass qname
     base_expr: str     # raw base class / interface expression
     relation: str      # "extends" | "implements"
+    span: SourceSpan | None = None
 
 
 @dataclass
@@ -225,6 +274,7 @@ class ImportEntry:
     module: str
     imported_name: str | None
     is_star: bool
+    span: SourceSpan | None = None
 
 
 @dataclass
@@ -245,6 +295,7 @@ class DiDecl:
     dep_expr: str
     annotations: list[str] = field(default_factory=list)
     mechanism: str = "field"
+    span: SourceSpan | None = None
 
 
 @dataclass
@@ -515,7 +566,8 @@ def _java_class_di(node, module_qname, lang, out) -> None:
                 continue  # unannotated fields are not injection points
             type_name = _type_base_name(member.child_by_field_name("type"))
             if type_name is not None:
-                out.append(DiDecl(cls_qname, type_name, annotations, "field"))
+                out.append(DiDecl(cls_qname, type_name, annotations, "field",
+                                  span=_span(member)))
         elif member.type == "constructor_declaration":
             _java_ctor_di(member, module_qname, cls_qname, lang, deco_types, out)
 
@@ -538,7 +590,8 @@ def _java_ctor_di(member, module_qname, cls_qname, lang, deco_types,
             continue  # primitive / var - never a repo class
         annotations = [_decorator_name(a)
                        for a in _annotation_children(param, deco_types, lang)]
-        out.append(DiDecl(ctor_qname, type_name, annotations, "constructor"))
+        out.append(DiDecl(ctor_qname, type_name, annotations, "constructor",
+                          span=_span(param)))
 
 
 def _collect_java_mappings(root, module_qname, lang) -> dict[str, list[tuple[str, str]]]:
@@ -827,6 +880,7 @@ def _walk_inherits(node, module_qname, lang, out: list):
                             class_qname=cls_qname,
                             base_expr=base.text.decode("utf-8"),
                             relation=rel,
+                            span=_span(base),
                         ))
         _walk_inherits(child, module_qname, lang, out)
 
@@ -903,6 +957,12 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     for c in pf.raw_calls:
         c.file_path = file_path
         c.language = lang_name
+        c.span = _offset_span(c.span, file_path, line_offset)
+    # IR records that carry spans but no per-record file_path (inherits,
+    # imports, DI decls) get their file + line offset stamped here too, so
+    # evidence can always point at the original file.
+    for rec in (*pf.inherits, *pf.imports, *pf.di_decls):
+        rec.span = _offset_span(rec.span, file_path, line_offset)
 
     # Attach captured MockMvc requests to the methods that made them
     mockmvc_map: dict[str, list[tuple[str, str]]] = {}
@@ -1035,6 +1095,7 @@ def _walk_calls(node, module_qname, cur_scope, lang, out,
                     target_expr=expr, call_form=form,
                     file_path="",
                     args=_call_args(child, lang),
+                    span=_span(child),
                 ))
             if mockmvc_requests is not None and lang.get("mockmvc_capture"):
                 request = _mockmvc_request(child, lang)
@@ -1104,12 +1165,13 @@ def _extract_imports_java(root, lang) -> list[ImportEntry]:
             module, _, member = full.rpartition(".")
             pkg, _, cls = module.rpartition(".")
             class_qn = f"{pkg}::{cls}" if cls else module
-            entries.append(ImportEntry(member, class_qn, member, False))
+            entries.append(ImportEntry(member, class_qn, member, False,
+                                       span=_span(node)))
         elif "asterisk" in child_types:
-            entries.append(ImportEntry("*", full, None, True))
+            entries.append(ImportEntry("*", full, None, True, span=_span(node)))
         else:
             pkg, _, cls = full.rpartition(".")
-            entries.append(ImportEntry(cls, pkg, cls, False))
+            entries.append(ImportEntry(cls, pkg, cls, False, span=_span(node)))
     return entries
 
 
@@ -1127,11 +1189,13 @@ def _extract_imports_python(root, module_qname, lang,
                 if child.type == "dotted_name":
                     mod = child.text.decode("utf-8")
                     local = mod.split(".")[0]
-                    entries.append(ImportEntry(local, mod, None, False))
+                    entries.append(ImportEntry(local, mod, None, False,
+                                               span=_span(node)))
                 elif child.type == "aliased_import":
                     name = child.child_by_field_name("name").text.decode("utf-8")
                     alias = child.child_by_field_name("alias").text.decode("utf-8")
-                    entries.append(ImportEntry(alias, name, None, False))
+                    entries.append(ImportEntry(alias, name, None, False,
+                                               span=_span(node)))
         elif node.type == "import_from_statement":
             mod_node = node.child_by_field_name("module_name")
             sub = _dotted(mod_node)
@@ -1148,13 +1212,16 @@ def _extract_imports_python(root, module_qname, lang,
             for c in node.children:
                 if c.type == "dotted_name" and (mod_node is None or c.start_byte != mod_node.start_byte):
                     name = c.text.decode("utf-8")
-                    entries.append(ImportEntry(name, module, name, False))
+                    entries.append(ImportEntry(name, module, name, False,
+                                               span=_span(node)))
                 elif c.type == "aliased_import":
                     name = c.child_by_field_name("name").text.decode("utf-8")
                     alias = c.child_by_field_name("alias").text.decode("utf-8")
-                    entries.append(ImportEntry(alias, module, name, False))
+                    entries.append(ImportEntry(alias, module, name, False,
+                                               span=_span(node)))
                 elif c.type == "wildcard_import":
-                    entries.append(ImportEntry("*", module, None, True))
+                    entries.append(ImportEntry("*", module, None, True,
+                                               span=_span(node)))
     return entries
 
 
@@ -1216,7 +1283,8 @@ def _extract_imports_esm(root, lang, file_path: str,
             clause = _find_child(node, "import_clause")
             if clause is None and source:
                 # side-effect import: import "mod"
-                entries.append(ImportEntry(source, source, None, False))
+                entries.append(ImportEntry(source, source, None, False,
+                                           span=_span(node)))
                 continue
             if clause is None:
                 continue
@@ -1224,7 +1292,9 @@ def _extract_imports_esm(root, lang, file_path: str,
                 if child.type == "namespace_import":
                     ident = _find_child(child, "identifier")
                     if ident:
-                        entries.append(ImportEntry(ident.text.decode("utf-8"), source, None, False))
+                        entries.append(ImportEntry(ident.text.decode("utf-8"),
+                                                   source, None, False,
+                                                   span=_span(node)))
                 elif child.type == "named_imports":
                     for spec in child.children:
                         if spec.type == "import_specifier":
@@ -1232,10 +1302,13 @@ def _extract_imports_esm(root, lang, file_path: str,
                             alias_node = spec.child_by_field_name("alias")
                             name = name_node.text.decode("utf-8") if name_node else ""
                             local = alias_node.text.decode("utf-8") if alias_node else name
-                            entries.append(ImportEntry(local, source, name, False))
+                            entries.append(ImportEntry(local, source, name, False,
+                                                       span=_span(node)))
                 elif child.type == "identifier":
                     # default import: import foo from "mod"
-                    entries.append(ImportEntry(child.text.decode("utf-8"), source, "default", False))
+                    entries.append(ImportEntry(child.text.decode("utf-8"),
+                                               source, "default", False,
+                                               span=_span(node)))
         elif node.type == "export_statement":
             source = _mod(_esm_source(node))
             if not source:
@@ -1249,7 +1322,8 @@ def _extract_imports_esm(root, lang, file_path: str,
                             alias_node = spec.child_by_field_name("alias")
                             name = name_node.text.decode("utf-8") if name_node else ""
                             local = alias_node.text.decode("utf-8") if alias_node else name
-                            entries.append(ImportEntry(local, source, name, False))
+                            entries.append(ImportEntry(local, source, name, False,
+                                                       span=_span(node)))
     return entries
 
 
