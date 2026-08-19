@@ -565,16 +565,27 @@ def _resolve_java_dotted(expr: str, mod_syms: dict, existing: set[str]) -> str |
 
 
 def _resolve_java_type(type_name: str, source_module: str | None,
-                       imports: dict, mod_syms: dict | None) -> str | None:
-    """Resolve a Java type name to a class qname: same-package class, then import."""
+                       imports: dict, mod_syms: dict | None,
+                       star_modules: list | None = None) -> list[str]:
+    """All class qnames a Java type name resolves to: same-package class, then
+    import, then wildcard imports (`import a.b.*`). Callers pick resolved (1)
+    vs candidate (many) vs unresolved (0)."""
+    hits: list[str] = []
     if mod_syms and source_module:
         same_pkg = mod_syms.get(source_module, {})
         if type_name in same_pkg:
-            return same_pkg[type_name]
+            hits.append(same_pkg[type_name])
     if type_name in imports:
         mod, imported, _star = imports[type_name]
-        return _join_target(mod, imported) if imported else mod
-    return None
+        candidate = _join_target(mod, imported) if imported else mod
+        if candidate not in hits:  # same-package + import often name the same class
+            hits.append(candidate)
+    if not hits and star_modules:
+        for module in star_modules:
+            syms = (mod_syms or {}).get(module) or {}
+            if type_name in syms:
+                hits.append(syms[type_name])
+    return hits
 
 
 def _resolve_java(c, local: dict, imports: dict, existing: set[str],
@@ -585,6 +596,8 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
                   module_alls: dict | None = None,
                   default_exports: dict | None = None) -> list[Edge]:
     """Java-aware call resolution: simple / attribute / construct forms."""
+    star_modules = ((star_map or {}).get(source_module, [])
+                    if source_module else [])
     if c.call_form == CALL_SIMPLE:
         name = c.target_expr
         if name in local:
@@ -603,6 +616,12 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
             target = _join_target(enclosing, name)
             if target in existing:
                 return [_resolved(base, target, existing)]
+        if star_modules:  # import a.b.* -> unique / candidate / unresolved
+            hits = _star_lookup(name, star_modules, mod_syms, module_alls)
+            if len(hits) == 1:
+                return [_resolved(base, hits[0], existing)]
+            if len(hits) > 1:
+                return _candidates(base, hits)
         return [base]
     if c.call_form == CALL_ATTRIBUTE:
         expr = c.target_expr
@@ -616,12 +635,15 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
             scope_types = var_types.get(c.source_qname, {})
             receiver_type = scope_types.get(head)
             if receiver_type:
-                class_qn = _resolve_java_type(
-                    receiver_type, source_module, imports, mod_syms)
-                if class_qn:
-                    target = _join_target(class_qn, rest)
+                hits = _resolve_java_type(receiver_type, source_module,
+                                          imports, mod_syms, star_modules)
+                if len(hits) == 1:
+                    target = _join_target(hits[0], rest)
                     if target in existing:
                         return [_resolved(base, target, existing)]
+                elif len(hits) > 1:
+                    return _candidates(base, [_join_target(h, rest)
+                                              for h in hits])
         if head in imports:
             mod, imported, _star = imports[head]
             if imported:
@@ -630,6 +652,12 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
             return [_resolved(base, _join_target(mod, rest), existing)]
         if head in local and local[head] in existing:
             return [_resolved(base, _join_target(local[head], rest), existing)]
+        if star_modules:  # Widget.run() where Widget came from import a.b.*
+            hits = _star_lookup(head, star_modules, mod_syms, module_alls)
+            if len(hits) == 1:
+                return [_resolved(base, _join_target(hits[0], rest), existing)]
+            if len(hits) > 1:
+                return _candidates(base, [_join_target(h, rest) for h in hits])
         if mod_syms:
             target = _resolve_java_dotted(c.target_expr, mod_syms, existing)
             if target:
@@ -650,6 +678,12 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
         for candidate in candidates:
             if candidate in existing:
                 return [_resolved(base, candidate, existing)]
+        if star_modules:  # new Widget() where Widget came from import a.b.*
+            hits = _star_lookup(name, star_modules, mod_syms, module_alls)
+            if len(hits) == 1:
+                return [_resolved(base, hits[0], existing)]
+            if len(hits) > 1:
+                return _candidates(base, hits)
         return [base]
     return [base]  # CALL_OTHER -> unresolved
 
@@ -743,6 +777,15 @@ def _build_inherits(parsed: list[ParsedFile], qnames: set[str],
                 if candidate and candidate in qnames:
                     tgt = candidate
                     resolved = True
+                elif "::" not in tgt and mod_syms:
+                    # import a.b.*; class User extends Base — the base comes
+                    # from a wildcard-imported module, not a named import.
+                    star_modules = [imp.module for imp in pf.imports
+                                    if imp.is_star]
+                    hits = _star_lookup(tgt, star_modules, mod_syms, None)
+                    if len(hits) == 1 and hits[0] in qnames:
+                        tgt = hits[0]
+                        resolved = True
             edges.append(Edge(
                 source=ih.class_qname, target=tgt, kind=ih.relation,
                 file_path=pf.file_path,
@@ -778,24 +821,36 @@ def _build_di_edges(parsed: list[ParsedFile], existing: set[str], mod_syms: dict
         if pf.language != "java" or not pf.di_decls:
             continue
         imports = all_import_maps.get(pf.module_qname, {})
+        star_modules = [imp.module for imp in pf.imports if imp.is_star]
         for decl in pf.di_decls:
             if (decl.mechanism == "field"
                     and not _is_di_annotated(decl.annotations, di_annotations)):
                 continue
-            class_qn = _resolve_java_type(decl.dep_expr, pf.module_qname,
-                                          imports, mod_syms)
-            if not class_qn or class_qn not in existing:
+            hits = [h for h in _resolve_java_type(
+                decl.dep_expr, pf.module_qname, imports, mod_syms, star_modules)
+                if h in existing]
+            if not hits:
                 continue
-            _dedup_append(edges, seen, Edge(
-                source=decl.owner_qname, target=class_qn, kind="call",
-                file_path=pf.file_path, resolution="resolved",
-                origin="type",
-                rule_id="JAVA-F04" if decl.mechanism == "constructor" else "JAVA-F05",
-                evidence_json={
-                    "mechanism": decl.mechanism,
-                    "dep_type": decl.dep_expr,
-                    "annotations": decl.annotations,
-                }))
+            rule_id = ("JAVA-F04" if decl.mechanism == "constructor"
+                       else "JAVA-F05")
+            evidence = {
+                "mechanism": decl.mechanism,
+                "dep_type": decl.dep_expr,
+                "annotations": decl.annotations,
+            }
+            if len(hits) == 1:
+                _dedup_append(edges, seen, Edge(
+                    source=decl.owner_qname, target=hits[0], kind="call",
+                    file_path=pf.file_path, resolution="resolved",
+                    origin="type", rule_id=rule_id, evidence_json=evidence))
+            else:  # wildcard ambiguity — candidate DI edges sharing a site_id
+                base = Edge(source=decl.owner_qname, target=decl.dep_expr,
+                            kind="call", file_path=pf.file_path,
+                            resolution="candidate",
+                            origin="type", rule_id=rule_id,
+                            evidence_json=evidence)
+                for candidate in _candidates(base, hits):
+                    _dedup_append(edges, seen, candidate)
     return edges
 
 

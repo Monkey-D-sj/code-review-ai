@@ -232,6 +232,148 @@ def _ctor_chain_repo(tmp_path):
     return files
 
 
+def _wildcard_repo(tmp_path):
+    """A consumer importing two other packages via `import a.b.*;` — Widget in
+    com.widgets, Base in com.base — so every Java resolution channel can be
+    exercised: construct, bare-class-head attribute, declared-type receiver,
+    DI field/ctor, and inheritance, all through the wildcard channel."""
+    files = []
+    for name, body in (
+        ("com/widgets/Widget.java",
+         "package com.widgets;\n"
+         "public class Widget {\n"
+         "    public void run() {}\n"
+         "}\n"),
+        ("com/base/Base.java",
+         "package com.base;\n"
+         "public class Base {\n"
+         "    public void boot() {}\n"
+         "}\n"),
+        ("com/app/App.java",
+         "package com.app;\n"
+         "import com.widgets.*;\n"
+         "import com.base.*;\n"
+         "public class App extends Base {\n"
+         "    @Autowired private Widget field;\n"
+         "    App(Widget ctorDep) { this.field = ctorDep; }\n"
+         "    public void main() {\n"
+         "        Widget w = new Widget();\n"
+         "        w.run();\n"
+         "        Widget.run();\n"
+         "        new Widget();\n"
+         "    }\n"
+         "}\n"),
+    ):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        files.append(parse_file(str(path), str(tmp_path)))
+    return files
+
+
+def _wildcard_edges(tmp_path, di=None):
+    files = _wildcard_repo(tmp_path)
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    return resolve_edges(files, qnames, None, None, di)
+
+
+def test_wildcard_import_construct_resolves(tmp_path):
+    """JAVA-M04: `new Widget()` where Widget comes from `import com.widgets.*`."""
+    edges = _wildcard_edges(tmp_path)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert ("com.app::App.main", "com.widgets::Widget", "resolved") in by
+
+
+def test_wildcard_import_class_head_attribute_resolves(tmp_path):
+    """`Widget.run()` — the bare class head resolves via the wildcard import."""
+    edges = _wildcard_edges(tmp_path)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert ("com.app::App.main", "com.widgets::Widget.run", "resolved") in by
+
+
+def test_wildcard_import_receiver_type_binding_resolves(tmp_path):
+    """`Widget w = ...; w.run()` — the declared receiver type resolves via the
+    wildcard import."""
+    edges = _wildcard_edges(tmp_path)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert ("com.app::App.main", "com.widgets::Widget.run", "resolved") in by
+
+
+def test_wildcard_import_inherit_resolves(tmp_path):
+    """COM-M05-java: `import com.base.*; class App extends Base` — the base
+    comes from a wildcard import, not a named one."""
+    edges = _wildcard_edges(tmp_path)
+    by = {(e.source, e.target, e.kind, e.resolution) for e in edges}
+    assert ("com.app::App", "com.base::Base", "extends", "resolved") in by
+
+
+def test_wildcard_import_di_resolves(tmp_path):
+    """DI field + ctor param of a wildcard-imported type yield resolved edges."""
+    edges = _wildcard_edges(tmp_path, ["Autowired"])
+    by = {(e.source, e.target, e.kind, e.resolution) for e in edges}
+    assert ("com.app::App", "com.widgets::Widget", "call", "resolved") in by
+    assert ("com.app::App.App", "com.widgets::Widget", "call", "resolved") in by
+
+
+def test_wildcard_conflict_produces_candidates(tmp_path):
+    """冲突负例: two wildcard-imported packages both define Widget — `new
+    Widget()` becomes two candidate edges sharing one site_id, not a silently
+    picked winner."""
+    files = []
+    for name, body in (
+        ("a/pkg/Widget.java", "package a.pkg;\npublic class Widget {}\n"),
+        ("b/pkg/Widget.java", "package b.pkg;\npublic class Widget {}\n"),
+        ("app/App.java",
+         "package app;\n"
+         "import a.pkg.*;\n"
+         "import b.pkg.*;\n"
+         "public class App {\n"
+         "    void main() {\n"
+         "        Widget w = new Widget();\n"
+         "    }\n"
+         "}\n"),
+    ):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        files.append(parse_file(str(path), str(tmp_path)))
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames)
+    candidates = [e for e in edges if e.resolution == "candidate"]
+    assert {e.target for e in candidates} == {"a.pkg::Widget", "b.pkg::Widget"}
+    assert {e.site_id for e in candidates} == {candidates[0].site_id}
+    assert set(candidates[0].evidence_json["candidates"]) == {
+        "a.pkg::Widget", "b.pkg::Widget"}
+
+
+def test_wildcard_di_conflict_produces_candidates(tmp_path):
+    """A DI dep resolved via two wildcard packages emits candidate DI edges."""
+    files = []
+    for name, body in (
+        ("a/pkg/Repo.java", "package a.pkg;\npublic class Repo {}\n"),
+        ("b/pkg/Repo.java", "package b.pkg;\npublic class Repo {}\n"),
+        ("app/Ctl.java",
+         "package app;\n"
+         "import a.pkg.*;\n"
+         "import b.pkg.*;\n"
+         "public class Ctl {\n"
+         "    @Autowired private Repo repo;\n"
+         "}\n"),
+    ):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        files.append(parse_file(str(path), str(tmp_path)))
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames, None, None, ["Autowired"])
+    candidates = [e for e in edges if e.resolution == "candidate"]
+    assert {e.target for e in candidates} == {"a.pkg::Repo", "b.pkg::Repo"}
+    assert {e.site_id for e in candidates} == {candidates[0].site_id}
+    # the DI provenance survives on the candidate edges
+    assert candidates[0].rule_id == "JAVA-F05"
+    assert candidates[0].origin == "type"
+
+
 def test_instantiation_to_constructor_internal_call_end_to_end(tmp_path):
     """The P1 audit gap, end to end: `new Foo()` must reach the real Java
     constructor (Foo.Foo), and the constructor's own internal calls must then

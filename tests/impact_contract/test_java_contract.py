@@ -188,6 +188,33 @@ def test_java_cycle_and_diamond(tmp_path):
     assert res["affected_entries"] == ["com.example::Graph.main"]
 
 
+def test_java_wildcard_import_flow(tmp_path):
+    """JAVA-M04: a wildcard-imported Widget reached from App.main is a real
+    flow member — impact on its method recalls the entry point."""
+    _, conn = build_index(tmp_path, {
+        "com/widgets/Widget.java": (
+            "package com.widgets;\n"
+            "public class Widget {\n"
+            "    public void run() {}\n"
+            "}\n"
+        ),
+        "com/app/App.java": (
+            "package com.app;\n"
+            "import com.widgets.*;\n"
+            "public class App {\n"
+            "    public static void main(String[] args) {\n"
+            "        Widget w = new Widget();\n"
+            "        w.run();\n"
+            "    }\n"
+            "}\n"
+        ),
+    })
+    res = get_impact(conn, ["com.widgets::Widget.run"])[0]
+    assert res["found"]
+    assert "com.app::App.main" in qname_set(res["upstream"])
+    assert res["affected_entries"] == ["com.app::App.main"]
+
+
 def test_java_incremental_equals_rebuild(tmp_path):
     """modify + add + delete: incremental sync leaves impact identical to rebuild."""
     cfg, conn = build_index(tmp_path,GRAPH)
