@@ -29,6 +29,7 @@ DEFAULTS = dict(
     community_detection=False,
     community_weight="plain",
     path_aliases={},  # import specifier prefix -> repo-relative dir, e.g. {"@/": "src/"}
+    base_url="",  # tsconfig compilerOptions.baseUrl — bare import specifiers resolve under it
     external_service_url="http://localhost:3000",
     summary_source="diff",  # "none"|"diff" — attach each changed function's unified diff to the change summary
 )
@@ -51,6 +52,7 @@ class Config:
     community_detection: bool
     community_weight: str
     path_aliases: dict[str, str]
+    base_url: str
     external_service_url: str
     summary_source: str
 
@@ -144,22 +146,59 @@ def _jsonc_clean(text: str) -> str:
     return "".join(out)
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursive dict merge — override wins per key; nested dicts merge
+    depth-first so a child's `paths` adds to (rather than replaces) the
+    parent's, matching real tsconfig `extends` semantics."""
+    merged = dict(base)
+    for key, value in override.items():
+        if (key in merged and isinstance(merged[key], dict)
+                and isinstance(value, dict)):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _tsconfig_compiler_options(repo_path: str) -> dict:
+    """compilerOptions merged across the tsconfig.json `extends` chain.
+
+    A child tsconfig's compilerOptions override the parent's (the config that
+    physically references the file wins), with nested dicts like `paths`
+    deep-merged so the child adds aliases rather than dropping the parent's.
+    Package-name `extends` (e.g. "@tsconfig/node14") is a node_modules lookup
+    with no repo-relative file — skipped. Unreadable or missing tsconfig
+    yields {} (e.g. pure Python repos).
+    """
+    seen: set[Path] = set()
+    merged: dict = {}
+    current: Path | None = Path(repo_path) / "tsconfig.json"
+    while current is not None and current not in seen:
+        seen.add(current)
+        if not current.exists():
+            break
+        try:
+            data = json.loads(_jsonc_clean(current.read_text(encoding="utf-8")))
+        except (ValueError, OSError):
+            break
+        options = data.get("compilerOptions") or {}
+        merged = _deep_merge(options, merged)  # parent first, child overrides
+        extends = data.get("extends")
+        if isinstance(extends, str) and not extends.startswith("@"):
+            current = (current.parent / extends).resolve()
+        else:
+            current = None
+    return merged
+
+
 def _tsconfig_path_aliases(repo_path: str) -> dict:
-    """Path aliases from <repo>/tsconfig.json compilerOptions.paths.
+    """Path aliases from the merged tsconfig compilerOptions.paths.
 
     Each `@/* -> src/*` entry becomes a prefix -> dir alias ({"@/": "src/"}),
     so import specifiers like `@/hooks/useSelectOptions` can be resolved to the
     module qname the graph derives from `src/hooks/useSelectOptions.ts`.
-    Missing/unreadable tsconfig (e.g. pure Python repos) yields {}.
     """
-    ts = Path(repo_path) / "tsconfig.json"
-    if not ts.exists():
-        return {}
-    try:
-        data = json.loads(_jsonc_clean(ts.read_text(encoding="utf-8")))
-    except (ValueError, OSError):
-        return {}
-    paths = (data.get("compilerOptions") or {}).get("paths") or {}
+    paths = _tsconfig_compiler_options(repo_path).get("paths") or {}
     out: dict = {}
     for key, targets in paths.items():
         if not targets:
@@ -170,6 +209,12 @@ def _tsconfig_path_aliases(repo_path: str) -> dict:
             continue
         out[prefix] = target
     return out
+
+
+def _tsconfig_base_url(repo_path: str) -> str:
+    """The merged compilerOptions.baseUrl (trailing slash stripped), or ''."""
+    base = _tsconfig_compiler_options(repo_path).get("baseUrl") or ""
+    return base.rstrip("/") if base else ""
 
 
 def load_config(repo_path: str = ".") -> Config:
@@ -189,16 +234,18 @@ def load_config(repo_path: str = ".") -> Config:
                 raw[key] = json.loads(env)
             else:
                 raw[key] = env
-    # Toolchain auto-detection: tsconfig.json paths, explicit config wins.
+    # Toolchain auto-detection: tsconfig paths/baseUrl, explicit config wins.
     raw["path_aliases"] = {**_tsconfig_path_aliases(raw["repo_path"]),
                            **(raw["path_aliases"] or {})}
+    raw["base_url"] = raw["base_url"] or _tsconfig_base_url(raw["repo_path"])
     return Config(**raw)
 
 
 _CONFIG_HASH_KEYS = ("diff_base", "entry_names", "entry_decorators",
                      "dependency_markers", "di_annotations", "exclude",
                      "test_globs", "test_names", "test_decorators",
-                     "community_detection", "community_weight", "path_aliases")
+                     "community_detection", "community_weight", "path_aliases",
+                     "base_url")
 
 
 def config_hash(config: Config) -> str:

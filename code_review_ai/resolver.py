@@ -120,17 +120,20 @@ def _module_symbols(parsed_files: list[ParsedFile]) -> dict:
 
 
 def _import_map(pf: ParsedFile, path_aliases: dict[str, str] | None = None,
-                existing: set[str] | None = None) -> dict:
+                existing: set[str] | None = None,
+                base_url: str = "") -> dict:
     """local_name -> (module, imported_name_or_None, is_star).
 
-    The module string is canonicalized through path_aliases when it resolves to
-    a real module qname (so `@/x` -> `x` consistently across call resolution and
-    re-export traversal); otherwise the raw specifier is kept.
+    The module string is canonicalized through path_aliases and tsconfig
+    baseUrl when it resolves to a real module qname (so `@/x` -> `x` and a bare
+    `components/Button` -> `components.Button` consistently across call
+    resolution and re-export traversal); otherwise the raw specifier is kept.
     """
-    if path_aliases and existing is not None:
-        return {i.local_name: (_module_of(i.module, path_aliases, existing),
-                               i.imported_name, i.is_star) for i in pf.imports}
-    return {i.local_name: (i.module, i.imported_name, i.is_star) for i in pf.imports}
+    if existing is None:
+        return {i.local_name: (i.module, i.imported_name, i.is_star)
+                for i in pf.imports}
+    return {i.local_name: (_import_module(i.module, path_aliases, base_url, existing),
+                           i.imported_name, i.is_star) for i in pf.imports}
 
 
 def _exists(qname: str, existing: set[str]) -> bool:
@@ -148,22 +151,14 @@ def _alias_replaced(spec: str, path_aliases: dict[str, str] | None) -> tuple[boo
     return False, spec
 
 
-def _spec_to_module(spec: str, path_aliases: dict[str, str] | None,
-                    existing: set[str]) -> str | None:
-    """Resolve an alias-prefixed import specifier to an existing module qname,
-    or None.
+def _path_parts_to_module(path: str, existing: set[str]) -> str | None:
+    """Path → module qname, or None when the module isn't in the graph.
 
-    Only specifiers that actually match an alias prefix are re-derived, so
-    relative/bare imports are left untouched. The alias target is converted to
-    a module qname the same way parser._module_qname derives one from a
-    repo-relative path (strip a known source suffix, drop a leading ``src/``,
-    join with dots). Returns None when the alias target has no module in the
-    graph, so callers keep the raw specifier on their unresolved edges.
+    Mirrors parser._module_qname: strip a known source suffix, drop a leading
+    ``src/``, join with dots. Returning None lets callers keep the raw
+    specifier on unresolved edges instead of inventing phantom modules.
     """
-    matched, norm = _alias_replaced(spec, path_aliases)
-    if not matched or "::" in norm:
-        return None
-    parts = [part for part in norm.split("/") if part not in ("", ".")]
+    parts = [part for part in path.split("/") if part not in ("", ".")]
     if not parts or not parts[-1]:
         return None
     last = parts[-1]
@@ -175,6 +170,41 @@ def _spec_to_module(spec: str, path_aliases: dict[str, str] | None,
         parts = parts[1:]
     candidate = ".".join(parts)
     return candidate if candidate in existing else None
+
+
+def _spec_to_module(spec: str, path_aliases: dict[str, str] | None,
+                    existing: set[str]) -> str | None:
+    """Resolve an alias-prefixed import specifier to an existing module qname,
+    or None.
+
+    Only specifiers that actually match an alias prefix are re-derived, so
+    relative/bare imports are left untouched. Returns None when the alias
+    target has no module in the graph, so callers keep the raw specifier on
+    their unresolved edges.
+    """
+    matched, norm = _alias_replaced(spec, path_aliases)
+    if not matched or "::" in norm:
+        return None
+    return _path_parts_to_module(norm, existing)
+
+
+def _import_module(spec: str, path_aliases: dict[str, str] | None,
+                   base_url: str, existing: set[str]) -> str:
+    """Canonical module qname for an import specifier (alias + baseUrl).
+
+    path_aliases map a prefix to a dir; baseUrl resolves bare specifiers under
+    ``<baseUrl>/`` when that module exists. Already-canonical module qnames
+    (the parser resolves relative specs at parse time) are never re-mapped:
+    a spec already in `existing` and a relative ``./``/``../`` specifier are
+    left untouched. Returns the raw specifier when neither channel resolves.
+    """
+    matched, norm = _alias_replaced(spec, path_aliases)
+    if matched:
+        return _path_parts_to_module(norm, existing) or spec
+    if base_url and not spec.startswith((".", "/")) and spec not in existing:
+        return _path_parts_to_module(base_url.rstrip("/") + "/" + spec,
+                                     existing) or spec
+    return spec
 
 
 def _module_of(spec: str, path_aliases: dict[str, str] | None,
@@ -200,13 +230,16 @@ def _dedup_append(edges: list[Edge], seen: set[tuple[str, str, str]],
 
 def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                   path_aliases: dict[str, str] | None = None,
-                  dependency_markers: list[str] | None = None) -> list[Edge]:
+                  dependency_markers: list[str] | None = None,
+                  base_url: str = "") -> list[Edge]:
     mod_syms = _module_symbols(parsed_files)
-    all_import_maps = {pf.module_qname: _import_map(pf, path_aliases, existing_qnames)
+    all_import_maps = {pf.module_qname: _import_map(pf, path_aliases,
+                                                    existing_qnames, base_url)
                        for pf in parsed_files}
     # Star imports (`from m import *` / `export * from m`) — a separate list per
     # module because multiple stars would collapse on `_import_map`'s "*" key.
-    star_map = {pf.module_qname: [_module_of(imp.module, path_aliases, existing_qnames)
+    star_map = {pf.module_qname: [_import_module(imp.module, path_aliases, base_url,
+                                                 existing_qnames)
                                   for imp in pf.imports if imp.is_star]
                 for pf in parsed_files
                 if any(imp.is_star for imp in pf.imports)}
@@ -221,7 +254,7 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
     seen: set[tuple[str, str, str]] = set()
     for pf in parsed_files:
         local = mod_syms.get(pf.module_qname, {})
-        imports = _import_map(pf, path_aliases, existing_qnames)
+        imports = _import_map(pf, path_aliases, existing_qnames, base_url)
         for c in pf.raw_calls:
             for edge in _resolve_one(c, local, imports, existing_qnames, all_import_maps,
                                      mod_syms=mod_syms, source_module=pf.module_qname,
@@ -372,6 +405,13 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
     if c.call_form == CALL_ATTRIBUTE:
         head = c.target_expr.split(".", 1)[0]
         rest = c.target_expr[len(head) + 1:]
+        if head not in imports:
+            # CJS require("mod").foo() — the require expression is keyed as its
+            # own import binding, so the receiver match uses the LAST dot (the
+            # specifier string itself contains dots).
+            receiver, _sep, member = c.target_expr.rpartition(".")
+            if receiver and receiver in imports:
+                head, rest = receiver, member
         if head in imports:
             mod, imp_name, _ = imports[head]
             mod = _module_of(mod, path_aliases, existing)  # alias @/x -> real module
@@ -436,7 +476,15 @@ def _resolve_reexport(current: str, name: str, all_import_maps: dict,
         return []  # import cycle
     binding = (all_import_maps.get(current) or {}).get(name)
     if binding and binding[1]:
-        return _resolve_reexport(binding[0], binding[1], all_import_maps,
+        next_module = binding[0]
+        # CJS `exports.wrap = helper.run`: "helper" is a local require alias,
+        # not a module qname — resolve it through the current module's import
+        # map (helper -> util) before recursing, or the chain dead-ends.
+        if next_module not in all_import_maps:
+            alias = (all_import_maps.get(current) or {}).get(next_module)
+            if alias:
+                next_module = alias[0]
+        return _resolve_reexport(next_module, binding[1], all_import_maps,
                                  existing, (seen or set()) | {current}, star_map)
     hits: list[str] = []
     for module in (star_map or {}).get(current, []):
@@ -624,7 +672,8 @@ def _build_contains(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
 
 
 def _build_imports(parsed: list[ParsedFile], qnames: set[str],
-                   path_aliases: dict[str, str] | None = None) -> list[Edge]:
+                   path_aliases: dict[str, str] | None = None,
+                   base_url: str = "") -> list[Edge]:
     """IMPORT edges: module → imported_module."""
     edges: list[Edge] = []
     for pf in parsed:
@@ -635,9 +684,9 @@ def _build_imports(parsed: list[ParsedFile], qnames: set[str],
                 continue
             tgt = imp.module
             resolved = tgt in qnames
-            if not resolved:  # alias @/x -> real module qname
-                cand = _spec_to_module(tgt, path_aliases, qnames)
-                if cand is not None:
+            if not resolved:  # alias @/x or baseUrl -> real module qname
+                cand = _import_module(tgt, path_aliases, base_url, qnames)
+                if cand in qnames:
                     tgt = cand
                     resolved = True
             edges.append(Edge(
@@ -754,18 +803,20 @@ def resolve_edges(parsed: list[ParsedFile],
                   existing_qnames: set[str],
                   path_aliases: dict[str, str] | None = None,
                   dependency_markers: list[str] | None = None,
-                  di_annotations: list[str] | None = None) -> list[Edge]:
+                  di_annotations: list[str] | None = None,
+                  base_url: str = "") -> list[Edge]:
     """Resolve all edges — call, contains, import, inherits — from parsed files.
 
     This is the single entry point for edge generation. Indexer calls this
     once and gets the complete edge list.
     """
     edges = resolve_calls(parsed, existing_qnames, path_aliases,
-                          dependency_markers)
+                          dependency_markers, base_url)
     edges.extend(_build_contains(parsed, existing_qnames))
-    edges.extend(_build_imports(parsed, existing_qnames, path_aliases))
+    edges.extend(_build_imports(parsed, existing_qnames, path_aliases, base_url))
     mod_syms = _module_symbols(parsed)
-    import_maps = {pf.module_qname: _import_map(pf, path_aliases, existing_qnames)
+    import_maps = {pf.module_qname: _import_map(pf, path_aliases,
+                                                existing_qnames, base_url)
                    for pf in parsed}
     edges.extend(_build_inherits(parsed, existing_qnames, import_maps, mod_syms))
     edges.extend(_build_di_edges(parsed, existing_qnames, mod_syms,

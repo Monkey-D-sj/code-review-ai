@@ -932,7 +932,8 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     if lang_name == "python":
         pf.module_all = _extract_module_all(root)
     elif lang_name in ("typescript", "javascript"):
-        pf.default_export = _extract_esm_default_export(root, module_qname)
+        pf.default_export = (_extract_esm_default_export(root, module_qname)
+                             or _extract_cjs_default_export(root, module_qname))
     # handle inheritance
     _walk_inherits(root, module_qname, lang, pf.inherits)
     if lang_name == "java":
@@ -1146,7 +1147,13 @@ def _extract_imports(root, module_qname, lang, lang_name: str,
         return _extract_imports_python(root, module_qname, lang, file_path)
     if lang_name == "java":
         return _extract_imports_java(root, lang)
-    return _extract_imports_esm(root, lang, file_path, repo_root, module_qname)
+    entries = _extract_imports_esm(root, lang, file_path, repo_root, module_qname)
+    if lang_name in ("javascript", "typescript"):
+        # CommonJS require/exports coexist with ESM syntax in .js/.mjs/.cjs
+        # and in TS compiled with module=commonjs — merge both channels.
+        entries = [*entries,
+                   *_extract_imports_cjs(root, module_qname, file_path, repo_root)]
+    return entries
 
 
 def _extract_imports_java(root, lang) -> list[ImportEntry]:
@@ -1405,6 +1412,220 @@ def _extract_imports_esm(root, lang, file_path: str, repo_root: str,
                 entries.append(ImportEntry("*", source, None, True,
                                            span=_span(node)))
     return entries
+
+
+def _extract_imports_cjs(root, module_qname: str, file_path: str,
+                         repo_root: str) -> list[ImportEntry]:
+    """Extract CommonJS imports: require() bindings and exports re-export
+    bindings, complementing the ESM channel in the same file.
+
+    Handles:
+      const m = require("mod")         → module import (local m)
+      const {a, b: c} = require("mod") → named imports (a, c)
+      require("mod")                   → side-effect import
+      require("mod").foo()             → receiver-alias keyed on the require expr
+      exports.foo = bar                → re-export binding (bar)
+      module.exports = { ... }         → object barrel re-export bindings
+    `module.exports = <def>` is the default export (see _extract_cjs_default_export).
+    """
+    entries: list[ImportEntry] = []
+    for call in _iter_require_calls(root):
+        spec = _require_spec(call)
+        if spec is None:
+            continue
+        module = _esm_relative_module(spec, file_path, repo_root) or spec
+        call_text = call.text.decode("utf-8").strip()
+        entries.append(ImportEntry(call_text, module, None, False,
+                                   span=_span(call)))
+        entries.extend(_require_bindings(call, module, _span(call)))
+    entries.extend(_cjs_export_bindings(root, module_qname))
+    return entries
+
+
+def _iter_require_calls(root) -> list:
+    """All `require(...)` call_expression nodes (function field is `require`)."""
+    found: list = []
+
+    def walk(node):
+        if node.type == "call_expression":
+            func = node.child_by_field_name("function")
+            if (func is not None and func.type == "identifier"
+                    and func.text.decode("utf-8") == "require"):
+                found.append(node)
+        for child in node.children:
+            walk(child)
+
+    walk(root)
+    return found
+
+
+def _require_spec(call) -> str | None:
+    """The module specifier string of a require call, or None when it has none."""
+    args = call.child_by_field_name("arguments")
+    if args is None:
+        return None
+    for child in args.children:
+        if child.type == "string":
+            return child.text.decode("utf-8").strip("\"'")
+    return None
+
+
+def _require_bindings(call, module: str, span) -> list[ImportEntry]:
+    """Name bindings for `const m = require(...)` / `const {a, b: c} = require(...)`.
+
+    The require expression itself is keyed by the caller; this adds the
+    declarator name(s) so `m.foo()` and destructured calls resolve through the
+    import map. A require call not inside a variable_declarator (bare
+    side-effect, `require("mod").foo()` object) yields nothing extra.
+    """
+    parent = call.parent
+    if parent is None or parent.type != "variable_declarator":
+        return []
+    name_node = parent.child_by_field_name("name")
+    if name_node is None:
+        return []
+    entries: list[ImportEntry] = []
+    if name_node.type == "identifier":
+        entries.append(ImportEntry(name_node.text.decode("utf-8"), module,
+                                   None, False, span=span))
+    elif name_node.type == "object_pattern":
+        for child in name_node.children:
+            if child.type == "shorthand_property_identifier_pattern":
+                local = child.text.decode("utf-8")
+                entries.append(ImportEntry(local, module, local, False,
+                                           span=span))
+            elif child.type == "pair_pattern":
+                key_node = child.child_by_field_name("key")
+                value_node = child.child_by_field_name("value")
+                if key_node is not None and value_node is not None:
+                    entries.append(ImportEntry(
+                        value_node.text.decode("utf-8"), module,
+                        key_node.text.decode("utf-8"), False, span=span))
+    return entries
+
+
+def _member_object_prop(node) -> tuple[str, str]:
+    """(object_text, property_text) of a member_expression's first level."""
+    if node.type != "member_expression":
+        return "", ""
+    obj = node.child_by_field_name("object")
+    prop = node.child_by_field_name("property")
+    if obj is None or prop is None:
+        return "", ""
+    return obj.text.decode("utf-8"), prop.text.decode("utf-8")
+
+
+def _cjs_export_bindings(root, module_qname: str) -> list[ImportEntry]:
+    """Re-export bindings from `exports.foo = X` / `module.exports.foo = X` and
+    `module.exports = { ... }` object barrels.
+
+    Each binding names the exported local (foo) so a consumer's
+    `const { foo } = require("m")` chains through _resolve_reexport to the
+    referenced symbol. `module.exports = <named def>` is the default export and
+    is handled by _extract_cjs_default_export.
+    """
+    entries: list[ImportEntry] = []
+    for node in root.children:
+        if node.type != "expression_statement":
+            continue
+        assignment = next((c for c in node.children
+                           if c.type == "assignment_expression"), None)
+        if assignment is None:
+            continue
+        left = assignment.child_by_field_name("left")
+        right = assignment.child_by_field_name("right")
+        if left is None or right is None or left.type != "member_expression":
+            continue
+        obj, prop = _member_object_prop(left)
+        if obj == "exports":
+            binding = _cjs_rhs_binding(right, module_qname)
+            if binding is not None:
+                entries.append(ImportEntry(prop, binding[0], binding[1], False,
+                                           span=_span(node)))
+        elif obj == "module.exports":
+            binding = _cjs_rhs_binding(right, module_qname)
+            if binding is not None:
+                entries.append(ImportEntry(prop, binding[0], binding[1], False,
+                                           span=_span(node)))
+        elif obj == "module" and prop == "exports" and right.type == "object":
+            entries.extend(_cjs_object_bindings(right, module_qname,
+                                                _span(node)))
+    return entries
+
+
+def _cjs_rhs_binding(right, module_qname: str) -> tuple[str, str] | None:
+    """(module, imported_name) a re-export RHS resolves to, or None.
+
+    identifier       → (module_qname, ident)     exports.foo = bar
+    member_expression → (object, property)        exports.foo = util.helper
+    function/class/object/literal → None (fresh local, no stable symbol)
+    """
+    if right.type == "identifier":
+        return module_qname, right.text.decode("utf-8")
+    if right.type == "member_expression":
+        obj, prop = _member_object_prop(right)
+        if obj and prop:
+            return obj, prop
+    return None
+
+
+def _cjs_object_bindings(obj_node, module_qname: str, span) -> list[ImportEntry]:
+    """Per-property re-export bindings of a `module.exports = { ... }` barrel."""
+    entries: list[ImportEntry] = []
+    for child in obj_node.children:
+        if child.type == "shorthand_property_identifier_pattern":
+            name = child.text.decode("utf-8")
+            entries.append(ImportEntry(name, module_qname, name, False,
+                                       span=span))
+        elif child.type == "pair":
+            key_node = child.child_by_field_name("key")
+            value_node = child.child_by_field_name("value")
+            if key_node is None:
+                continue
+            key = key_node.text.decode("utf-8")
+            if value_node is None:  # { a } shorthand inside a pair
+                entries.append(ImportEntry(key, module_qname, key, False,
+                                           span=span))
+            elif value_node.type == "identifier":
+                entries.append(ImportEntry(key, module_qname,
+                                           value_node.text.decode("utf-8"),
+                                           False, span=span))
+            elif value_node.type == "member_expression":
+                obj, prop = _member_object_prop(value_node)
+                if obj and prop:
+                    entries.append(ImportEntry(key, obj, prop, False,
+                                               span=span))
+    return entries
+
+
+def _extract_cjs_default_export(root, module_qname: str) -> str | None:
+    """The qname a module's `module.exports = X` names, or None.
+
+    X may be a named function/class expression or a reference to a local
+    symbol; a fresh anonymous function/class or an object literal has no stable
+    qname → None, so a default import of it degrades to unresolved.
+    """
+    for node in root.children:
+        if node.type != "expression_statement":
+            continue
+        assignment = next((c for c in node.children
+                           if c.type == "assignment_expression"), None)
+        if assignment is None:
+            continue
+        left = assignment.child_by_field_name("left")
+        right = assignment.child_by_field_name("right")
+        if left is None or right is None or left.type != "member_expression":
+            continue
+        obj, prop = _member_object_prop(left)
+        if not (obj == "module" and prop == "exports"):
+            continue
+        if right.type in ("function_expression", "class"):
+            name_node = right.child_by_field_name("name")
+            if name_node is not None:
+                return qname.join(module_qname, name_node.text.decode("utf-8"))
+        if right.type == "identifier":
+            return qname.join(module_qname, right.text.decode("utf-8"))
+    return None
 
 
 def _extract_esm_default_export(root, module_qname: str) -> str | None:

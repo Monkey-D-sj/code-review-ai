@@ -202,3 +202,73 @@ def test_parse_ts_method_in_class():
     assert method.kind == "method"
     assert method.parent_qname == Q("ts.auth", "UserService")
     assert method.signature.startswith("authenticate")
+
+
+# ── CommonJS extraction (JS-M18/M19) ─────────────────────────────────
+
+
+def test_parse_cjs_require_bindings(tmp_path):
+    """`const m = require(...)`, destructured require, and bare side-effect
+    require each key the import map; the require expression is also keyed as
+    its own receiver-alias so `require('mod').foo()` binds."""
+    f = tmp_path / "app.js"
+    f.write_text(
+        "const util = require('./util');\n"
+        "const { helper, wrap: w } = require('./more');\n"
+        "require('./side');\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(f), str(tmp_path))
+    imps = {i.local_name: i for i in pf.imports}
+    assert imps["util"].module == "util"
+    assert imps["require('./util')"].module == "util"
+    assert imps["helper"].module == "more" and imps["helper"].imported_name == "helper"
+    assert imps["w"].module == "more" and imps["w"].imported_name == "wrap"
+    assert imps["require('./side')"].module == "side"
+
+
+def test_parse_cjs_export_bindings(tmp_path):
+    """`exports.foo = bar`, `module.exports.foo = bar` and the object barrel
+    each produce a re-export binding the resolver chains through."""
+    f = tmp_path / "auth.js"
+    f.write_text(
+        "function login() {\n    return true;\n}\n"
+        "const helper = require('./util');\n"
+        "exports.login = login;\n"
+        "module.exports.wrap = helper.run;\n"
+        "module.exports = { login, run: helper.run };\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(f), str(tmp_path))
+    imps = {i.local_name: i for i in pf.imports}
+    assert imps["login"].module == "auth" and imps["login"].imported_name == "login"
+    assert imps["wrap"].module == "helper" and imps["wrap"].imported_name == "run"
+    assert imps["run"].module == "helper" and imps["run"].imported_name == "run"
+
+
+def test_parse_cjs_default_export_function_expression(tmp_path):
+    """`module.exports = function login(){}` names the default export qname."""
+    f = tmp_path / "auth.js"
+    f.write_text(
+        "module.exports = function login() {\n    return true;\n}\n",
+        encoding="utf-8",
+    )
+    assert parse_file(str(f), str(tmp_path)).default_export == Q("auth", "login")
+
+
+def test_parse_cjs_default_export_identifier(tmp_path):
+    """`module.exports = login` (reference to a local) names that local."""
+    f = tmp_path / "auth.js"
+    f.write_text(
+        "function login() {\n    return true;\n}\n"
+        "module.exports = login;\n",
+        encoding="utf-8",
+    )
+    assert parse_file(str(f), str(tmp_path)).default_export == Q("auth", "login")
+
+
+def test_parse_cjs_default_export_absent(tmp_path):
+    """An object-literal `module.exports = {...}` has no single default qname."""
+    f = tmp_path / "auth.js"
+    f.write_text("module.exports = { a: 1 };\n", encoding="utf-8")
+    assert parse_file(str(f), str(tmp_path)).default_export is None

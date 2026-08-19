@@ -61,7 +61,8 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
 
     qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
     all_edges = resolve_edges(parsed, qnames, config.path_aliases,
-                              config.dependency_markers, config.di_annotations)
+                              config.dependency_markers, config.di_annotations,
+                              config.base_url)
     t_resolve = time.perf_counter()
 
     with transaction(conn):
