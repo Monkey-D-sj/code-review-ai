@@ -1,10 +1,12 @@
 # Impact 上下文召回覆盖矩阵
 
-> 目标：给定一个发生变化的代码节点，尽可能完整地找回完成代码评审所需的上下文。
+> 目标：给定一个发生变化的代码节点，找回评审该改动所需的直接代码上下文。
 >
 > 覆盖语言：Python、TypeScript/JavaScript、Java。
 >
-> 本文是目标覆盖目录，不表示当前实现已经支持全部条目。它同时收录可由静态分析确定的关系、需要类型/配置/框架建模的关系，以及原则上无法可靠静态确定的动态关系。后续每一项都应映射到自动化测试、Impact Benchmark case，或明确的“不支持/降级”契约。
+> 本文是目标覆盖目录，不表示当前实现已经支持全部条目。P0 只承诺可从源码语法、作用域和模块规则稳定得出的直接关系；框架、配置和运行时关联留在 P2，作为明确记录的后续增强，而不是当前能力承诺。后续每一项都应映射到自动化测试、Impact Benchmark case，或明确的“不支持/降级”契约。
+>
+> 当前发布所需的 P0 范围、跨语言公共契约、fixture 规范与 100% 门槛见 [Impact P0 直接代码上下文覆盖规范](IMPACT_CONTEXT_P0_COVERAGE.md)。本矩阵保留完整目录和 P1/P2 扩展项。
 
 ## 1. 评测对象
 
@@ -12,13 +14,14 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 
 | 上下文类型 | 定义 | 示例 |
 |---|---|---|
-| `caller` | 直接或传递依赖 changed symbol 的节点 | Controller 调用 Service |
+| `caller` | 直接或传递调用 changed symbol 的节点 | `Controller` 调用 `Service` |
 | `callee` | changed symbol 为理解行为必须读取的下游节点 | Service 调用 Repository |
+| `reference` | 直接读取、写入、声明或导入 changed symbol 的节点 | 常量读取、字段访问、类型注解、import |
 | `entry` | 可从外部触发、且能到达 changed symbol 的业务入口 | HTTP route、CLI command、consumer |
 | `test` | 直接或间接覆盖 changed symbol 的测试节点/文件 | unit test、MockMvc test |
 | `semantic` | 没有显式调用，但存在确定或高置信业务关系的节点 | DI provider、route binding、event handler |
 
-不把“同一提交中碰巧修改的文件”直接等同于必要上下文。提交共变可以作为弱 gold，人工确认的调用、入口、测试和框架关系才是强 gold。
+不把“同一提交中碰巧修改的文件”直接等同于必要上下文。P0 的 strong gold 是人工确认的调用、直接引用和模块关系；框架关系与提交共变只能作为 P2 的弱 gold 或候选。
 
 ## 2. 可分析性分级
 
@@ -32,9 +35,21 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 
 评测必须包含正例和负例：不仅验证“应该召回的能召回”，还要验证“不确定关系不会被错误包装成确定关系”。
 
+### 2.1 交付优先级
+
+| 优先级 | 当前承诺 | 范围 |
+|---|---|---|
+| P0 | 必做 | 变更定位、显式调用、直接 symbol reference、import/re-export、可唯一确定的类/继承/构造关系，以及无法解析时的诚实降级 |
+| P1 | 后续 | 类型辅助 receiver 绑定、override/接口分派候选、直接测试调用与 test-impact 排序 |
+| P2 | 不阻塞当前发布 | 框架约定、DI、路由、事件/队列、回调数据流、前端模板、测试框架生命周期、外部配置和运行时行为 |
+
+P0 的目标不是构建完整程序分析器，而是让评审者看到“这段源码直接调用或直接引用了谁、又被谁直接调用或直接引用”。各语言的定义/作用域/模块解析表中，可由语法唯一确定的项默认属于 P0；需要类型推断或存在多个合理目标的项按 P1 或 D/E 降级。
+
+P2 典型例子包括：Spring `@Autowired`、FastAPI 路由装饰器、React JSX 父子组件、`EventEmitter`/Kafka topic、pytest fixture、`Promise.then`、反射和 `getattr(obj, name)`。它们很有价值，但不应以猜测结果污染 P0 的直接关系。
+
 ## 3. 三语言公共覆盖
 
-### 3.1 节点与变更定位
+### 3.1 节点与变更定位（P0）
 
 | ID | 情况 | 应有行为 | 分级 |
 |---|---|---|---|
@@ -54,7 +69,9 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 | COM-N14 | 生成文件、vendored、依赖目录 | 按配置排除并报告排除原因 | A |
 | COM-N15 | 不支持的语言/二进制文件 | 进入 uncovered changes，不静默忽略 | A |
 
-### 3.2 显式调用图
+`COM-N09` 中“定位装饰器/注解变更”属于 P0；由此重新计算 route、DI、test 等框架语义边属于 P2。其余条目均为 P0。
+
+### 3.2 显式调用图（P0）
 
 | ID | 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -75,7 +92,9 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 | COM-C15 | 条件分支中的调用 | 静态上保留所有可达分支调用 | A |
 | COM-C16 | 异常/early return 后的不可达调用 | 基础模式可保守保留；CFG 模式应区分不可达 | A/D |
 
-### 3.3 模块、继承和类型关系
+`COM-C05` 的调用图可达性属于 P0；将函数识别为 HTTP、CLI 或 consumer 等“业务入口”需要框架或配置建模时属于 P2。`COM-C11` 同理：P0 只要求不伪造 upstream。
+
+### 3.3 模块、继承和类型关系（P0/P1）
 
 | ID | 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -90,7 +109,24 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 | COM-M09 | 多重继承/多接口 | 保留全部关系和语言特定解析顺序 | B/D |
 | COM-M10 | 外部依赖中的父类/接口 | 保留 external type，不能假装仓库内闭合 | E |
 
-### 3.4 回调、异步和控制反转
+P0：`COM-M01`–`COM-M05` 和 `COM-M10`，即直接 import/re-export、唯一可判定的模块绑定、源码可见的继承关系及外部边界。P1：`COM-M06`–`COM-M09`，即 override、接口分派、泛型和多继承等需要类型辅助或候选集的关系。
+
+### 3.4 直接符号引用（P0）
+
+调用图不足以解释常量、字段和类型声明的改动。本节只记录源码中可直接观察到的 read/write/type/import/instantiation 关系；不追踪运行时数据流。
+
+| ID | 情况 | 应召回关系 | 分级 |
+|---|---|---|---|
+| COM-R01 | 模块/全局常量或变量被读取 | reader → changed value | A/B |
+| COM-R02 | 模块/全局变量被写入 | writer → changed value | A/B |
+| COM-R03 | 类字段/属性被读取或写入 | member access → changed field/property | A/B |
+| COM-R04 | enum 成员/常量对象成员被引用 | use site → changed member | A/B |
+| COM-R05 | 类、interface、type alias、DTO/schema 字段被声明或用作类型 | type use → changed type/member | A/B |
+| COM-R06 | 类/接口被 extends、implements 或实例化 | subtype/implementation/constructor site → changed type | A/B |
+| COM-R07 | exported symbol 被 import、alias 或 re-export | importer/forwarder → changed export | A/B |
+| COM-R08 | 动态属性名、反射或运行时数据决定引用目标 | 保留 candidate/dynamic 与原始表达式，不伪造引用边 | D/E |
+
+### 3.5 回调、异步和控制反转（P2）
 
 | ID | 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -105,7 +141,7 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 | COM-I09 | 路由声明 → handler | route 作为 entry 并连接 handler | C |
 | COM-I10 | 测试框架收集 → test | test 节点/文件正确标记 | C |
 
-### 3.5 Test Impact 公共契约
+### 3.6 Test Impact 公共契约（P1/P2）
 
 | ID | 情况 | 应有行为 | 分级 |
 |---|---|---|---|
@@ -140,7 +176,7 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 | PY-S10 | `super().m()` | 按 MRO 连接基类方法；歧义时给候选 | B/D |
 | PY-S11 | property getter/setter/deleter | 属性访问与对应 descriptor 方法 | C/D |
 | PY-S12 | magic method：迭代、比较、运算符 | 语法操作与 `__iter__`/`__eq__` 等方法 | C/D |
-| PY-S13 | context manager `with` | 连接 `__enter__`/`__exit__` | C/D |
+| PY-S13 | context manager `with` / `async with` | 连接 `__enter__`/`__exit__` 或异步对应方法 | C/D |
 | PY-S14 | iterator/generator/yield | consumer 与 generator；不虚构运行次数 | B/D |
 | PY-S15 | comprehension 内调用 | 归属外层函数并保留调用 | A |
 | PY-S16 | decorator definition/application | decorated function ↔ decorator；wrapper 关系 | B/C |
@@ -148,6 +184,7 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 | PY-S18 | `functools.partial` | 可确定函数目标与预绑定参数 | C/D |
 | PY-S19 | `functools.singledispatch` | base function ↔ registered implementations | C/D |
 | PY-S20 | 同名 nested/class/module 函数 | 遵守 LEGB/类作用域，不串边 | A/B |
+| PY-S21 | `async for` | 记录迭代对象与循环体；异步迭代协议无法唯一解析时降级 | C/D |
 
 ### 4.2 Import、包和类型
 
@@ -168,7 +205,7 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 | PY-M13 | union/generic/type alias | 展开为候选类型集合 | B/D |
 | PY-M14 | 返回值链 `factory().run()` | 利用返回类型绑定 `run` | B/D |
 
-### 4.3 Python 框架语义
+### 4.3 Python 框架语义（P2）
 
 | ID | 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -191,7 +228,7 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 | PY-F17 | SQLAlchemy event/listener | event target → listener | C/D |
 | PY-F18 | Pydantic validator/serializer | model lifecycle → validator/serializer | C |
 
-### 4.4 Python 测试生态
+### 4.4 Python 测试生态（P2）
 
 | ID | 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -206,7 +243,7 @@ Impact 查询的输入是一个或多个 changed symbols，输出上下文分为
 | PY-T09 | `setUp/tearDown/setUpClass` | 生命周期方法 → tests | C |
 | PY-T10 | mock/patch target string | 常量 qname 可映射为弱语义关系 | C/D |
 
-### 4.5 Python 动态边界
+### 4.5 Python 动态边界（P2：只要求诚实降级）
 
 以下情况必须进入负向/降级测试，目标不是强行 resolved：
 
@@ -253,6 +290,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | JS-S22 | decorator application | decorated target ↔ decorator | B/C |
 | JS-S23 | top-level call | module 节点作为 caller | A |
 | JS-S24 | 同名重载/声明合并 | 绑定实现签名，声明节点作为类型上下文 | B/D |
+| JS-S25 | class static block | class 初始化节点中的直接调用/引用归属该类 | A/B |
 
 ### 5.2 ESM、CommonJS 和工程模块解析
 
@@ -281,6 +319,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | JS-M21 | dynamic `import()` 常量 | 常量路径可解析 | C |
 | JS-M22 | bundler alias/Vite/Webpack/Jest mapper | 读取配置后归一 | B/C |
 | JS-M23 | `.d.ts`/type-only import | 用于类型关系，不生成运行时调用 | B |
+| JS-M24 | TypeScript `import x = require()` / `export =` | 按 CommonJS 绑定规则连接真实 module/export | B |
 
 ### 5.3 TypeScript 类型辅助解析
 
@@ -299,7 +338,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | TS-Y11 | structural typing | 返回结构匹配候选时必须标低置信度 | D |
 | TS-Y12 | enum/namespace declaration merge | 正确处理值空间与类型空间 | B/D |
 
-### 5.4 异步、回调和事件
+### 5.4 异步、回调和事件（P2）
 
 | ID | TS/JS 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -313,7 +352,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | JS-I08 | worker/child process | 静态入口文件可连接；动态路径降级 | C/E |
 | JS-I09 | RxJS pipeline | operator/callback 链与 subscriber | C/D |
 
-### 5.5 前端与 Node 框架语义
+### 5.5 前端与 Node 框架语义（P2）
 
 | ID | 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -336,7 +375,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | JS-F17 | Redux action/reducer | action type → reducers/listeners | C/D |
 | JS-F18 | GraphQL resolver | schema field → resolver entry | C/D |
 
-### 5.6 TS/JS 测试生态
+### 5.6 TS/JS 测试生态（P2）
 
 | ID | 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -351,7 +390,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | JS-T09 | Playwright/Cypress | 静态 URL/selector 可作弱 route/component gold | C/D/E |
 | JS-T10 | test filename/glob variants | `.test/.spec/__tests__` 等正确识别 | C |
 
-### 5.7 TS/JS 动态边界
+### 5.7 TS/JS 动态边界（P2：只要求诚实降级）
 
 | ID | 情况 | 正确降级行为 | 分级 |
 |---|---|---|---|
@@ -392,6 +431,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | JAVA-S20 | method reference `x::m`/`C::new` | callback → 方法/构造器 | B/C |
 | JAVA-S21 | initializer/static initializer | module/class 初始化节点及触发关系 | A/B |
 | JAVA-S22 | try-with-resources | 连接 close/AutoCloseable 为语义候选 | C/D |
+| JAVA-S23 | field/instance initializer | 初始化块或字段初始化表达式中的直接调用/引用归属类型 | A/B |
 
 ### 6.2 Package、module、继承和分派
 
@@ -414,7 +454,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | JAVA-M15 | generic type/bridge method | 结合实例类型解析；擦除后保守候选 | B/D |
 | JAVA-M16 | external JAR/classpath | 可选读取符号表；不索引源码时标 external | B/E |
 
-### 6.3 回调、并发和标准库语义
+### 6.3 回调、并发和标准库语义（P2）
 
 | ID | Java 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -427,7 +467,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | JAVA-I07 | ServiceLoader | service interface → providers（配置可读时） | C/D |
 | JAVA-I08 | serialization callbacks | framework lifecycle → read/write hooks | C/D |
 
-### 6.4 Spring/Jakarta 语义
+### 6.4 Spring/Jakarta 语义（P2）
 
 | ID | 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -456,7 +496,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | JAVA-F23 | Spring Integration/Kafka/JMS listener | topic/channel → consumer entry | C/D |
 | JAVA-F24 | configuration properties/string bean names | 常量配置可候选；外部配置降级 | C/E |
 
-### 6.5 Java 测试生态
+### 6.5 Java 测试生态（P2）
 
 | ID | 情况 | 应召回关系 | 分级 |
 |---|---|---|---|
@@ -474,7 +514,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | JAVA-T12 | repository/service integration test | DI → target bean → changed symbol | C |
 | JAVA-T13 | test source-set/file naming | Maven/Gradle/JUnit 惯例正确识别 | B/C |
 
-### 6.6 Java 动态边界
+### 6.6 Java 动态边界（P2：只要求诚实降级）
 
 | ID | 情况 | 正确降级行为 | 分级 |
 |---|---|---|---|
@@ -499,7 +539,7 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | Historical benchmark | 证明真实仓库上的召回与排序 | Recall@K/All、Precision@K、MRR、失败分类 |
 | Full Agent Eval | 证明上下文最终对 Agent 有价值 | 质量、Token、成本、延迟、工具采用 |
 
-对于 A/B/C 级 P0 条目，至少应有 Resolver + Impact contract；仅有 Parser 单测不算 Impact 能力已经覆盖。D/E 级条目至少要有负向测试，验证系统会暴露不确定性并安全降级。
+对于 P0 条目，至少应有 Resolver + Impact contract；仅有 Parser 单测不算 Impact 能力已经覆盖。P1 项目按排期进入同一套契约；P2 项目至少要有负向测试，验证系统会暴露不确定性并安全降级，而非作为 P0 的 resolved 边。
 
 ## 8. Impact Benchmark case 规范
 
@@ -551,21 +591,22 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 
 ## 9. 数据集覆盖要求
 
-### 9.1 最低可发布规模
+### 9.1 P0 最低可发布规模
 
 | 语言 | 强 gold cases | 真实仓库 | 必须包含 |
 |---|---:|---:|---|
-| Python | ≥20 | ≥3 | 普通调用、包转发、FastAPI/Flask、pytest fixture、动态负例 |
-| TypeScript/JavaScript | ≥20 | ≥3 | TS+JS、ESM+CJS、barrel/alias、Jest、至少一个 Node/前端框架 |
-| Java | ≥20 | ≥3 | 重载/类型绑定/多态、Spring DI/route、JUnit/Mockito、反射负例 |
+| Python | ≥20 | ≥3 | 普通调用、作用域、import/包转发、常量/字段/类型引用、动态负例 |
+| TypeScript/JavaScript | ≥20 | ≥3 | TS+JS、ESM+CJS、barrel/alias、class/static block、类型/成员引用 |
+| Java | ≥20 | ≥3 | 重载/类型绑定、继承/实例化、field initializer、成员/类型引用 |
+
+P1/P2 可使用同一数据集补充 case，但不以框架覆盖率作为 P0 发布门槛。
 
 ### 9.2 分层约束
 
-- A 级确定静态关系：不少于 40%。
-- B 级类型/配置关系：不少于 20%。
-- C 级框架语义关系：不少于 25%。
-- D/E 级歧义和运行时负例：不少于 15%。
-- caller、callee、entry、test 四类 strong gold 都必须出现。
+- P0 的 A 级直接关系：不少于 60%。
+- P0 的 B 级模块/类型辅助关系：不少于 20%。
+- P0 的 D/E 级歧义和运行时负例：不少于 20%。
+- caller、callee、reference 三类 P0 strong gold 都必须出现；`entry` 与 `test` 是 P1/P2 的补充维度。
 - 既要有成功召回，也要有正确返回空结果或不确定性的 case。
 - 同一仓库不能占全部 case 的一半以上。
 - 每项结果必须绑定数据集版本、代码 commit、配置和运行命令。
@@ -575,28 +616,28 @@ TypeScript 和 JavaScript共享语法/模块生态，但必须分别有真实 `.
 | 指标 | 说明 |
 |---|---|
 | Changed Symbol Found Rate | changed symbol 能否在历史快照中定位 |
-| Strong Context Recall@K | 前 K 个结果召回多少必要节点/文件 |
-| Strong Context Precision@K | 前 K 个结果中多少是真正必要上下文 |
+| Strong Context Recall@K | 前 K 个结果召回多少必要节点/文件；报告必须固定 K=5、10、20 |
+| Strong Context Precision@K | 前 K 个结果中多少是真正必要上下文；candidate 不能按 resolved 计入 precision |
 | Recall@All | 区分候选生成缺口和排序缺口 |
 | MRR | 第一个必要上下文出现的位置 |
-| Relation Recall | caller/callee/entry/test/semantic 分项召回 |
+| Relation Recall | caller/callee/reference 分项召回；entry/test/semantic 另按 P1/P2 报告 |
 | Resolution Calibration | resolved/dynamic/unresolved 是否与 gold 不确定性一致 |
 | Unsupported Honesty | E 级 case 是否避免错误确定性结论 |
 | Query Latency | 索引已存在时的查询耗时 |
 | Index Cost | 冷启动与增量索引耗时、体积 |
 
-报告必须按语言、可分析性级别和关系类型分层。总平均值不能掩盖某一种语言或框架完全没有覆盖。
+报告必须按优先级、语言、可分析性级别和关系类型分层。总平均值不能掩盖某一种语言的 P0 直接关系完全没有覆盖。
 
 ## 11. 完成定义
 
-一个条目只有同时满足以下条件才标记为“Impact 已覆盖”：
+P0 条目只有同时满足以下条件才标记为“Impact 已覆盖”：
 
 1. 语法形态能进入统一 IR；
-2. resolver 能产生正确的 resolved/semantic/candidate/dynamic 结果；
+2. resolver 能产生正确的 resolved/candidate/dynamic 结果；
 3. 至少一个索引级测试验证 `get_impact` 或 `get_test_impact` 的最终输出；
 4. 存在容易误匹配的负例；
 5. 增量更新后结果与全量 rebuild 一致；
-6. 若属于主流真实场景，至少有一个历史仓库 benchmark case；
+6. 至少有一个历史仓库 benchmark case；
 7. 不可静态确定时，系统明确展示不确定性并触发安全降级，而不是静默漏掉或伪造确定关系。
 
-“全量覆盖”的合理含义不是宣称静态分析能够知道所有运行时行为，而是：支持范围内每种关系都有端到端证据；支持范围外每种重要动态边界都有明确、可测试、不会误导用户的降级行为。
+P1/P2 条目可以标记为 `partial`、`missing` 或 `unsupported`，不影响 P0 完成定义。这里的“全量覆盖”仅指 P0 直接代码关系：支持范围内每种关系都有端到端证据；支持范围外的重要动态边界都有明确、可测试、不会误导用户的降级行为。
