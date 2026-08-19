@@ -53,8 +53,12 @@ def create_server(config: Config):
         """Impact analysis for changed symbols: the affected business entry
         points plus upstream callers / downstream callees per flow. Pass
         explicit `symbols` (e.g. ["auth::login"]) or `files`; if both omitted,
-        changed symbols are derived from git diff (diff_base). Prefer this over
-        grepping when assessing what a code change breaks."""
+        changed symbols are derived from git diff (diff_base). Each result also
+        carries `uncertainty` (one-hop non-resolved edges around the symbol —
+        dynamic/unresolved/candidate — capped at 20) and `coverage` (adjacent-
+        edge counts per resolution), so resolution gaps are visible instead of
+        silently dropped. Prefer this over grepping when assessing what a code
+        change breaks."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
         return json.dumps(_get_impact(conn, changed))
 
@@ -66,8 +70,12 @@ def create_server(config: Config):
         explicit `symbols` (e.g. ["auth::login"]) or `files`; if both
         omitted, changed symbols are derived from the git diff (diff_base).
         Returns affected tests grouped by file with the changed symbols each
-        covers. Prefer this over get_impact when the question is "which tests
-        must I run", not "which business code breaks"."""
+        covers, plus `complete` / `fallback_recommended` / `fallback_reasons`
+        — when a symbol is not in the index or no test reaches it but the call
+        graph has dynamic/candidate edges around it, the result is marked
+        incomplete so the reviewer falls back to running the full suite.
+        Prefer this over get_impact when the question is "which tests must I
+        run", not "which business code breaks"."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
         return json.dumps(_get_test_impact(conn, changed))
 

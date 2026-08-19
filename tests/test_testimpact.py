@@ -77,11 +77,15 @@ def test_test_impact_transitive(tmp_path):
 
 def test_test_impact_no_coverage(tmp_path):
     conn = _build_repo(tmp_path)
-    # prod::unused exists and is found, but no test reaches it.
+    # prod::unused exists and is found, but no test reaches it. That is a
+    # *complete* analysis — no breakpoint hides any edge — so no fallback.
     res = get_test_impact(conn, ["prod::unused"])
     assert res["affected_tests"] == []
     assert res["test_count"] == 0
     assert res["not_found"] == []
+    assert res["complete"] is True
+    assert res["fallback_recommended"] is False
+    assert res["fallback_reasons"] == []
 
 
 def test_test_impact_unknown_symbol(tmp_path):
@@ -89,6 +93,10 @@ def test_test_impact_unknown_symbol(tmp_path):
     res = get_test_impact(conn, ["prod::nope"])
     assert res["affected_tests"] == []
     assert res["not_found"] == ["prod::nope"]
+    # an unknown changed symbol makes the result untrustworthy (guide §5.4)
+    assert res["complete"] is False
+    assert res["fallback_recommended"] is True
+    assert "changed symbol not found in index" in res["fallback_reasons"]
 
 
 def test_test_impact_multiple_changed_symbols_merge_covers(tmp_path):
@@ -99,6 +107,78 @@ def test_test_impact_multiple_changed_symbols_merge_covers(tmp_path):
     assert by_q["test_prod::test_login"]["covers"] == ["prod::hash_pw", "prod::login"]
     # test_hash reaches only hash_pw
     assert by_q["test_prod::test_hash"]["covers"] == ["prod::hash_pw"]
+
+
+def _build_breakpoint_repo(tmp_path):
+    """prod.py has `dispatch` with a dynamic outgoing edge (handler.handle()).
+    test_prod.py tests only `other`, which dispatch is not reachable from."""
+    (tmp_path / "prod.py").write_text(
+        "def dispatch(handler):\n"
+        "    handler.handle()\n"
+        "\n"
+        "def other():\n"
+        "    return 1\n", encoding="utf-8")
+    (tmp_path / "test_prod.py").write_text(
+        "from prod import other\n\n"
+        "def test_other():\n"
+        "    other()\n", encoding="utf-8")
+    for cmd in (["git", "init"], ["git", "add", "-A"],
+                ["git", "commit", "-m", "fixture"]):
+        subprocess.run(cmd, cwd=tmp_path, check=True, capture_output=True)
+    cfg = load_config(str(tmp_path))
+    cfg.db_path = str(tmp_path / "i.db")
+    cfg.repo_path = str(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    rebuild(cfg, conn)
+    return conn
+
+
+def _build_breakpoint_with_coverage_repo(tmp_path):
+    """A test calls `dispatch` directly, so there IS coverage even though the
+    symbol has a dynamic outgoing edge — no fallback should be advised."""
+    (tmp_path / "prod.py").write_text(
+        "def dispatch(handler):\n"
+        "    handler.handle()\n", encoding="utf-8")
+    (tmp_path / "test_prod.py").write_text(
+        "from prod import dispatch\n\n"
+        "def test_dispatch():\n"
+        "    dispatch(None)\n", encoding="utf-8")
+    for cmd in (["git", "init"], ["git", "add", "-A"],
+                ["git", "commit", "-m", "fixture"]):
+        subprocess.run(cmd, cwd=tmp_path, check=True, capture_output=True)
+    cfg = load_config(str(tmp_path))
+    cfg.db_path = str(tmp_path / "i.db")
+    cfg.repo_path = str(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    rebuild(cfg, conn)
+    return conn
+
+
+def test_test_impact_breakpoint_no_coverage_suggests_fallback(tmp_path):
+    """A zero-test result is only trustworthy when the graph around the changed
+    symbol is fully resolved; a dynamic/candidate breakpoint forces fallback."""
+    conn = _build_breakpoint_repo(tmp_path)
+    res = get_test_impact(conn, ["prod::dispatch"])
+    assert res["affected_tests"] == []
+    assert res["test_count"] == 0
+    assert res["not_found"] == []
+    assert res["complete"] is False
+    assert res["fallback_recommended"] is True
+    assert any("dynamic/candidate" in r for r in res["fallback_reasons"])
+
+
+def test_test_impact_breakpoint_with_coverage_no_fallback(tmp_path):
+    """Coverage defeats the breakpoint: dispatch has a dynamic outgoing edge,
+    but test_dispatch reaches it, so "run only these tests" is trustworthy."""
+    conn = _build_breakpoint_with_coverage_repo(tmp_path)
+    res = get_test_impact(conn, ["prod::dispatch"])
+    assert res["test_count"] == 1
+    assert res["not_found"] == []
+    assert res["complete"] is True
+    assert res["fallback_recommended"] is False
+    assert res["fallback_reasons"] == []
 
 
 def test_get_impact_exclude_vs_only(tmp_path):

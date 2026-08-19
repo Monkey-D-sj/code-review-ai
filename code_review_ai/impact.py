@@ -1,7 +1,10 @@
 
+import json
+
 import sqlite3
 
 _SIGNATURE_LIMIT = 160
+_UNCERTAINTY_LIMIT = 20
 
 
 def _cap_signature(value: str | None) -> str:
@@ -94,6 +97,83 @@ def _edge_brief(conn: sqlite3.Connection, qname: str) -> dict:
 
 _TEST_FILTER = {"exclude": 0, "only": 1, "include": None}
 
+# One-line reason per non-resolved resolution, so uncertainty items stay compact
+# (guide §5.2) and test-impact can explain *why* a full-run fallback is advised.
+_REASON_BY_RESOLUTION = {
+    "dynamic": "receiver type not statically known",
+    "unresolved": "target not found in repo",
+    "candidate": "one of several possible targets",
+    "external": "external dependency",
+}
+
+# Resolution priority for uncertainty ordering: breakpoints that hide the most
+# likely to matter are surfaced first (direct dynamic first).
+_UNCERTAINTY_PRIORITY = {"dynamic": 0, "candidate": 1, "unresolved": 2,
+                         "external": 3}
+
+
+def _uncertainty(conn: sqlite3.Connection, qname: str) -> list[dict]:
+    """One-hop non-resolved edges around a changed symbol (target= or source=),
+    capped at 20, so the AI reviewer sees resolution gaps instead of silent
+    drops (guide §5.2, priority 1: edges directly touching the changed symbol).
+    Computed for found and not-found symbols alike — a deleted-but-referenced
+    symbol still surfaces its dangling references here."""
+    rows = conn.execute(
+        "SELECT source,target,resolution,rule_id,evidence_json FROM edges "
+        "WHERE (target=? OR source=?) AND resolution != 'resolved' "
+        "ORDER BY "
+        "  CASE resolution WHEN 'dynamic' THEN 0 WHEN 'candidate' THEN 1 "
+        "    WHEN 'unresolved' THEN 2 WHEN 'external' THEN 3 ELSE 4 END, source",
+        (qname, qname),
+    ).fetchall()
+    items: list[dict] = []
+    for r in rows:
+        evidence: dict = {}
+        if r["evidence_json"]:
+            try:
+                evidence = json.loads(r["evidence_json"])
+            except ValueError:
+                evidence = {}
+        # dynamic edges store the raw call expression (e.g. "plugin.run");
+        # other resolutions carry the raw target name/expression in `target`.
+        expression = evidence.get("target_expr") or r["target"]
+        items.append({
+            "source": r["source"],
+            "expression": expression,
+            "resolution": r["resolution"],
+            "candidates": evidence.get("candidates", []),
+            "rule_id": r["rule_id"],
+            "reason": _REASON_BY_RESOLUTION.get(r["resolution"],
+                                                "uncertain edge"),
+        })
+    return items[:_UNCERTAINTY_LIMIT]
+
+
+_COVERAGE_KEYS = ("resolved_edges", "semantic_edges", "candidate_edges",
+                  "dynamic_edges", "unresolved_edges")
+
+
+def _coverage(conn: sqlite3.Connection, qname: str,
+              truncated: bool = False) -> dict:
+    """Adjacent-edge counts per resolution (guide §5.1 `coverage`), so the
+    reviewer can see how much of the neighborhood the determined graph covers
+    versus what fell out. `truncated` reflects whether the uncertainty list
+    above hit its cap."""
+    counts: dict[str, int] = {}
+    for r in conn.execute(
+            "SELECT resolution, COUNT(*) AS cnt FROM edges "
+            "WHERE target=? OR source=? GROUP BY resolution",
+            (qname, qname)):
+        counts[r["resolution"]] = r["cnt"]
+    return {
+        "resolved_edges": counts.get("resolved", 0),
+        "semantic_edges": counts.get("semantic", 0),
+        "candidate_edges": counts.get("candidate", 0),
+        "dynamic_edges": counts.get("dynamic", 0),
+        "unresolved_edges": counts.get("unresolved", 0),
+        "truncated": truncated,
+    }
+
 
 def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
                max_nodes_per_direction: int = 20,
@@ -101,16 +181,25 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
     """Impact analysis for changed symbols. `tests` selects which nodes the
     upstream/downstream/affected_entries contain: 'exclude' (default, business
     impact) drops test nodes, 'only' keeps only test nodes (for test-impact
-    analysis), 'include' keeps everything."""
+    analysis), 'include' keeps everything.
+
+    Every result carries `uncertainty` (one-hop non-resolved edges around the
+    symbol, capped at 20) and `coverage` (adjacent-edge counts per resolution).
+    Both are computed regardless of the `tests` filter so get_test_impact can
+    read them in tests="only" mode."""
     if tests not in _TEST_FILTER:
         raise ValueError(f"tests must be one of {list(_TEST_FILTER)}, got {tests!r}")
     test_filter = _TEST_FILTER[tests]
     results: list[dict] = []
     for qname in changed_symbols:
+        uncertainty = _uncertainty(conn, qname)
+        coverage = _coverage(conn, qname,
+                             truncated=len(uncertainty) >= _UNCERTAINTY_LIMIT)
         node = conn.execute("SELECT id FROM nodes WHERE qualified_name=?", (qname,)).fetchone()
         if node is None:
             results.append({"symbol": qname, "found": False, "upstream": [],
-                            "downstream": [], "affected_entries": []})
+                            "downstream": [], "affected_entries": [],
+                            "uncertainty": uncertainty, "coverage": coverage})
             continue
         nid = node["id"]
         flows = conn.execute(
@@ -142,6 +231,7 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
             "symbol": qname, "found": True,
             "upstream": _dedup(up_all), "downstream": _dedup(down_all),
             "affected_entries": sorted(entries),
+            "uncertainty": uncertainty, "coverage": coverage,
         })
     return results
 

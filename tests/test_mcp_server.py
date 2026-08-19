@@ -43,6 +43,13 @@ def test_get_impact_tool(tmp_path):
     data = json.loads(out)
     assert data[0]["symbol"] == Q("auth","login")
     assert data[0]["found"] is True
+    # Phase 2: uncertainty + coverage flow through the MCP JSON output
+    assert data[0]["uncertainty"] == []
+    assert set(data[0]["coverage"]) == {
+        "resolved_edges", "semantic_edges", "candidate_edges",
+        "dynamic_edges", "unresolved_edges", "truncated"}
+    assert data[0]["coverage"]["resolved_edges"] == 1  # app::main -> login
+    assert data[0]["coverage"]["truncated"] is False
 
 
 def test_search_symbol_tool(tmp_path):
@@ -159,6 +166,11 @@ def test_get_test_impact_tool(tmp_path):
     assert data["test_count"] == 1
     assert data["affected_tests"][0]["qname"] == "test_prod::test_login"
     assert data["affected_tests"][0]["covers"] == ["prod::login"]
+    # Phase 2: the fallback safety contract flows through (no unknown symbol,
+    # full coverage -> complete, no fallback)
+    assert data["complete"] is True
+    assert data["fallback_recommended"] is False
+    assert data["fallback_reasons"] == []
 
 
 def test_query_graph_tool(tmp_path):

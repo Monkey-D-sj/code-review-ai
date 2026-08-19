@@ -66,3 +66,49 @@ def test_impact_puts_direct_callers_first(tmp_path):
     qnames = [node["qname"] for node in res["upstream"]]
     assert qnames.index("d::direct") < qnames.index("a::entry")
     assert qnames.index("b::helper") < qnames.index("a::entry")
+
+
+def _dyn_idx(tmp_path):
+    """Repo with one dynamic call: dispatch(handler) -> handler.handle() —
+    the receiver type is a parameter, so the resolver leaves it unresolved."""
+    (tmp_path / "dyn.py").write_text(
+        "def dispatch(handler):\n"
+        "    handler.handle()\n", encoding="utf-8")
+    for cmd in (["git", "init"], ["git", "add", "-A"],
+                ["git", "commit", "-m", "fixture"]):
+        subprocess.run(cmd, cwd=tmp_path, check=True, capture_output=True)
+    cfg = load_config(str(tmp_path))
+    cfg.db_path = str(tmp_path / "i.db")
+    cfg.repo_path = str(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    rebuild(cfg, conn)
+    return conn
+
+
+def test_impact_uncertainty_lists_dynamic_edge_not_upstream(tmp_path):
+    # A dynamic edge is returned as uncertainty (guide §5.2) so the resolution
+    # gap is visible — but never pollutes the determined upstream/downstream.
+    conn = _dyn_idx(tmp_path)
+    res = get_impact(conn, ["dyn::dispatch"])[0]
+    assert res["found"] is True
+    dyn = [u for u in res["uncertainty"] if u["resolution"] == "dynamic"]
+    assert dyn and dyn[0]["expression"] == "handler.handle"
+    assert dyn[0]["source"] == "dyn::dispatch"
+    assert dyn[0]["reason"] == "receiver type not statically known"
+    assert res["upstream"] == [] and res["downstream"] == []
+    # coverage counts the dynamic adjacency apart from resolved
+    assert res["coverage"]["dynamic_edges"] == 1
+    assert res["coverage"]["resolved_edges"] == 0
+    assert res["coverage"]["truncated"] is False
+
+
+def test_impact_coverage_counts_resolved_adjacency(tmp_path):
+    conn = _tmp_idx(tmp_path)
+    # c::target has two incoming resolved call edges (b::helper, d::direct);
+    # a::entry reaches it only transitively, so no edge touches target.
+    res = get_impact(conn, ["c::target"])[0]
+    assert res["coverage"]["resolved_edges"] == 2
+    assert res["coverage"]["dynamic_edges"] == 0
+    assert res["uncertainty"] == []
+    assert res["coverage"]["truncated"] is False
