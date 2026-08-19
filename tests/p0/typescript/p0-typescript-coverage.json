@@ -40,8 +40,8 @@
       "capability": "P0-G06",
       "case_id": "ts_all_edges",
       "test_kind": "query_e2e",
-      "status": "missing",
-      "evidence": []
+      "status": "covered",
+      "evidence": ["ts_all_edges"]
     },
     {
       "capability": "P0-G07",

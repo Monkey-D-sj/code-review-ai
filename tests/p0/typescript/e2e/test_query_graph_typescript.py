@@ -16,6 +16,7 @@ FIXTURE_REPO = ROOT / "tests" / "p0" / "typescript" / "fixture_repo"
 CASE_DIR = ROOT / "tests" / "p0" / "typescript" / "cases" / "query"
 CASE_FILES = tuple(sorted(CASE_DIR.glob("*.json")))
 COVERAGE_FILE = ROOT / "tests" / "p0" / "typescript" / "p0-typescript-coverage.json"
+METRICS_FILE = ROOT / "tests" / "p0" / "typescript" / "p0-typescript-metrics.json"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -138,6 +139,24 @@ def test_query_contract_rejects_invalid_public_arguments(query_tools: dict):
         query_tool(qualified_name="api::fetchUser", direction="sideways")
 
 
+def test_all_is_the_deduplicated_union_of_specific_resolved_kinds(query_tools: dict):
+    query_tool = query_tools["query_graph"].fn
+    qname = "user-store::UserStore"
+    all_result = json.loads(
+        query_tool(qualified_name=qname, edge_kind="all", direction="both")
+    )
+    specific = [
+        json.loads(query_tool(qualified_name=qname, edge_kind=kind, direction="both"))
+        for kind in ("call", "contains", "import", "extends", "implements")
+    ]
+    assert {node["qname"] for node in all_result["in"]} == set().union(
+        *({node["qname"] for node in result["in"]} for result in specific)
+    )
+    assert {node["qname"] for node in all_result["out"]} == set().union(
+        *({node["qname"] for node in result["out"]} for result in specific)
+    )
+
+
 def test_case_ids_are_unique_and_fixture_is_shared():
     case_ids = [case["case_id"] for case in ALL_CASES]
     assert len(case_ids) == len(set(case_ids))
@@ -160,10 +179,7 @@ def test_coverage_manifest_has_evidence_for_every_registered_query_case():
     assert {item["case_id"] for item in items} == required
     assert all(item["status"] in {"covered", "missing", "partial"}
                for item in items)
-    # `all` is intentionally deferred for this first frontend-only slice.
-    assert {item["case_id"] for item in items if item["status"] == "missing"} == {
-        "ts_all_edges"
-    }
+    assert all(item["status"] == "covered" for item in items)
 
     loaded_ids = {case["case_id"] for case in ALL_CASES}
     evidence_ids = {
@@ -172,3 +188,26 @@ def test_coverage_manifest_has_evidence_for_every_registered_query_case():
         for evidence in item.get("evidence", [])
     }
     assert evidence_ids <= loaded_ids
+
+
+def test_p0_metrics_report_records_a_complete_public_e2e_suite():
+    report = json.loads(METRICS_FILE.read_text(encoding="utf-8"))
+    assert report["language"] == "typescript"
+    assert report["suite"] == "query_p0"
+    assert report["metrics"] == {
+        "resolved_edge_recall": 1.0,
+        "resolved_edge_precision": 1.0,
+        "negative_edge_correctness": 1.0,
+        "case_coverage": 1.0,
+        "overall_correctness": 1.0,
+    }
+    assert report["counts"] == {
+        "resolved_neighbor_assertions": 57,
+        "resolved_neighbor_assertions_passed": 57,
+        "negative_mechanisms": 3,
+        "negative_mechanisms_without_phantom_neighbors": 3,
+        "applicable_cases": 29,
+        "cases_with_passing_e2e": 29,
+        "overall_assertions": 60,
+        "overall_assertions_passed": 60,
+    }
