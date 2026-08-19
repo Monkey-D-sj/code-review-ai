@@ -92,7 +92,7 @@ def test_install_hooks_review_prompt_orders_change_summary_first(tmp_path):
     (repo / ".git").mkdir(parents=True)
     written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
     content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
-    assert content.index("get_change_summary") < content.index("get_impact")
+    assert content.index("get_change_summary") < content.index("query_graph")
 
 
 def test_install_hooks_review_archives_by_date(tmp_path):
@@ -176,5 +176,5 @@ def test_install_hooks_review_prompt_contains_risk_routing(tmp_path):
     assert "query_graph" in content       # 默认动作
     assert "direction=in" in content      # 默认看上游
     assert "risk" in content              # 风险信号
-    assert "不作为是否调用 get_impact 的硬门槛" in content
-    assert content.index("get_change_summary") < content.index("get_impact")
+    assert "不作为查询深度的硬门槛" in content
+    assert content.index("get_change_summary") < content.index("query_graph")

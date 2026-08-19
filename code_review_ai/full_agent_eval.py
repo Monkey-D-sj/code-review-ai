@@ -124,7 +124,7 @@ def prepare_full_agent_cases(cases: list[FullAgentCase], repos_dir: str,
         for mutation_path in case.mutation_paths:
             _restore_parent_version(worktree, case.source_commit, mutation_path)
         diff = _run_git(["-C", str(worktree), "diff", "--no-ext-diff",
-                         "--unified=40", "--", *case.mutation_paths]).stdout
+                         "--unified=3", "--", *case.mutation_paths]).stdout
         if not diff.strip():
             raise ValueError(f"case {case.case_id} produced an empty mutation")
         prepared.append(PreparedCase(case, str(worktree), diff))
@@ -303,7 +303,7 @@ def _full_aggregates(runs: list[dict], modes: tuple[str, ...]) -> dict:
             ])
             for name in (
                 "rebuild_index", "get_change_summary", "query_graph",
-                "get_impact", "get_test_impact", "search_symbol",
+                "get_test_impact", "search_symbol",
                 "get_symbol_detail",
             )
         }
@@ -352,10 +352,11 @@ def _prompt(item: PreparedCase, mode: str) -> str:
     tool_note = ("You have native Read/Glob/Grep tools and the installed "
                  "code-review-ai MCP tools. The graph index is already "
                  "synchronized; do not call rebuild_index. Use "
-                 "get_change_summary for structured change details, query_graph "
-                 "for direct upstream or downstream neighbors, and get_impact "
-                 "only when those direct neighbors leave the wider blast radius "
-                 "uncertain. Risk is a prioritization signal, not a hard gate. "
+                 "get_change_summary for structured change details and query_graph "
+                 "for upstream or downstream neighbors. Walk the call graph with "
+                 "query_graph (repeatedly, direction=in or out as needed) when the "
+                 "wider blast radius is uncertain. Risk is a prioritization signal, "
+                 "not a hard gate. "
                  if mode == "full_project_agent" else
                  "You have native Read/Glob/Grep tools. Use them to obtain the "
                  "repository evidence required by the review policy. ")

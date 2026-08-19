@@ -90,7 +90,8 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
         assert env["CRAI_EVAL_DB_PATH"] == str(prebuilt_db)
         if env["CRAI_EVAL_TOOL_PROFILE"] == "full_project":
             assert "do not call rebuild_index" in prompt
-            assert "get_impact only when" in prompt
+            assert "query_graph" in prompt
+            assert "get_impact" not in prompt
         calls = (["Read", "mcp__code-review-ai__query_graph"]
                  if env["CRAI_EVAL_TOOL_PROFILE"] == "full_project" else ["Read"])
         payload = {"findings": [{

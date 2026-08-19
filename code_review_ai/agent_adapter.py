@@ -36,7 +36,7 @@ FINDING_SCHEMA = {
 
 
 MCP_TOOL_NAMES = (
-    "rebuild_index", "get_impact", "get_test_impact", "find_dead_code",
+    "rebuild_index", "get_test_impact", "find_dead_code",
     "get_change_summary", "query_graph", "search_symbol",
     "get_symbol_detail", "list_entry_points", "get_communities",
     "get_community",

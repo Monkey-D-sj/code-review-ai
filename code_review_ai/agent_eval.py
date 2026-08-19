@@ -374,7 +374,7 @@ def _create_case_snapshot(config: Config, case: AgentEvalCase,
             _reverse_fix_hunks(worktree, source_repo, case.source_commit,
                                mutation_specs)
         actual_diff = _run_git(
-            ["-C", str(worktree), "diff", "--no-ext-diff", "--unified=40",
+            ["-C", str(worktree), "diff", "--no-ext-diff", "--unified=3",
              "--", *mutation_paths]).stdout
         if not actual_diff.strip():
             raise ValueError(f"case {case.case_id} produced an empty mutation")
