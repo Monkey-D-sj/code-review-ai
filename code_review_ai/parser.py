@@ -309,6 +309,8 @@ class ParsedFile:
     inherits: list[RawInherit] = field(default_factory=list)
     var_types: dict[str, dict[str, str]] = field(default_factory=dict)
     di_decls: list[DiDecl] = field(default_factory=list)
+    module_all: set[str] | None = None
+    default_export: str | None = None
 
 
 def list_source_files(repo_path: str, extensions: list[str] | None = None) -> list[str]:
@@ -927,6 +929,8 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     _walk_calls(root, module_qname, None, lang, pf.raw_calls, mockmvc_requests)
     pf.imports = _extract_imports(root, module_qname, lang, lang_name,
                                   file_path, repo_root)
+    if lang_name == "python":
+        pf.module_all = _extract_module_all(root)
     # handle inheritance
     _walk_inherits(root, module_qname, lang, pf.inherits)
     if lang_name == "java":
@@ -1223,6 +1227,37 @@ def _extract_imports_python(root, module_qname, lang,
                     entries.append(ImportEntry("*", module, None, True,
                                                span=_span(node)))
     return entries
+
+
+def _extract_module_all(root) -> set[str] | None:
+    """A module's ``__all__`` literal-list, or None when not statically declared.
+
+    Only a top-level ``__all__ = [...]`` (or tuple/set of string literals) is
+    honored. A dynamic ``__all__`` (function call, concatenation) yields None,
+    which makes star imports see the module's full symbol table — matching
+    Python's "no __all__ means all public names" semantics.
+    """
+    for statement in root.children:
+        if statement.type != "expression_statement":
+            continue
+        assignment = _find_child(statement, "assignment")
+        if assignment is None:
+            continue
+        left = assignment.child_by_field_name("left")
+        if left is None or left.type != "identifier":
+            continue
+        if left.text.decode("utf-8") != "__all__":
+            continue
+        right = assignment.child_by_field_name("right")
+        if right is None or right.type not in ("list", "tuple", "set"):
+            return None
+        names: set[str] = set()
+        for item in right.named_children:
+            if item.type != "string":
+                return None  # non-literal element -> treat as dynamic
+            names.add(item.text.decode("utf-8").strip("'\""))
+        return names
+    return None
 
 
 def _esm_relative_module(spec: str, file_path: str, repo_root: str) -> str | None:
