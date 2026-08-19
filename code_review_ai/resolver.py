@@ -437,6 +437,27 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
             cls_qn = local[head]
             tgt = _join_target(cls_qn, rest)
             return [_resolved(base, tgt, existing)]
+        # receiver declared type (PY-M12): `w.run()` / `self.w.run()` where the
+        # receiver variable is annotated — the declared type binds the target.
+        # After lexical scope + imports per §4.4; untyped/union receivers keep
+        # falling through to dynamic.
+        if var_types:
+            scope_types = var_types.get(c.source_qname, {})
+            receiver_expr, receiver_type = _receiver_declared_type(
+                c.target_expr, scope_types)
+            if receiver_expr:
+                hits = _resolve_py_type(
+                    receiver_type, local, imports, existing, all_import_maps,
+                    mod_syms, source_module, star_modules, star_map,
+                    module_alls, default_exports)
+                receiver_member = c.target_expr[len(receiver_expr) + 1:]
+                if len(hits) == 1:
+                    tgt = _join_target(hits[0], receiver_member)
+                    if tgt in existing:
+                        return [_resolved(base, tgt, existing)]
+                elif len(hits) > 1:
+                    return _candidates(base, [_join_target(hit, receiver_member)
+                                              for hit in hits])
         if c.language == "python" and head in ("self", "cls"):
             # method receiver -> enclosing class, mirroring Java's this./type
             # binding; bare `g()` stays module-scope (Python LEGB), not A.g
@@ -491,6 +512,58 @@ def _resolve_reexport(current: str, name: str, all_import_maps: dict,
         hits.extend(_resolve_reexport(module, name, all_import_maps, existing,
                                       (seen or set()) | {current}, star_map))
     return hits
+
+
+def _resolve_py_type(type_name: str, local: dict, imports: dict,
+                     existing: set[str], all_import_maps: dict,
+                     mod_syms: dict, source_module: str | None,
+                     star_modules: list, star_map: dict | None,
+                     module_alls: dict | None,
+                     default_exports: dict | None) -> list[str]:
+    """All class qnames a Python/TS declared type resolves to: same-module
+    symbol, then import (following barrel re-exports), then star imports.
+
+    Callers pick resolved (1) vs candidate (many) vs unresolved (0) — a
+    multi-hit barrel must never silently pick the first class.
+    """
+    hits: list[str] = []
+    if type_name in local:
+        hits.append(local[type_name])
+    if type_name in imports:
+        mod, imported, _star = imports[type_name]
+        if imported == "default":
+            default_qn = (default_exports or {}).get(mod)
+            if default_qn and default_qn not in hits:
+                hits.append(default_qn)
+        elif imported:
+            candidate = qname.join(mod, imported)
+            if candidate in existing and candidate not in hits:
+                hits.append(candidate)
+            else:
+                for hit in _resolve_reexport(mod, imported, all_import_maps,
+                                             existing, star_map=star_map):
+                    if hit not in hits:
+                        hits.append(hit)
+    if not hits and star_modules:
+        hits = _star_lookup(type_name, star_modules, mod_syms, module_alls)
+    return hits
+
+
+def _receiver_declared_type(target_expr: str,
+                            scope_types: dict) -> tuple[str | None, str | None]:
+    """The longest var_types prefix of a dotted call expression, if any.
+
+    ``w.run()`` → (``w``, ``Widget``); ``self.w.run()`` / ``this.w.run()`` →
+    (``self.w``/``this.w``, ``Widget``). Longest prefix wins so a field-access
+    chain binds to the field's declared type rather than the bare receiver
+    name. Returns (None, None) when no prefix is a declared variable.
+    """
+    segments = target_expr.split(".")
+    for index in range(len(segments) - 1, 0, -1):
+        prefix = ".".join(segments[:index])
+        if prefix in scope_types:
+            return prefix, scope_types[prefix]
+    return None, None
 
 
 def _resolved(base: Edge, target: str, existing: set[str]) -> Edge:

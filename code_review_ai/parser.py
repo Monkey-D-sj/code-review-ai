@@ -533,6 +533,320 @@ def _java_locals(node, scope) -> None:
         _java_locals(child, scope)
 
 
+# Receiver declared-type binding (PY-M12) collects annotated variable types for
+# Python and TypeScript so the resolver can bind `w.run()` when `w: Widget`.
+# Only simple identifier types are recorded — union/generic/subscript/string
+# annotations and untyped variables are skipped so the resolver never guesses a
+# target (those belong to Phase 4 Slice 6).
+_PY_SIMPLE_TYPE_NODES = ("identifier",)
+_TS_SIMPLE_TYPE_NODES = ("type_identifier",)
+
+
+def _py_type_text(type_node) -> str | None:
+    """Declared type text when ``type_node`` holds a simple identifier type.
+
+    Python's grammar wraps the annotation in a ``type`` node whose child is the
+    ``identifier`` (or a ``list``/``string``/``union_type`` — those return
+    None and the variable stays untyped).
+    """
+    if type_node is None:
+        return None
+    inner = type_node if type_node.type in _PY_SIMPLE_TYPE_NODES else None
+    if inner is None:
+        inner = next((child for child in type_node.children
+                      if child.type in _PY_SIMPLE_TYPE_NODES), None)
+    return inner.text.decode("utf-8") if inner is not None else None
+
+
+def _py_assignment_type(node) -> tuple[str, str] | None:
+    """From an ``expression_statement``, (name, type_text) for an annotated
+    assignment ``x: T`` / ``x: T = v`` with a plain identifier left side and a
+    simple identifier type. None for attribute/union/subscript targets."""
+    if node.type != "expression_statement":
+        return None
+    assign = next((child for child in node.children
+                   if child.type == "assignment"), None)
+    if assign is None:
+        return None
+    left = assign.child_by_field_name("left")
+    type_node = assign.child_by_field_name("type")
+    if left is None or left.type != "identifier":
+        return None
+    type_text = _py_type_text(type_node)
+    return (left.text.decode("utf-8"), type_text) if type_text else None
+
+
+def _py_annotated_in_children(node, scope: dict[str, str]) -> None:
+    """Record annotated assignments declared directly under ``node``."""
+    for child in node.children:
+        anno = _py_assignment_type(child)
+        if anno and anno[0] not in scope:
+            scope[anno[0]] = anno[1]
+
+
+def _py_param_name(param):
+    """A ``typed_parameter``'s name: the ``name`` field, or — for grammar
+    builds that only expose it as the first ``identifier`` child — that child."""
+    name_node = param.child_by_field_name("name")
+    if name_node is not None:
+        return name_node
+    return next((child for child in param.children
+                 if child.type == "identifier"), None)
+
+
+def _py_typed_parameters(params, scope: dict[str, str]) -> None:
+    """Record ``w: Widget``-style parameters (skip keyword-only/star forms)."""
+    if params is None:
+        return
+    for param in params.children:
+        if param.type != "typed_parameter":
+            continue
+        name_node = _py_param_name(param)
+        type_text = _py_type_text(param.child_by_field_name("type"))
+        if name_node is not None and type_text:
+            scope[name_node.text.decode("utf-8")] = type_text
+
+
+def _collect_python_var_types(root, module_qname, lang) -> dict[str, dict[str, str]]:
+    """Build {function/module_qname: {var_name: declared_type}} for Python.
+
+    Module-level scope is keyed by the module qname; function scopes by their
+    qname (matching ``RawCall.source_qname``). Method scopes carry the class's
+    annotated fields as ``self.<field>`` so ``self.w.run()`` binds via the
+    field's declared type.
+    """
+    out: dict[str, dict[str, str]] = {}
+    module_scope: dict[str, str] = {}
+    _py_annotated_in_children(root, module_scope)
+    if module_scope:
+        out[module_qname] = module_scope
+    for child in root.children:
+        if child.type == "class_definition":
+            _py_class_var_types(child, module_qname, None, lang, out)
+        elif child.type == "function_definition":
+            _py_function_var_types(child, module_qname, None, lang, out)
+    return out
+
+
+def _py_function_var_types(fn, module_qname, scope_qname, lang, out) -> None:
+    """Record a function's typed params + direct-body locals; recurse into
+    nested classes/functions."""
+    name_node = fn.child_by_field_name("name")
+    if name_node is None:
+        return
+    qn = qname.join(module_qname, name_node.text.decode("utf-8"), scope_qname)
+    scope: dict[str, str] = {}
+    _py_typed_parameters(fn.child_by_field_name("parameters"), scope)
+    body = fn.child_by_field_name("body")
+    if body is not None:
+        _py_annotated_in_children(body, scope)
+    if scope:
+        out[qn] = scope
+    if body is not None:
+        for child in body.children:
+            if child.type == "class_definition":
+                _py_class_var_types(child, module_qname, qn, lang, out)
+            elif child.type == "function_definition":
+                _py_function_var_types(child, module_qname, qn, lang, out)
+
+
+def _py_class_var_types(cls, module_qname, scope_qname, lang, out) -> None:
+    """Record a class's annotated fields and each method's typed scope."""
+    name_node = cls.child_by_field_name("name")
+    if name_node is None:
+        return
+    cls_qn = qname.join(module_qname, name_node.text.decode("utf-8"), scope_qname)
+    fields: dict[str, str] = {}
+    body = cls.child_by_field_name("body")
+    if body is not None:
+        _py_annotated_in_children(body, fields)
+    if fields:
+        out[cls_qn] = dict(fields)
+    if body is not None:
+        for member in body.children:
+            if member.type == "function_definition":
+                _py_method_var_types(member, module_qname, cls_qn, fields,
+                                     lang, out)
+            elif member.type == "class_definition":
+                _py_class_var_types(member, module_qname, cls_qn, lang, out)
+
+
+def _py_method_var_types(fn, module_qname, cls_qn, fields, lang, out) -> None:
+    """Record a method's scope: fields as ``self.<field>`` + typed params and
+    direct-body locals."""
+    name_node = fn.child_by_field_name("name")
+    if name_node is None:
+        return
+    qn = qname.join(module_qname, name_node.text.decode("utf-8"), cls_qn)
+    scope: dict[str, str] = {f"self.{name}": type_text
+                             for name, type_text in fields.items()}
+    _py_typed_parameters(fn.child_by_field_name("parameters"), scope)
+    body = fn.child_by_field_name("body")
+    if body is not None:
+        _py_annotated_in_children(body, scope)
+    if scope:
+        out[qn] = scope
+    if body is not None:
+        for child in body.children:
+            if child.type == "class_definition":
+                _py_class_var_types(child, module_qname, qn, lang, out)
+            elif child.type == "function_definition":
+                _py_function_var_types(child, module_qname, qn, lang, out)
+
+
+def _ts_type_text(node) -> str | None:
+    """Declared type text for a TS param/declarator/field carrying a
+    ``type_annotation`` whose inner type is a simple ``type_identifier``."""
+    ta = next((child for child in node.children
+               if child.type == "type_annotation"), None)
+    if ta is None:
+        return None
+    inner = next((child for child in ta.children
+                  if child.type in _TS_SIMPLE_TYPE_NODES), None)
+    return inner.text.decode("utf-8") if inner is not None else None
+
+
+def _ts_param_name(param):
+    """A ``required_parameter``/``optional_parameter``'s name: the ``name``
+    field, or — for grammar builds that only expose it as the first
+    ``identifier`` child — that child."""
+    name_node = param.child_by_field_name("name")
+    if name_node is not None:
+        return name_node
+    return next((child for child in param.children
+                 if child.type == "identifier"), None)
+
+
+def _ts_typed_parameters(fn, scope: dict[str, str]) -> None:
+    params = fn.child_by_field_name("parameters")
+    if params is None:
+        return
+    for param in params.children:
+        if param.type not in ("required_parameter", "optional_parameter"):
+            continue
+        name_node = _ts_param_name(param)
+        type_text = _ts_type_text(param)
+        if name_node is not None and type_text:
+            scope[name_node.text.decode("utf-8")] = type_text
+
+
+def _ts_locals(fn, scope: dict[str, str]) -> None:
+    """Record typed const/let declarations in the function body's direct block."""
+    block = fn.child_by_field_name("body")
+    if block is None:
+        return
+    for child in block.children:
+        if child.type != "lexical_declaration":
+            continue
+        for decl in child.children:
+            if decl.type != "variable_declarator":
+                continue
+            name_node = decl.child_by_field_name("name")
+            type_text = _ts_type_text(decl)
+            if name_node is not None and type_text:
+                scope[name_node.text.decode("utf-8")] = type_text
+
+
+def _ts_field_types(body, fields: dict[str, str]) -> None:
+    """Record typed class fields / interface property signatures."""
+    for member in body.children:
+        if member.type not in ("public_field_definition", "property_signature"):
+            continue
+        name_node = member.child_by_field_name("name")
+        type_text = _ts_type_text(member)
+        if name_node is not None and type_text:
+            fields[name_node.text.decode("utf-8")] = type_text
+
+
+def _collect_ts_var_types(root, module_qname, lang) -> dict[str, dict[str, str]]:
+    """Build {function/module_qname: {var_name: declared_type}} for TS/JS.
+
+    JavaScript has no type annotations, so this yields empty scopes for it —
+    the honest no-op. Method scopes carry fields as ``this.<field>``.
+    """
+    out: dict[str, dict[str, str]] = {}
+    _ts_walk(root, module_qname, None, None, lang, out)
+    return out
+
+
+def _ts_walk(node, module_qname, scope_qname, parent_kind, lang, out) -> None:
+    """Walk def nodes registering typed scopes; recurse for nested defs."""
+    for child in node.children:
+        child_type = child.type
+        if child_type == "function_declaration":
+            _ts_function(child, module_qname, scope_qname, lang, out)
+        elif child_type == "class_declaration":
+            _ts_class(child, module_qname, scope_qname, lang, out)
+        elif child_type == "variable_declarator":
+            _ts_arrow(child, module_qname, scope_qname, parent_kind, lang, out)
+        elif child.children:
+            _ts_walk(child, module_qname, scope_qname, parent_kind, lang, out)
+
+
+def _ts_function(fn, module_qname, scope_qname, lang, out) -> None:
+    name_node = fn.child_by_field_name("name")
+    if name_node is None:
+        return
+    qn = qname.join(module_qname, name_node.text.decode("utf-8"), scope_qname)
+    scope: dict[str, str] = {}
+    _ts_typed_parameters(fn, scope)
+    _ts_locals(fn, scope)
+    if scope:
+        out[qn] = scope
+    _ts_walk(fn, module_qname, qn, "function", lang, out)
+
+
+def _ts_class(cls, module_qname, scope_qname, lang, out) -> None:
+    name_node = cls.child_by_field_name("name")
+    if name_node is None:
+        return
+    cls_qn = qname.join(module_qname, name_node.text.decode("utf-8"), scope_qname)
+    fields: dict[str, str] = {}
+    body = cls.child_by_field_name("body")
+    if body is not None:
+        _ts_field_types(body, fields)
+    if fields:
+        out[cls_qn] = dict(fields)
+    if body is not None:
+        for member in body.children:
+            if member.type == "method_definition":
+                _ts_method(member, module_qname, cls_qn, fields, lang, out)
+            elif member.type == "class_declaration":
+                _ts_class(member, module_qname, cls_qn, lang, out)
+
+
+def _ts_method(method, module_qname, cls_qn, fields, lang, out) -> None:
+    name_node = method.child_by_field_name("name")
+    if name_node is None:
+        return
+    qn = qname.join(module_qname, name_node.text.decode("utf-8"), cls_qn)
+    scope: dict[str, str] = {f"this.{name}": type_text
+                             for name, type_text in fields.items()}
+    _ts_typed_parameters(method, scope)
+    _ts_locals(method, scope)
+    if scope:
+        out[qn] = scope
+    _ts_walk(method, module_qname, qn, "method", lang, out)
+
+
+def _ts_arrow(decl, module_qname, scope_qname, parent_kind, lang, out) -> None:
+    """Record a const/let x = (…) => {} / function() {} arrow function's scope."""
+    value = decl.child_by_field_name("value")
+    if value is None or value.type not in ("arrow_function", "function_expression"):
+        _ts_walk(decl, module_qname, scope_qname, parent_kind, lang, out)
+        return
+    name_node = decl.child_by_field_name("name")
+    if name_node is None:
+        return
+    qn = qname.join(module_qname, name_node.text.decode("utf-8"), scope_qname)
+    scope: dict[str, str] = {}
+    _ts_typed_parameters(value, scope)
+    _ts_locals(value, scope)
+    if scope:
+        out[qn] = scope
+    _ts_walk(value, module_qname, qn, "function", lang, out)
+
+
 def _collect_java_di(root, module_qname, lang) -> list[DiDecl]:
     """Java DI declarations per file: annotated fields + constructor params.
 
@@ -943,6 +1257,10 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
         for n in pf.nodes:
             if n.qualified_name in mappings:
                 n.mappings = mappings[n.qualified_name]
+    elif lang_name == "python":
+        pf.var_types = _collect_python_var_types(root, module_qname, lang)
+    elif lang_name == "typescript":
+        pf.var_types = _collect_ts_var_types(root, module_qname, lang)
 
     # Dedup nodes — keep first occurrence of each qualified_name (inner
     # functions with the same name can appear in nested scopes).

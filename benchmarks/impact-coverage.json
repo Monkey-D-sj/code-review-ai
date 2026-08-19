@@ -2590,10 +2590,14 @@
     "PY-M12": {
       "behavior": "利用参数/字段/局部变量注解缩小方法目标",
       "desc": "类型注解 receiver",
-      "evidence": [],
+      "evidence": [
+        "tests/test_parser_types.py",
+        "tests/test_resolver_types.py",
+        "tests/impact_contract/test_receiver_type_contract.py"
+      ],
       "level": "B/D",
-      "reason": "类型注解 receiver 未用于缩小目标",
-      "status": "missing"
+      "reason": "参数/字段(self.w)/局部/模块级类型注解 receiver 绑定唯一目标 resolved、barrel 多命中 candidate（共享 site_id）；union/字符串/外部类型不猜，保持 dynamic",
+      "status": "covered"
     },
     "PY-M13": {
       "behavior": "展开为候选类型集合",
@@ -2991,8 +2995,8 @@
     "unsupported"
   ],
   "summary": {
-    "covered": 91,
-    "missing": 163,
+    "covered": 92,
+    "missing": 162,
     "partial": 60,
     "total": 327,
     "unsupported": 13

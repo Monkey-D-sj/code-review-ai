@@ -221,7 +221,9 @@ OVERLAY: dict[str, tuple[str, str, list[str]]] = {
     "PY-M10": _part(".pyi 不索引：x.py+x.pyi 只建 x.py 节点、无幽灵边（不当作运行时调用）；stub 类型解析未接入",
                     ["tests/test_resolver_phase3.py"]),
     "PY-M11": ("missing", "ABC/Protocol 实现候选未建", []),
-    "PY-M12": ("missing", "类型注解 receiver 未用于缩小目标", []),
+    "PY-M12": _cov("参数/字段(self.w)/局部/模块级类型注解 receiver 绑定唯一目标 resolved、barrel 多命中 candidate（共享 site_id）；union/字符串/外部类型不猜，保持 dynamic",
+                   ["tests/test_parser_types.py", "tests/test_resolver_types.py",
+                    "tests/impact_contract/test_receiver_type_contract.py"]),
     "PY-M13": ("missing", "union/generic/type alias 未展开", []),
     "PY-M14": ("missing", "返回值链 factory().run() 未绑定", []),
 
