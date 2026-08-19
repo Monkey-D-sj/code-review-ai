@@ -1,0 +1,12 @@
+{
+  "language": "typescript",
+  "fixture": "fixture_repo",
+  "edge_kind": "import",
+  "cases": [
+    {"case_id":"IMPORT-001","p0_capabilities":["P0-G03"],"qualified_name":"modules","direction":"out","expected_in":[],"expected_out":["api","barrel","cjs","client","hooks","side-effect"]},
+    {"case_id":"IMPORT-002","p0_capabilities":["P0-G03"],"qualified_name":"index","direction":"out","expected_in":[],"expected_out":["modules"]},
+    {"case_id":"IMPORT-003","p0_capabilities":["P0-G03"],"qualified_name":"barrel","direction":"out","expected_in":[],"expected_out":["api"]},
+    {"case_id":"IMPORT-004","p0_capabilities":["P0-G03"],"qualified_name":"api","direction":"in","expected_in":["barrel","calls","hooks","modules"],"expected_out":[]},
+    {"case_id":"IMPORT-005","p0_capabilities":["P0-G03"],"qualified_name":"cjs","direction":"in","expected_in":["modules"],"expected_out":[]}
+  ]
+}

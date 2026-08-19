@@ -1,0 +1,61 @@
+{
+  "language": "typescript",
+  "items": [
+    {
+      "capability": "P0-G01",
+      "case_id": "ts_call_edges",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["CALL-001", "CALL-002", "CALL-003", "CALL-004", "CALL-005", "CALL-006", "CALL-007", "CALL-008", "CALL-009", "CALL-010", "CALL-011", "CALL-012", "CALL-013", "CALL-014"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "ts_contains_edges",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["CONTAINS-001", "CONTAINS-002", "CONTAINS-003"]
+    },
+    {
+      "capability": "P0-G03",
+      "case_id": "ts_import_edges",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["IMPORT-001", "IMPORT-002", "IMPORT-003", "IMPORT-004", "IMPORT-005"]
+    },
+    {
+      "capability": "P0-G04",
+      "case_id": "ts_extends_edges",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["EXTENDS-001", "EXTENDS-002", "EXTENDS-003"]
+    },
+    {
+      "capability": "P0-G05",
+      "case_id": "ts_implements_edges",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["IMPLEMENTS-001", "IMPLEMENTS-002"]
+    },
+    {
+      "capability": "P0-G06",
+      "case_id": "ts_all_edges",
+      "test_kind": "query_e2e",
+      "status": "missing",
+      "evidence": []
+    },
+    {
+      "capability": "P0-G07",
+      "case_id": "ts_query_contract",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["ts_query_contract"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "ts_nonresolved_call_edges",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["CALL-012", "CALL-013", "CALL-014"]
+    }
+  ]
+}

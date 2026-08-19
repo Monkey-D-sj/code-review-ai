@@ -636,12 +636,12 @@ def _direct_neighbors(conn: sqlite3.Connection, symbols: tuple[str, ...],
     for symbol in symbols:
         incoming = conn.execute(
             "SELECT DISTINCT source AS qname FROM edges WHERE target=? "
-            "AND resolution='resolved' ORDER BY source LIMIT ?",
+            "AND kind='call' AND resolution='resolved' ORDER BY source LIMIT ?",
             (symbol, per_direction),
         ).fetchall()
         outgoing = conn.execute(
             "SELECT DISTINCT target AS qname FROM edges WHERE source=? "
-            "AND resolution='resolved' ORDER BY target LIMIT ?",
+            "AND kind='call' AND resolution='resolved' ORDER BY target LIMIT ?",
             (symbol, per_direction),
         ).fetchall()
         neighbors.extend(row["qname"] for row in (*incoming, *outgoing))

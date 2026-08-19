@@ -65,20 +65,25 @@ LANG = {
         "def_nodes": {
             "function_declaration": "function",
             "class_declaration": "class",
+            "interface_declaration": "interface",
             "method_definition": "method",
         },
         "scope_nodes": {
             "function_declaration", "class_declaration", "method_definition",
         },
-        "call_node": {"call_expression"},
+        "call_node": {"call_expression", "new_expression"},
+        "constructor_node": "new_expression",
+        "constructor_type_field": "constructor",
         "import_nodes": {
             "import_statement",
             "export_statement",
         },
         "detect_arrow_in_vars": True,
         "class_def": "class_declaration",
+        "class_def_nodes": {"class_declaration", "interface_declaration"},
         "class_extends": "extends_clause",
         "class_implements": "implements_clause",
+        "static_block_node": "class_static_block",
         "decorator_node": "decorator",
     },
     "javascript": {
@@ -951,6 +956,8 @@ def _java_class_mappings(node, module_qname, lang, out) -> None:
 
 
 def _join_mapping_path(prefix: str, path: str) -> str:
+    if not path:  # bare method mapping — the class prefix is the whole route
+        return prefix or "/"
     if not prefix or prefix == "/":
         return path
     if path.startswith("/"):
@@ -1031,7 +1038,7 @@ def _java_mappings(node, lang) -> list[tuple[str, str]]:
         method = _MAPPING_METHODS.get(_decorator_name(ann))
         if method is None:
             continue
-        paths = _annotation_strings(ann)
+        paths = _annotation_strings(ann) or [""]  # bare @GetMapping -> class route
         if method == "ANY":
             method = _request_mapping_method(ann) or "ANY"
         for path in paths:
@@ -1081,6 +1088,18 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
         t = child.type
         if deco_types and t in deco_types:
             pending.append(_decorator_name(child))
+            continue
+        if t == lang.get("static_block_node"):
+            if parent_kind == "class":
+                qn = qname.join(module_qname, "static_block", scope_qname)
+                output.append(ParsedNode(
+                    qualified_name=qn, kind="static_block", file_path="",
+                    start_line=child.start_point[0] + 1,
+                    end_line=child.end_point[0] + 1,
+                    signature=_sig(source, child), parent_qname=scope_qname,
+                ))
+            _walk_defs_typed(child, source, module_qname, scope_qname,
+                             parent_kind, lang, output)
             continue
         if t in lang["def_nodes"]:
             # method_definition outside a class is just an object-literal
@@ -1146,7 +1165,16 @@ _INHERIT_BASE_TYPES = ("identifier", "type_identifier", "property_identifier",
 def _inherit_clause(node, clause_name: str):
     """Return an inheritance clause: the named field when present, else the
     child node of that type (Java interface 'extends' is a bare child node)."""
-    return node.child_by_field_name(clause_name) or _find_child(node, clause_name)
+    clause = node.child_by_field_name(clause_name) or _find_child(node, clause_name)
+    if clause is not None:
+        return clause
+    # Tree-sitter TypeScript nests extends/implements inside a
+    # ``class_heritage`` node rather than exposing them as direct class fields.
+    heritage = _find_child(node, "class_heritage")
+    if heritage is not None:
+        return (heritage.child_by_field_name(clause_name)
+                or _find_child(heritage, clause_name))
+    return None
 
 
 def _inherit_bases(clause):
@@ -1349,6 +1377,10 @@ def _call_target_for(node, lang) -> tuple[str | None, str | None]:
     """
     if lang.get("constructor_node") and node.type == lang["constructor_node"]:
         ctor = node.child_by_field_name(lang.get("constructor_type_field", "type"))
+        if ctor is None:
+            ctor = next((child for child in node.children
+                         if child.type in ("identifier", "type_identifier",
+                                           "member_expression")), None)
         if ctor is None:
             return None, None
         return ctor.text.decode("utf-8"), CALL_CONSTRUCT

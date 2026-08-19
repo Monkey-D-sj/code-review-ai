@@ -1,0 +1,10 @@
+{
+  "language": "typescript",
+  "fixture": "fixture_repo",
+  "edge_kind": "contains",
+  "cases": [
+    {"case_id":"CONTAINS-001","p0_capabilities":["P0-G02"],"qualified_name":"contains","direction":"out","expected_in":[],"expected_out":["contains::Container","contains::moduleEntry"]},
+    {"case_id":"CONTAINS-002","p0_capabilities":["P0-G02"],"qualified_name":"contains::Container","direction":"both","expected_in":["contains"],"expected_out":["contains::Container.constructor","contains::Container.create","contains::Container.read","contains::Container.static_block"]},
+    {"case_id":"CONTAINS-003","p0_capabilities":["P0-G02"],"qualified_name":"contains::Container.read","direction":"in","expected_in":["contains::Container"],"expected_out":[]}
+  ]
+}

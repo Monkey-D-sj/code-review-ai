@@ -1,0 +1,21 @@
+{
+  "language": "typescript",
+  "fixture": "fixture_repo",
+  "edge_kind": "call",
+  "cases": [
+    {"case_id":"CALL-001","p0_capabilities":["P0-G01"],"qualified_name":"calls::topLevelCall","direction":"both","expected_in":[],"expected_out":["api::fetchUser"]},
+    {"case_id":"CALL-002","p0_capabilities":["P0-G01"],"qualified_name":"calls::LocalStore.load","direction":"both","expected_in":["calls::instanceMethodCall"],"expected_out":["calls::LocalStore.save"]},
+    {"case_id":"CALL-003","p0_capabilities":["P0-G01"],"qualified_name":"calls::constructorCall","direction":"out","expected_in":[],"expected_out":["calls::LocalStore","calls::LocalStore.constructor"]},
+    {"case_id":"CALL-004","p0_capabilities":["P0-G01"],"qualified_name":"calls::branchCall","direction":"out","expected_in":[],"expected_out":["api::fetchUser"]},
+    {"case_id":"CALL-005","p0_capabilities":["P0-G01"],"qualified_name":"calls::loopCall","direction":"out","expected_in":[],"expected_out":["api::parseUser"]},
+    {"case_id":"CALL-006","p0_capabilities":["P0-G01"],"qualified_name":"calls::tryCall","direction":"out","expected_in":[],"expected_out":["api::fetchUser","api::parseUser"]},
+    {"case_id":"CALL-007","p0_capabilities":["P0-G01"],"qualified_name":"hooks::useUser","direction":"both","expected_in":["modules::useModuleImports"],"expected_out":["api::fetchUser"]},
+    {"case_id":"CALL-008","p0_capabilities":["P0-G01"],"qualified_name":"hooks::useAsyncUser","direction":"out","expected_in":[],"expected_out":["api::fetchUserAsync"]},
+    {"case_id":"CALL-009","p0_capabilities":["P0-G01"],"qualified_name":"user-store::UserStore.read","direction":"out","expected_in":[],"expected_out":["base-store::BaseStore.read"]},
+    {"case_id":"CALL-010","p0_capabilities":["P0-G01"],"qualified_name":"calls::arrowCall","direction":"out","expected_in":[],"expected_out":["api::fetchUser"]},
+    {"case_id":"CALL-011","p0_capabilities":["P0-G01"],"qualified_name":"calls::asyncCall","direction":"out","expected_in":[],"expected_out":["calls::fetchUserAsync"]},
+    {"case_id":"CALL-012","p0_capabilities":["P0-G01"],"negative_kind":"dynamic_key","qualified_name":"calls::dynamicKeyCall","direction":"both","expected_in":[],"expected_out":[]},
+    {"case_id":"CALL-013","p0_capabilities":["P0-G01"],"negative_kind":"reflection","qualified_name":"calls::reflectionCall","direction":"both","expected_in":[],"expected_out":[]},
+    {"case_id":"CALL-014","p0_capabilities":["P0-G01"],"negative_kind":"higher_order_argument","qualified_name":"calls::higherOrderCall","direction":"out","expected_in":[],"expected_out":["calls::runTask"]}
+  ]
+}

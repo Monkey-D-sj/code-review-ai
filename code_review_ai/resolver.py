@@ -231,7 +231,8 @@ def _dedup_append(edges: list[Edge], seen: set[tuple[str, str, str]],
 def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                   path_aliases: dict[str, str] | None = None,
                   dependency_markers: list[str] | None = None,
-                  base_url: str = "") -> list[Edge]:
+                  base_url: str = "",
+                  inheritance_edges: list[Edge] | None = None) -> list[Edge]:
     mod_syms = _module_symbols(parsed_files)
     all_import_maps = {pf.module_qname: _import_map(pf, path_aliases,
                                                     existing_qnames, base_url)
@@ -250,18 +251,31 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
     var_types = {qn: types for pf in parsed_files
                  for qn, types in pf.var_types.items()}
     class_qnames = {n.qualified_name for f in parsed_files for n in f.nodes if n.kind == "class"}
+    if inheritance_edges is None:
+        inheritance_edges = _build_inherits(parsed_files, existing_qnames,
+                                             path_aliases, base_url, mod_syms)
+    inheritance_map = {}
+    for edge in inheritance_edges:
+        if edge.resolution == "resolved" and edge.kind == "extends":
+            inheritance_map.setdefault(edge.source, []).append(edge.target)
     edges: list[Edge] = []
     seen: set[tuple[str, str, str]] = set()
     for pf in parsed_files:
         local = mod_syms.get(pf.module_qname, {})
         imports = _import_map(pf, path_aliases, existing_qnames, base_url)
+        # Star imports are per-file (Java packages hold several files whose
+        # wildcard imports must not cross-contaminate), so thread the file's
+        # own list down instead of the module-aggregated star_map.
+        star_modules = [imp.module for imp in pf.imports if imp.is_star]
         for c in pf.raw_calls:
             for edge in _resolve_one(c, local, imports, existing_qnames, all_import_maps,
                                      mod_syms=mod_syms, source_module=pf.module_qname,
                                      var_types=var_types, path_aliases=path_aliases,
                                      class_qnames=class_qnames, star_map=star_map,
                                      module_alls=module_alls,
-                                     default_exports=default_exports):
+                                     default_exports=default_exports,
+                                     star_modules=star_modules,
+                                     inheritance_map=inheritance_map):
                 _dedup_append(edges, seen, edge)
                 if edge.resolution == "resolved" and edge.target in class_qnames:
                     init_qn = _init_member_qname(edge.target, c.language)
@@ -291,7 +305,12 @@ def _init_member_qname(class_qn: str, language: str) -> str:
     with the class's own name, so the member is ``Class.Class`` - reusing the
     class short name instead of Python's ``__init__`` convention (which never
     exists in Java and made the extra edge silently unresolvable)."""
-    member = "__init__" if language != "java" else qname.short(class_qn)
+    if language in ("typescript", "javascript"):
+        member = "constructor"
+    elif language == "java":
+        member = qname.short(class_qn)
+    else:
+        member = "__init__"
     return qname.join(qname.module(class_qn), member, class_qn)
 
 
@@ -364,15 +383,31 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                  class_qnames: set[str] | None = None,
                  star_map: dict | None = None,
                  module_alls: dict | None = None,
-                 default_exports: dict | None = None) -> list[Edge]:
+                 default_exports: dict | None = None,
+                 star_modules: list | None = None,
+                 inheritance_map: dict[str, list[str]] | None = None) -> list[Edge]:
     base = Edge(source=c.source_qname, target=c.target_expr, kind="call",
                 file_path=c.file_path, resolution="unresolved")
     if c.language == "java":
         return _resolve_java(c, local, imports, existing, mod_syms,
                              source_module, base, var_types,
                              class_qnames=class_qnames, star_map=star_map,
-                             module_alls=module_alls, default_exports=default_exports)
-    star_modules = (star_map or {}).get(source_module, []) if source_module else []
+                             module_alls=module_alls, default_exports=default_exports,
+                             star_modules=star_modules)
+    if star_modules is None:
+        star_modules = (star_map or {}).get(source_module, []) if source_module else []
+    if c.call_form == CALL_CONSTRUCT:
+        name = c.target_expr
+        if name in local:
+            return [_resolved(base, local[name], existing)]
+        if name in imports:
+            mod, imported, _star = imports[name]
+            mod = _module_of(mod, path_aliases, existing)
+            target = qname.join(mod, imported) if imported else mod
+            if imported == "default":
+                target = (default_exports or {}).get(mod, target)
+            return [_resolved(base, target, existing)]
+        return [base]
     if c.call_form == CALL_SIMPLE:
         name = c.target_expr
         if name in local:
@@ -403,6 +438,37 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                 return _candidates(base, hits)
         return [base]  # unresolved
     if c.call_form == CALL_ATTRIBUTE:
+        if c.language in ("typescript", "javascript"):
+            class_qn = _enclosing_class_qname(c.source_qname, class_qnames)
+            if class_qn and c.target_expr.startswith("this."):
+                target = _join_target(class_qn, c.target_expr[len("this."):])
+                if target in existing:
+                    return [_resolved(base, target, existing)]
+        elif c.language == "python" and c.target_expr.startswith("super()."):
+            class_qn = _enclosing_class_qname(c.source_qname, class_qnames)
+        else:
+            class_qn = None
+        super_prefix = "super()." if c.language == "python" else "super."
+        if class_qn and c.target_expr.startswith(super_prefix):
+            member = c.target_expr[len(super_prefix):]
+            pending = list((inheritance_map or {}).get(class_qn, []))
+            seen_classes: set[str] = set()
+            targets: list[str] = []
+            while pending:
+                parent = pending.pop(0)
+                if parent in seen_classes:
+                    continue
+                seen_classes.add(parent)
+                target = _join_target(parent, member)
+                if target in existing:
+                    if target not in targets:
+                        targets.append(target)
+                    continue
+                pending.extend((inheritance_map or {}).get(parent, []))
+            if len(targets) == 1:
+                return [_resolved(base, targets[0], existing)]
+            if len(targets) > 1:
+                return _candidates(base, targets)
         head = c.target_expr.split(".", 1)[0]
         rest = c.target_expr[len(head) + 1:]
         if head not in imports:
@@ -512,6 +578,14 @@ def _resolve_reexport(current: str, name: str, all_import_maps: dict,
         hits.extend(_resolve_reexport(module, name, all_import_maps, existing,
                                       (seen or set()) | {current}, star_map))
     return hits
+
+
+def _enclosing_class_qname(source_qname: str,
+                           class_qnames: set[str] | None) -> str | None:
+    """Return the most-specific class containing a method qname."""
+    matches = [candidate for candidate in (class_qnames or set())
+               if source_qname.startswith(candidate + ".")]
+    return max(matches, key=len) if matches else None
 
 
 def _resolve_py_type(type_name: str, local: dict, imports: dict,
@@ -667,10 +741,16 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
                   class_qnames: set[str] | None = None,
                   star_map: dict | None = None,
                   module_alls: dict | None = None,
-                  default_exports: dict | None = None) -> list[Edge]:
-    """Java-aware call resolution: simple / attribute / construct forms."""
-    star_modules = ((star_map or {}).get(source_module, [])
-                    if source_module else [])
+                  default_exports: dict | None = None,
+                  star_modules: list | None = None) -> list[Edge]:
+    """Java-aware call resolution: simple / attribute / construct forms.
+
+    star_modules is the *per-file* wildcard-import list (Java packages hold
+    several files whose `import a.b.*` must not cross-contaminate); callers
+    without the per-file view fall back to the module-aggregated star_map."""
+    if star_modules is None:
+        star_modules = ((star_map or {}).get(source_module, [])
+                        if source_module else [])
     if c.call_form == CALL_SIMPLE:
         name = c.target_expr
         if name in local:
@@ -698,8 +778,19 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
         return [base]
     if c.call_form == CALL_ATTRIBUTE:
         expr = c.target_expr
-        if expr.startswith("this."):
+        explicit_this = expr.startswith("this.")
+        if explicit_this:
             expr = expr[len("this."):]
+            # `this.m()` is a same-class method call, not a dynamic receiver.
+            # Keep field receivers (`this.field.m()`) on the type-binding path
+            # below, but resolve the direct method form through the enclosing
+            # class just like a bare `m()` call.
+            if "." not in expr:
+                enclosing = _enclosing_class(c.source_qname, class_qnames)
+                if enclosing:
+                    target = _join_target(enclosing, expr)
+                    if target in existing:
+                        return [_resolved(base, target, existing)]
         head, sep, rest = expr.partition(".")
         if not sep:
             return [_mark_dynamic(base, c.call_form, c.target_expr)]
@@ -769,11 +860,14 @@ def _build_contains(parsed: list[ParsedFile], qnames: set[str]) -> list[Edge]:
     edges: list[Edge] = []
     for pf in parsed:
         for n in pf.nodes:
-            if n.parent_qname:
+            parent = n.parent_qname
+            if parent is None and n.qualified_name != pf.module_qname:
+                parent = pf.module_qname
+            if parent:
                 edges.append(Edge(
-                    source=n.parent_qname, target=n.qualified_name,
+                    source=parent, target=n.qualified_name,
                     kind="contains", file_path=n.file_path,
-                    resolution="resolved" if n.parent_qname in qnames else "unresolved",
+                    resolution="resolved" if parent in qnames else "unresolved",
                 ))
     return edges
 
@@ -786,8 +880,10 @@ def _build_imports(parsed: list[ParsedFile], qnames: set[str],
     for pf in parsed:
         for imp in pf.imports:
             # Java static imports reference a class member (module is a class
-            # qname, not a module) — not an import edge.
-            if imp.is_star or "::" in imp.module:
+            # qname, not a module) — not an import edge. A Python wildcard
+            # import still creates a module-to-module import edge; its symbol
+            # visibility is resolved separately by the call resolver.
+            if "::" in imp.module:
                 continue
             tgt = imp.module
             resolved = tgt in qnames
@@ -825,18 +921,20 @@ def _resolve_inherit_base(base_expr: str, imports: dict,
 
 
 def _build_inherits(parsed: list[ParsedFile], qnames: set[str],
-                    all_import_maps: dict | None = None,
+                    path_aliases: dict[str, str] | None = None,
+                    base_url: str = "",
                     mod_syms: dict | None = None) -> list[Edge]:
     """INHERITS edges: subclass → base class / interface.
 
     A base_expr resolves same-module first; a cross-module base then goes
     through the file's import map (``import pkg; class User(pkg.Base)`` /
     ``from pkg import Base``), so inheritance closure follows real modules
-    instead of dropping straight to unresolved.
+    instead of dropping straight to unresolved. The import map is per-file —
+    a Java package with several files must not share one clobbered map.
     """
     edges: list[Edge] = []
     for pf in parsed:
-        imports = (all_import_maps or {}).get(pf.module_qname, {})
+        imports = _import_map(pf, path_aliases, qnames, base_url)
         for ih in pf.inherits:
             tgt = ih.base_expr
             resolved = tgt in qnames
@@ -876,7 +974,8 @@ def _is_di_annotated(annotations: list[str], di_annotations: list[str] | None) -
 
 
 def _build_di_edges(parsed: list[ParsedFile], existing: set[str], mod_syms: dict,
-                    all_import_maps: dict,
+                    path_aliases: dict[str, str] | None,
+                    base_url: str,
                     di_annotations: list[str] | None) -> list[Edge]:
     """Annotation/constructor DI edges: injection point -> dependency class.
 
@@ -887,13 +986,14 @@ def _build_di_edges(parsed: list[ParsedFile], existing: set[str], mod_syms: dict
     type must resolve to a repo class (same-package -> import, via
     _resolve_java_type); primitives/String/external types drop out naturally.
     kind="call" matches the existing Depends()-marker DI edges, so in_degree /
-    flow / dead-code consume them the same way."""
+    flow / dead-code consume them the same way. The import map is per-file —
+    a Java package with several files must not share one clobbered map."""
     edges: list[Edge] = []
     seen: set[tuple[str, str, str]] = set()
     for pf in parsed:
         if pf.language != "java" or not pf.di_decls:
             continue
-        imports = all_import_maps.get(pf.module_qname, {})
+        imports = _import_map(pf, path_aliases, existing, base_url)
         star_modules = [imp.module for imp in pf.imports if imp.is_star]
         for decl in pf.di_decls:
             if (decl.mechanism == "field"
@@ -943,12 +1043,10 @@ def resolve_edges(parsed: list[ParsedFile],
     edges.extend(_build_contains(parsed, existing_qnames))
     edges.extend(_build_imports(parsed, existing_qnames, path_aliases, base_url))
     mod_syms = _module_symbols(parsed)
-    import_maps = {pf.module_qname: _import_map(pf, path_aliases,
-                                                existing_qnames, base_url)
-                   for pf in parsed}
-    edges.extend(_build_inherits(parsed, existing_qnames, import_maps, mod_syms))
+    edges.extend(_build_inherits(parsed, existing_qnames, path_aliases,
+                                 base_url, mod_syms))
     edges.extend(_build_di_edges(parsed, existing_qnames, mod_syms,
-                                 import_maps, di_annotations))
+                                 path_aliases, base_url, di_annotations))
     from code_review_ai.java_routing import build_route_edges
     edges.extend(build_route_edges(parsed, existing_qnames))
     return edges

@@ -67,9 +67,9 @@ def _filter_ids_by_test(conn: sqlite3.Connection, ids: list[int],
 def _edges_fallback(conn: sqlite3.Connection, qname: str, max_per_dir: int,
                     test_filter: int | None = None):
     caller_sql = ("SELECT DISTINCT source FROM edges "
-                  "WHERE target=? AND resolution='resolved'")
+                  "WHERE target=? AND kind='call' AND resolution='resolved'")
     callee_sql = ("SELECT DISTINCT target FROM edges "
-                  "WHERE source=? AND resolution='resolved'")
+                  "WHERE source=? AND kind='call' AND resolution='resolved'")
     caller_params: list = [qname]
     callee_params: list = [qname]
     if test_filter is not None:
@@ -161,9 +161,9 @@ def _coverage(conn: sqlite3.Connection, qname: str,
     above hit its cap."""
     counts: dict[str, int] = {}
     for r in conn.execute(
-            "SELECT resolution, COUNT(*) AS cnt FROM edges "
-            "WHERE target=? OR source=? GROUP BY resolution",
-            (qname, qname)):
+        "SELECT resolution, COUNT(*) AS cnt FROM edges "
+        "WHERE kind='call' AND (target=? OR source=?) GROUP BY resolution",
+        (qname, qname)):
         counts[r["resolution"]] = r["cnt"]
     return {
         "resolved_edges": counts.get("resolved", 0),

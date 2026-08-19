@@ -135,9 +135,11 @@ def create_server(config: Config):
         if r is None:
             return json.dumps({"error": "symbol not found"})
         callers = [row["source"] for row in conn.execute(
-            "SELECT DISTINCT source FROM edges WHERE target=? AND resolution='resolved'", (qualified_name,))]
+            "SELECT DISTINCT source FROM edges WHERE target=? AND kind='call' "
+            "AND resolution='resolved'", (qualified_name,))]
         callees = [row["target"] for row in conn.execute(
-            "SELECT DISTINCT target FROM edges WHERE source=? AND resolution='resolved'", (qualified_name,))]
+            "SELECT DISTINCT target FROM edges WHERE source=? AND kind='call' "
+            "AND resolution='resolved'", (qualified_name,))]
         return json.dumps({"qname": r["qualified_name"], "kind": r["kind"],
                            "file": r["file_path"], "line": r["start_line"],
                            "signature": r["signature"],
