@@ -1,0 +1,13 @@
+{
+  "case_id": "py_nonresolved_call_edges",
+  "language": "python",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.negative.dynamic::normal_target",
+  "edge_kind": "call",
+  "direction": "both",
+  "negative_kind": "dynamic_member",
+  "negative_kinds": ["dynamic_member", "runtime_import", "higher_order_argument"],
+  "expected_in": ["p0_fixture.negative.dynamic::negative_consumer"],
+  "expected_out": []
+}

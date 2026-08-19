@@ -1,0 +1,1 @@
+"""Negative call-resolution fixtures."""

@@ -1,0 +1,15 @@
+{
+  "case_id": "py_import_edges",
+  "language": "python",
+  "p0_capabilities": ["P0-G03"],
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.calls.imports",
+  "edge_kind": "import",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": [
+    "p0_fixture.calls.top_level",
+    "p0_fixture.modules.api",
+    "p0_fixture.modules.wildcard_source"
+  ]
+}

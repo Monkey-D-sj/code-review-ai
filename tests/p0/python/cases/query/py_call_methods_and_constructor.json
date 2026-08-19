@@ -1,0 +1,16 @@
+{
+  "case_id": "py_call_methods_and_constructor",
+  "language": "python",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.classes.worker::Worker.work",
+  "edge_kind": "call",
+  "direction": "both",
+  "expected_in": [
+    "p0_fixture.classes.worker::Worker.__init__",
+    "p0_fixture.classes.worker::Worker.class_work",
+    "p0_fixture.classes.worker::method_and_constructor",
+    "p0_fixture.classes.worker::static_method_call"
+  ],
+  "expected_out": ["p0_fixture.calls.top_level::leaf"]
+}

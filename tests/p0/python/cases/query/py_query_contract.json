@@ -1,0 +1,15 @@
+{
+  "case_id": "py_query_contract",
+  "language": "python",
+  "p0_capabilities": ["P0-G07"],
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.modules.api::cross_target",
+  "edge_kind": "call",
+  "direction": "both",
+  "expected_in": [
+    "p0_fixture.calls.cross_module::cross_consumer",
+    "p0_fixture.calls.imports::import_consumer",
+    "p0_fixture.modules.api::aggregate"
+  ],
+  "expected_out": []
+}

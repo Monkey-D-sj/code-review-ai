@@ -1,0 +1,11 @@
+{
+  "case_id": "py_all_edges",
+  "language": "python",
+  "p0_capabilities": ["P0-G06"],
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.modules.api::aggregate",
+  "edge_kind": "all",
+  "direction": "both",
+  "expected_in": ["p0_fixture.modules.api"],
+  "expected_out": ["p0_fixture.modules.api::cross_target"]
+}
