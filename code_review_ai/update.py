@@ -63,11 +63,16 @@ def needs_nodes_update(config, conn) -> bool:
 
 
 def repair_resolutions(conn) -> int:
-    """Re-evaluate non-dynamic edge labels against the current node qname set.
+    """Re-evaluate only resolved/unresolved edge labels against the current
+    node qname set.
 
     Matches what a full rebuild would resolve: for unchanged files, target is
     derived from stable imports, so only existence changes. Call edges whose
-    target has no '::' are raw/unresolvable in a full rebuild too — skipped."""
+    target has no '::' are raw/unresolvable in a full rebuild too — skipped.
+    candidate/semantic/dynamic/external edges are never re-labelled here: their
+    resolution encodes a derivation (multiple candidates, a vetted framework
+    rule, a runtime-bound receiver, an explicit external target) that node
+    existence alone must not flip."""
     qnames = {r["qualified_name"]
               for r in conn.execute("SELECT qualified_name FROM nodes")}
     rows = conn.execute(
@@ -75,7 +80,7 @@ def repair_resolutions(conn) -> int:
     updates: list[tuple[str, int]] = []
     for row in rows:
         resolution = row["resolution"]
-        if resolution == "dynamic":
+        if resolution not in ("resolved", "unresolved"):
             continue
         target = row["target"]
         if row["kind"] == "call" and "::" not in target:
@@ -362,9 +367,11 @@ def update_flows(config, conn) -> int:
              for r in conn.execute(
                  "SELECT id,qualified_name,file_path,kind,decorators "
                  "FROM nodes")]
-    erows = [EdgeRow(r["source"], r["target"], r["resolution"])
+    erows = [EdgeRow(r["source"], r["target"], r["resolution"], r["kind"],
+                     r["rule_id"])
              for r in conn.execute(
-                 "SELECT source,target,resolution FROM edges WHERE kind='call'")]
+                 "SELECT source,target,resolution,kind,rule_id FROM edges "
+                 "WHERE kind='call'")]
     flows = build_flows(nodes, erows, config.entry_names,
                         config.entry_decorators)
     id_to_qname = {n.id: n.qualified_name for n in nodes}

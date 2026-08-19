@@ -102,6 +102,49 @@ def test_repair_resolutions_flips_by_global_set(tmp_path):
     assert flipped == 3
 
 
+def test_repair_resolutions_preserves_special_labels(tmp_path):
+    """Phase 2: repair_resolutions only re-validates resolved/unresolved.
+    candidate/semantic/dynamic/external labels survive a sync untouched — even
+    when their target exists in the node set (node existence alone must not
+    relabel a derived resolution)."""
+    repo, cfg = _git_repo(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    conn.execute("INSERT INTO nodes(qualified_name,kind) VALUES('m::real','function')")
+    # each special label with an EXISTING target, which the old repair pass
+    # would have flipped to resolved
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) "
+        "VALUES('s1','m::real','call','candidate')")
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) "
+        "VALUES('s2','m::real','call','semantic')")
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) "
+        "VALUES('s3','m::real','call','external')")
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) "
+        "VALUES('s4','m::real','call','dynamic')")
+    # control: a resolved edge whose target vanished still flips to unresolved
+    conn.execute(
+        "INSERT INTO edges(source,target,kind,resolution) "
+        "VALUES('s5','m::gone','call','resolved')")
+
+    flipped = upd.repair_resolutions(conn)
+
+    def label_of(source):
+        return conn.execute(
+            "SELECT resolution FROM edges WHERE source=?", (source,)
+        ).fetchone()[0]
+
+    assert label_of("s1") == "candidate"
+    assert label_of("s2") == "semantic"
+    assert label_of("s3") == "external"
+    assert label_of("s4") == "dynamic"
+    assert label_of("s5") == "unresolved"  # repair still works for resolved
+    assert flipped == 1
+
+
 def _init_and_build(cfg, conn):
     init_schema(conn)
     from code_review_ai.indexer import rebuild

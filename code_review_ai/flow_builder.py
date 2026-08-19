@@ -6,6 +6,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
 from code_review_ai import qname
+from code_review_ai.traversal import is_traversable
 
 
 @dataclass
@@ -22,6 +23,8 @@ class EdgeRow:
     source: str
     target: str
     resolution: str
+    kind: str = "call"
+    rule_id: str | None = None
 
 
 @dataclass
@@ -47,22 +50,27 @@ def _decorators(raw: str | None) -> list[str]:
 
 def flow_input_hash(conn) -> str:
     """Stable hash of exactly what build_flows consumes: entry-candidate
-    function/method nodes (qname, kind, file, decorators) plus resolved call
+    function/method nodes (qname, kind, file, decorators) plus traversable call
     edges. Same input -> same flows, so update_flows can skip a rebuild when the
     call graph didn't structurally change (e.g. a body-only edit that alters no
     edges). Decorators are included because entry_decorators drives entry
-    selection — an annotation-only edit must invalidate the flows."""
+    selection — an annotation-only edit must invalidate the flows. Each
+    traversable edge hashes its (source, target, resolution, rule_id), so a
+    resolution flip (resolved -> candidate) or a newly-registered semantic rule
+    invalidates the flows."""
     nodes = conn.execute(
         "SELECT qualified_name, kind, file_path, decorators FROM nodes "
         "WHERE kind IN ('function','method') ORDER BY qualified_name").fetchall()
     edges = conn.execute(
-        "SELECT source, target FROM edges "
-        "WHERE kind='call' AND resolution='resolved' ORDER BY source, target"
-    ).fetchall()
+        "SELECT source, target, resolution, rule_id FROM edges "
+        "WHERE kind='call' ORDER BY source, target").fetchall()
     parts = [f"n:{row['qualified_name']}|{row['kind']}|{row['file_path']}"
              f"|{sorted(_decorators(row['decorators']))}"
              for row in nodes]
-    parts += [f"e:{row['source']}->{row['target']}" for row in edges]
+    parts += [f"e:{row['source']}->{row['target']}|{row['resolution']}"
+              f"|{row['rule_id']}"
+              for row in edges
+              if is_traversable("call", row["resolution"], row["rule_id"])]
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
@@ -73,7 +81,7 @@ def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
     id_to_file = {n.id: n.file_path for n in nodes}
     adj: dict[int, list[int]] = defaultdict(list)  # adjacency list: target → [source]
     for e in edges:
-        if e.resolution != "resolved":
+        if not is_traversable(e.kind, e.resolution, e.rule_id):
             continue
         s = qname_to_id.get(e.source)
         t = qname_to_id.get(e.target)
@@ -82,7 +90,7 @@ def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
 
     flows: list[FlowRecord] = []
     has_incoming = {qname_to_id.get(e.target) for e in edges
-                    if e.resolution == "resolved"}
+                    if is_traversable(e.kind, e.resolution, e.rule_id)}
     has_incoming.discard(None)
 
     for n in nodes:

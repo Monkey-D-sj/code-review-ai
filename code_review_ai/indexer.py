@@ -181,7 +181,8 @@ def _write_flows(conn, parsed, edges, qname_to_id: dict[str, int],
     nodes = [NodeRow(qname_to_id[n.qualified_name], n.qualified_name,
                      n.file_path, n.kind, n.decorators)
              for pf in parsed for n in pf.nodes]
-    erows = [EdgeRow(e.source, e.target, e.resolution) for e in edges]
+    erows = [EdgeRow(e.source, e.target, e.resolution, e.kind, e.rule_id)
+             for e in edges]
     id_to_qname = {n.id: n.qualified_name for n in nodes}
     flows = build_flows(nodes, erows, config.entry_names,
                         config.entry_decorators)

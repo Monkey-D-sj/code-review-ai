@@ -131,3 +131,43 @@ def test_unresolved_edges_excluded():
     # c gets its own root flow since unresolved edges don't count as inbound
     flow_c = next(f for f in flows if f.entry_point_id == 2)
     assert flow_c.path == [2]
+
+
+def test_candidate_edges_never_traverse():
+    """Phase 2 gate: a candidate edge (one of several valid targets) never
+    reaches flow_builder — a flow must not be built on a guess."""
+    edges = [EdgeRow(Q("m", "a"), Q("m", "b"), "resolved"),
+             EdgeRow(Q("m", "b"), Q("m", "c"), "candidate")]
+    flows = build_flows(_nodes(), edges, ["a"])
+    # a reaches only b; c (candidate, not inbound) and d are roots
+    assert {f.entry_point_id for f in flows} == {0, 2, 3}
+    flow_a = next(f for f in flows if f.entry_point_id == 0)
+    assert flow_a.path == [0, 1]
+    assert 2 not in flow_a.path  # c unreachable through the candidate edge
+
+
+def test_unregistered_semantic_edges_never_traverse():
+    """Phase 2 gate: a semantic edge whose rule is not in the allow-list never
+    reaches flow_builder — an unvetted framework rule must not build flows."""
+    edges = [EdgeRow(Q("m", "a"), Q("m", "b"), "resolved"),
+             EdgeRow(Q("m", "b"), Q("m", "c"), "semantic", rule_id="JAVA-F99")]
+    flows = build_flows(_nodes(), edges, ["a"])
+    assert {f.entry_point_id for f in flows} == {0, 2, 3}
+    flow_a = next(f for f in flows if f.entry_point_id == 0)
+    assert flow_a.path == [0, 1]
+
+
+def test_registered_semantic_rule_traverses():
+    """Phase 2: registering a semantic rule as traversable lets its edges build
+    flows (the vetting gate of guide §3.3 — an allow-listed rule is trusted)."""
+    from code_review_ai.traversal import register_semantic_rule
+    register_semantic_rule("JAVA-F99", traversable=True)
+    try:
+        edges = [EdgeRow(Q("m", "a"), Q("m", "b"), "resolved"),
+                 EdgeRow(Q("m", "b"), Q("m", "c"), "semantic", rule_id="JAVA-F99")]
+        flows = build_flows(_nodes(), edges, ["a"])
+        assert {f.entry_point_id for f in flows} == {0, 3}  # c no longer a root
+        flow_a = next(f for f in flows if f.entry_point_id == 0)
+        assert flow_a.path == [0, 1, 2]
+    finally:
+        register_semantic_rule("JAVA-F99", traversable=False)
