@@ -144,19 +144,24 @@
       "behavior": "保留 dynamic 边及原始表达式",
       "desc": "无法解析的接收者调用",
       "evidence": [
-        "tests/test_resolver.py"
+        "tests/test_resolver.py",
+        "tests/test_impact.py"
       ],
       "level": "D/E",
-      "reason": "obj.method() 标 dynamic 并保留原始表达式",
+      "reason": "obj.method() 标 dynamic 并保留原始表达式（evidence + uncertainty 端到端）",
       "status": "covered"
     },
     "COM-C14": {
       "behavior": "返回候选及依据，不任选一个",
       "desc": "一次表达式产生多个候选目标",
-      "evidence": [],
+      "evidence": [
+        "tests/test_flow_builder.py",
+        "tests/test_incremental.py",
+        "tests/test_impact.py"
+      ],
       "level": "D",
-      "reason": "无 candidate 多候选边模型（Phase 2）",
-      "status": "missing"
+      "reason": "candidate 模型/遍历门禁/repair 保护/uncertainty 候选槽已建；尚无规则产出真实多候选边（Phase 4 多态分派）",
+      "status": "partial"
     },
     "COM-C15": {
       "behavior": "静态上保留所有可达分支调用",
@@ -2228,10 +2233,11 @@
       "behavior": "常量名给候选；变量名 dynamic",
       "desc": "`getattr/setattr` 动态成员",
       "evidence": [
-        "tests/test_resolver.py"
+        "tests/test_resolver.py",
+        "tests/test_impact.py"
       ],
       "level": "D/E",
-      "reason": "obj.method() 标 dynamic；getattr 常量名候选未建",
+      "reason": "obj.method() 标 dynamic 且有 uncertainty 输出；getattr 常量名候选未建",
       "status": "partial"
     },
     "PY-D02": {
@@ -2961,8 +2967,8 @@
   ],
   "summary": {
     "covered": 77,
-    "missing": 170,
-    "partial": 67,
+    "missing": 169,
+    "partial": 68,
     "total": 327,
     "unsupported": 13
   }

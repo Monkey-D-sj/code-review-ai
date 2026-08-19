@@ -112,9 +112,12 @@ OVERLAY: dict[str, tuple[str, str, list[str]]] = {
                     ["tests/test_impact.py"]),
     "COM-C12": _cov("外部库/builtin 标 unresolved 且不进 flow",
                     ["tests/test_flow_builder.py", "tests/test_resolver.py"]),
-    "COM-C13": _cov("obj.method() 标 dynamic 并保留原始表达式",
-                    ["tests/test_resolver.py"]),
-    "COM-C14": ("missing", "无 candidate 多候选边模型（Phase 2）", []),
+    "COM-C13": _cov("obj.method() 标 dynamic 并保留原始表达式（evidence + uncertainty 端到端）",
+                    ["tests/test_resolver.py", "tests/test_impact.py"]),
+    "COM-C14": _part("candidate 模型/遍历门禁/repair 保护/uncertainty 候选槽已建；"
+                     "尚无规则产出真实多候选边（Phase 4 多态分派）",
+                     ["tests/test_flow_builder.py", "tests/test_incremental.py",
+                      "tests/test_impact.py"]),
     "COM-C15": _cov("静态上保留分支内全部调用（无 CFG，保守保留）",
                     ["tests/test_parser.py", "tests/test_resolver.py"]),
     "COM-C16": _part("基础模式保守保留；CFG 不可达区分不存在",
@@ -253,8 +256,8 @@ OVERLAY: dict[str, tuple[str, str, list[str]]] = {
     "PY-T10": ("missing", "mock/patch target string 未建弱关系", []),
 
     # ── PY-D: Python dynamic boundary ─────────────────────────────────────
-    "PY-D01": _part("obj.method() 标 dynamic；getattr 常量名候选未建",
-                    ["tests/test_resolver.py"]),
+    "PY-D01": _part("obj.method() 标 dynamic 且有 uncertainty 输出；getattr 常量名候选未建",
+                    ["tests/test_resolver.py", "tests/test_impact.py"]),
     "PY-D02": ("missing", "importlib/__import__ 未处理", []),
     "PY-D03": _unsup("eval/exec 运行时代码边界，负向降级测试待 Phase 2"),
     "PY-D04": _unsup("monkey patch 行为不可可靠确定，降级契约待 Phase 2"),
