@@ -14,40 +14,100 @@ def _cap_signature(value: str | None) -> str:
         else text[:_SIGNATURE_LIMIT] + "…"
 
 
-def _node_brief(conn: sqlite3.Connection, node_id: int) -> dict:
+def _node_brief(conn: sqlite3.Connection, node_id: int,
+                include_signatures: bool = True) -> dict:
     r = conn.execute(
         "SELECT qualified_name,file_path,start_line,signature FROM nodes WHERE id=?",
         (node_id,),
     ).fetchone()
     if r is None:
-        return {"qname": str(node_id), "file": "", "line": 0, "sig": ""}
-    return {"qname": r["qualified_name"], "file": r["file_path"],
-            "line": r["start_line"], "sig": _cap_signature(r["signature"])}
+        brief = {"qname": str(node_id), "file": "", "line": 0}
+        if include_signatures:
+            brief["sig"] = ""
+        return brief
+    brief = {"qname": r["qualified_name"], "file": r["file_path"],
+             "line": r["start_line"]}
+    if include_signatures:
+        brief["sig"] = _cap_signature(r["signature"])
+    return brief
 
 
-def _slice_flow(conn: sqlite3.Connection, flow_id: int, symbol_node_id: int,
-                max_per_dir: int, test_filter: int | None = None
-                ) -> tuple[list[dict], list[dict]]:
-    rows = conn.execute(
-        "SELECT node_id, position FROM flow_memberships WHERE flow_id=? ORDER BY position",
-        (flow_id,),
-    ).fetchall()
-    sym_pos = next((r["position"] for r in rows if r["node_id"] == symbol_node_id), None)
-    if sym_pos is None:
-        return [], []
-    # sym_pos is derived from the UNFILTERED membership: the changed symbol is a
-    # production node and would be dropped by test_filter='only', which would
-    # make it unlocatable. Only the up/down node sets are filtered, so
-    # _node_brief is never called on a filtered-out id (which would hit its
-    # str(node_id) fallback and leak a garbage qname).
-    up_ids = [r["node_id"] for r in rows if r["position"] < sym_pos]
-    down_ids = [r["node_id"] for r in rows if r["position"] > sym_pos]
+def _resolved_call_adjacency(conn: sqlite3.Connection
+                             ) -> tuple[dict[int, list[int]], dict[int, list[int]],
+                                        dict[int, str]]:
+    """Forward + reverse resolved-call adjacency in node-id space, loaded once
+    per get_impact call so every symbol shares the map (E rows, sub-ms for the
+    eval repos; a fixed O(E) cost, the same order as a single query_graph).
+    Also returns qname_by_id so chain output can be ordered by (level, qname)."""
+    id_by_qname: dict[str, int] = {}
+    qname_by_id: dict[int, str] = {}
+    for row in conn.execute("SELECT id, qualified_name FROM nodes"):
+        id_by_qname[row["qualified_name"]] = row["id"]
+        qname_by_id[row["id"]] = row["qualified_name"]
+    forward: dict[int, list[int]] = {}
+    reverse: dict[int, list[int]] = {}
+    for row in conn.execute(
+            "SELECT source, target FROM edges "
+            "WHERE kind='call' AND resolution='resolved'"):
+        source = id_by_qname.get(row["source"])
+        target = id_by_qname.get(row["target"])
+        if source is None or target is None:
+            continue
+        forward.setdefault(source, []).append(target)
+        reverse.setdefault(target, []).append(source)
+    return forward, reverse, qname_by_id
+
+
+def _bfs_levels(adjacency: dict[int, list[int]], start: int) -> dict[int, int]:
+    """{node_id: level} reachable from start via adjacency, whole graph.
+    level = BFS call-distance from start (1 = direct neighbors)."""
+    levels: dict[int, int] = {}
+    frontier = list(adjacency.get(start, ()))
+    distance = 1
+    while frontier:
+        next_frontier: list[int] = []
+        for node in frontier:
+            if node in levels:
+                continue
+            levels[node] = distance
+            next_frontier.extend(adjacency.get(node, ()))
+        frontier = next_frontier
+        distance += 1
+    return levels
+
+
+def _true_chain_ids(conn: sqlite3.Connection, symbol_node_id: int,
+                    test_filter: int | None,
+                    adjacency: tuple[dict[int, list[int]], dict[int, list[int]],
+                                     dict[int, str]],
+                    direction: str, max_nodes_per_direction: int) -> list[int]:
+    """Exact transitive callers ('up') / callees ('down') of symbol_node_id via
+    a WHOLE-GRAPH resolved-call BFS — no flow-membership restriction.
+
+    Equivalent to the union of the per-flow constrained BFS: every true
+    caller/callee Y of the symbol lies in at least one flow that also contains
+    the symbol (if Y is a root, Y's own flow contains the symbol; otherwise some
+    entry E reaches Y, hence reaches the symbol, so Y ∈ flow(E)). So one
+    whole-graph BFS reproduces the flow union exactly — one pass instead of one
+    per flow, no flow_memberships lookup, and it also covers symbols on no flow
+    (the old edges fallback). The BFS naturally stops at the symbol's blast
+    radius; no member set needed.
+
+    Output ids are ordered by (BFS level, qname): level 1 (direct
+    callers/callees) first, ties by qname. Both keys are id-independent, so an
+    incremental-synced index and a full rebuild (which renumbers node ids)
+    produce identical output order (contract test). Capped globally per
+    direction at max_nodes_per_direction.
+    """
+    forward, reverse, qname_by_id = adjacency
+    graph = reverse if direction == "up" else forward
+    levels = _bfs_levels(graph, symbol_node_id)
+    ids = sorted(levels, key=lambda nid: (levels[nid], qname_by_id.get(nid, "")))
+    ids = [nid for nid in ids if nid != symbol_node_id]
+    ids = ids[:max_nodes_per_direction]
     if test_filter is not None:
-        up_ids = _filter_ids_by_test(conn, up_ids, test_filter)
-        down_ids = _filter_ids_by_test(conn, down_ids, test_filter)
-    up = [_node_brief(conn, nid) for nid in up_ids[-max_per_dir:]]
-    down = [_node_brief(conn, nid) for nid in down_ids[:max_per_dir]]
-    return up, down
+        ids = _filter_ids_by_test(conn, ids, test_filter)
+    return ids
 
 
 def _filter_ids_by_test(conn: sqlite3.Connection, ids: list[int],
@@ -62,37 +122,6 @@ def _filter_ids_by_test(conn: sqlite3.Connection, ids: list[int],
         (*ids, test_filter),
     )}
     return [nid for nid in ids if nid in keep]
-
-
-def _edges_fallback(conn: sqlite3.Connection, qname: str, max_per_dir: int,
-                    test_filter: int | None = None):
-    caller_sql = ("SELECT DISTINCT source FROM edges "
-                  "WHERE target=? AND kind='call' AND resolution='resolved'")
-    callee_sql = ("SELECT DISTINCT target FROM edges "
-                  "WHERE source=? AND kind='call' AND resolution='resolved'")
-    caller_params: list = [qname]
-    callee_params: list = [qname]
-    if test_filter is not None:
-        caller_sql += " AND source IN (SELECT qualified_name FROM nodes WHERE is_test=?)"
-        caller_params.append(test_filter)
-        callee_sql += " AND target IN (SELECT qualified_name FROM nodes WHERE is_test=?)"
-        callee_params.append(test_filter)
-    caller_sql += " ORDER BY source"
-    callee_sql += " ORDER BY target"
-    callers = [_edge_brief(conn, e["source"])
-               for e in conn.execute(caller_sql, caller_params)][:max_per_dir]
-    callees = [_edge_brief(conn, e["target"])
-               for e in conn.execute(callee_sql, callee_params)][:max_per_dir]
-    return callers, callees
-
-
-def _edge_brief(conn: sqlite3.Connection, qname: str) -> dict:
-    r = conn.execute("SELECT file_path,start_line,signature FROM nodes WHERE qualified_name=?",
-                     (qname,)).fetchone()
-    if r is None:
-        return {"qname": qname, "file": "", "line": 0, "sig": ""}
-    return {"qname": qname, "file": r["file_path"], "line": r["start_line"],
-            "sig": _cap_signature(r["signature"])}
 
 
 _TEST_FILTER = {"exclude": 0, "only": 1, "include": None}
@@ -175,13 +204,48 @@ def _coverage(conn: sqlite3.Connection, qname: str,
     }
 
 
+def _affected_entries(conn: sqlite3.Connection, symbol_node_id: int,
+                      test_filter: int | None) -> set[str]:
+    """Business entry points of the flows containing the symbol (guide §4
+    contract: the flows a changed symbol sits in name the business entries its
+    change reaches). Still flow-derived — a whole-graph BFS has no notion of
+    entry point, so this is the one remaining flow read in get_impact."""
+    flows = conn.execute(
+        "SELECT flow_id FROM flow_memberships WHERE node_id=? ORDER BY flow_id",
+        (symbol_node_id,),
+    ).fetchall()
+    entries: set[str] = set()
+    for f in flows:
+        entry_sql = ("SELECT n.qualified_name FROM flows f"
+                     " JOIN nodes n ON f.entry_point_id=n.id"
+                     " WHERE f.id=?")
+        entry_params: list = [f["flow_id"]]
+        if test_filter is not None:
+            entry_sql += " AND n.is_test=?"
+            entry_params.append(test_filter)
+        entry = conn.execute(entry_sql, entry_params).fetchone()
+        if entry:
+            entries.add(entry["qualified_name"])
+    return entries
+
+
 def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
                max_nodes_per_direction: int = 20,
-               tests: str = "exclude") -> list[dict]:
+               tests: str = "exclude",
+               include_signatures: bool = True) -> list[dict]:
     """Impact analysis for changed symbols. `tests` selects which nodes the
     upstream/downstream/affected_entries contain: 'exclude' (default, business
     impact) drops test nodes, 'only' keeps only test nodes (for test-impact
     analysis), 'include' keeps everything.
+
+    Upstream/downstream are the EXACT transitive callers/callees of the symbol
+    via a WHOLE-GRAPH resolved-call BFS (`_true_chain_ids`), ordered by
+    (BFS level, qname) and capped globally per direction at
+    max_nodes_per_direction. The flow-constrained BFS it replaces was
+    equivalent (a symbol's flows together cover every true caller/callee), so
+    correctness is unchanged — a sibling branch that never calls the symbol is
+    never reported. `include_signatures=False` drops the `sig` field
+    (signatures are ~26% of payload) for compact tool responses.
 
     Every result carries `uncertainty` (one-hop non-resolved edges around the
     symbol, capped at 20) and `coverage` (adjacent-edge counts per resolution).
@@ -190,6 +254,7 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
     if tests not in _TEST_FILTER:
         raise ValueError(f"tests must be one of {list(_TEST_FILTER)}, got {tests!r}")
     test_filter = _TEST_FILTER[tests]
+    adjacency = _resolved_call_adjacency(conn)
     results: list[dict] = []
     for qname in changed_symbols:
         uncertainty = _uncertainty(conn, qname)
@@ -202,31 +267,13 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
                             "uncertainty": uncertainty, "coverage": coverage})
             continue
         nid = node["id"]
-        flows = conn.execute(
-            "SELECT flow_id FROM flow_memberships WHERE node_id=? ORDER BY flow_id", (nid,),
-        ).fetchall()
-        up_all, down_all, entries = [], [], set()
-        if flows:
-            direct_up, direct_down = _edges_fallback(conn, qname, max_nodes_per_direction, test_filter)
-            for f in flows:
-                up, down = _slice_flow(conn, f["flow_id"], nid, max_nodes_per_direction, test_filter)
-                up_all.extend(up)
-                down_all.extend(down)
-                entry_sql = ("SELECT n.qualified_name FROM flows f"
-                             " JOIN nodes n ON f.entry_point_id=n.id"
-                             " WHERE f.id=?")
-                entry_params: list = [f["flow_id"]]
-                if test_filter is not None:
-                    entry_sql += " AND n.is_test=?"
-                    entry_params.append(test_filter)
-                entry = conn.execute(entry_sql, entry_params).fetchone()
-                if entry:
-                    entries.add(entry["qualified_name"])
-            up_all = direct_up + up_all
-            down_all = direct_down + down_all
-        else:
-            up_all, down_all = _edges_fallback(conn, qname, max_nodes_per_direction, test_filter)
-        # dedup by qname preserving order
+        up_ids = _true_chain_ids(conn, nid, test_filter, adjacency, "up",
+                                 max_nodes_per_direction)
+        down_ids = _true_chain_ids(conn, nid, test_filter, adjacency, "down",
+                                   max_nodes_per_direction)
+        up_all = [_node_brief(conn, nid_, include_signatures) for nid_ in up_ids]
+        down_all = [_node_brief(conn, nid_, include_signatures) for nid_ in down_ids]
+        entries = _affected_entries(conn, nid, test_filter)
         results.append({
             "symbol": qname, "found": True,
             "upstream": _dedup(up_all), "downstream": _dedup(down_all),

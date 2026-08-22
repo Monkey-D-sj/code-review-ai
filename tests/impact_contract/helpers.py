@@ -10,6 +10,7 @@ Test modules import from this file as ``from helpers import ...`` — pytest's
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -80,19 +81,20 @@ def _edge_snapshot(conn) -> set[tuple]:
 
 
 def _flow_snapshot(conn) -> set[tuple]:
-    """{(entry_qname, (member_qnames in position order))}."""
+    """{(entry_qname, (member_qnames in build order))}.
+
+    Order comes from ``flows.path_json`` (the build_flows BFS path), not the
+    flow_memberships.position column — position is no longer written (impact
+    orders by BFS level + qname now), so it is NULL and unusable for ordering.
+    """
+    id_to_qname = {row["id"]: row["qualified_name"]
+                   for row in conn.execute("SELECT id, qualified_name FROM nodes")}
     out: set[tuple] = set()
-    for flow in conn.execute("SELECT id, entry_point_id FROM flows").fetchall():
-        entry = conn.execute(
-            "SELECT qualified_name FROM nodes WHERE id = ?",
-            (flow["entry_point_id"],)).fetchone()
-        path = tuple(
-            row[0] for row in conn.execute(
-                "SELECT n.qualified_name FROM flow_memberships m "
-                "JOIN nodes n ON n.id = m.node_id "
-                "WHERE m.flow_id = ? ORDER BY m.position",
-                (flow["id"],)))
-        out.add((entry["qualified_name"] if entry else None, path))
+    for flow in conn.execute(
+            "SELECT id, entry_point_id, path_json FROM flows").fetchall():
+        entry_qname = id_to_qname.get(flow["entry_point_id"])
+        path = tuple(id_to_qname[nid] for nid in json.loads(flow["path_json"]))
+        out.add((entry_qname, path))
     return out
 
 

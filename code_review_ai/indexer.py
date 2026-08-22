@@ -188,7 +188,7 @@ def _write_flows(conn, parsed, edges, qname_to_id: dict[str, int],
     flows = build_flows(nodes, erows, config.entry_names,
                         config.entry_decorators)
 
-    membership_rows: list[tuple[int, int, int]] = []
+    membership_rows: list[tuple[int, int]] = []
     for f in flows:
         name = qname.short(id_to_qname.get(f.entry_point_id, ""))
         cur = conn.execute(
@@ -198,10 +198,12 @@ def _write_flows(conn, parsed, edges, qname_to_id: dict[str, int],
              None, json.dumps(f.path)),
         )
         fid = cur.lastrowid
-        membership_rows.extend((fid, nid, pos) for pos, nid in enumerate(f.path))
+        # position column intentionally not written (impact now orders by
+        # BFS level + qname, id-independent); the column stays for schema compat.
+        membership_rows.extend((fid, nid) for nid in f.path)
     if membership_rows:
         conn.executemany(
-            "INSERT INTO flow_memberships(flow_id,node_id,position) VALUES(?,?,?)",
+            "INSERT INTO flow_memberships(flow_id,node_id) VALUES(?,?)",
             membership_rows,
         )
     return len(flows)

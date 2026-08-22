@@ -378,7 +378,7 @@ def update_flows(config, conn) -> int:
     with transaction(conn):
         conn.execute("DELETE FROM flow_memberships")
         conn.execute("DELETE FROM flows")
-        membership_rows: list[tuple[int, int, int]] = []
+        membership_rows: list[tuple[int, int]] = []
         for f in flows:
             name = qname.short(id_to_qname.get(f.entry_point_id, ""))
             cur = conn.execute(
@@ -387,11 +387,13 @@ def update_flows(config, conn) -> int:
                 (name, f.entry_point_id, f.depth, f.node_count, f.file_count,
                  None, json.dumps(f.path)))
             fid = cur.lastrowid
-            membership_rows.extend((fid, nid, pos) for pos, nid in enumerate(f.path))
+            # position column intentionally not written (impact now orders by
+            # BFS level + qname, id-independent); the column stays for schema compat.
+            membership_rows.extend((fid, nid) for nid in f.path)
         if membership_rows:
             conn.executemany(
-                "INSERT INTO flow_memberships(flow_id,node_id,position) "
-                "VALUES(?,?,?)", membership_rows)
+                "INSERT INTO flow_memberships(flow_id,node_id) VALUES(?,?)",
+                membership_rows)
         conn.execute(
             "INSERT OR REPLACE INTO build_meta(key,value) "
             "VALUES('flows_as_of_head',?)", (head or "",))
