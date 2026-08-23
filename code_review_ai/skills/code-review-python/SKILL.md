@@ -48,3 +48,5 @@ description: 按 Python 审核规范审查 Python 代码（.py）。含安全、
 - datetime 注意时区：naive 与 aware 不混用，推荐 `timezone.utc`。
 - 模块级常量用 `UPPER_SNAKE` 命名。
 - 列表推导嵌套不宜过深。
+- 新增内部模块 import（非外部库）时，检查循环导入：被导入模块是否（直接或传递地）在模块级反向 import 当前文件——如 a.py 模块级 `import b`、b.py 又新增模块级 `import a` → 成环，加载顺序脆弱。设置为warning
+- 函数内 import（`def f(): import a`）是规避循环依赖的惯用法、不成环；但它使 `a.fn()` 的调用绕过静态解析，审查时要把这类调用当真实依赖核对调用点。
