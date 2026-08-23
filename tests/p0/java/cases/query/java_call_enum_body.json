@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-CALL-ENUM-BODY-POS",
+  "language": "java",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::Behavior.run",
+  "edge_kind": "call",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": ["com.acme.p0.calls::Behavior.helper"],
+  "syntax_ids": ["JAVA-CALL-ENUM-BODY"]
+}

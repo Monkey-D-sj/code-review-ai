@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-CALL-ANONYMOUS-CLASS-POS",
+  "language": "java",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::Advanced.anonymousCaller",
+  "edge_kind": "call",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": ["com.acme.p0.calls::Advanced.anonymousCaller.run"],
+  "syntax_ids": ["JAVA-CALL-ANONYMOUS-CLASS"]
+}

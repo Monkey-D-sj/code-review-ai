@@ -1,0 +1,12 @@
+{
+  "case_id": "PY-EXTENDS-BOUNDARY",
+  "syntax_ids": ["PY-EXTENDS-SAME-MODULE"],
+  "language": "python",
+  "fixture": "fixture_repo",
+  "edge_kind": "extends",
+  "qualified_name": "p0_fixture.inheritance.base::Base",
+  "direction": "out",
+  "negative_kind": "root_class",
+  "expected_in": [],
+  "expected_out": []
+}

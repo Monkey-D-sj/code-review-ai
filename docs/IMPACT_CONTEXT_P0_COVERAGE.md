@@ -1,6 +1,7 @@
 # Impact P0 Query 上下文覆盖规范
 
-> 发布目标：对已完成索引的 Python、TypeScript/JavaScript、Java 仓库，可靠查询图中已解析的一跳邻居。
+> 发布目标：用可穷举、可复现的合成语法 fixture，验证 Python、TypeScript、Java
+> 仓库中五类已解析图边的一跳查询契约。真实仓库只用于另行 smoke，不进入本套件分母。
 >
 > P0 是当前发布契约，必须 100% 达标。
 >
@@ -60,7 +61,8 @@ P0 coverage = covered applicable combinations / all applicable combinations
 2. 不存在 `missing` 或 `partial` 的适用 P0 组合；
 3. 每个组合都有通过公开 `query_graph` 的端到端测试证据；
 4. `all` 的结果等于各具体边类型结果的去重并集，且只包含 resolved 邻居；
-5. 每个 P0 ID 至少有一个真实仓库 benchmark case。
+5. 每个适用的 P0 ID 都必须有合成语法 fixture、完整 gold 邻居集合和公开查询证据；
+6. case 必须包含容易误匹配的 near-miss 或动态负例，不能只测成功路径。
 
 ## 5. 评测指标
 
@@ -70,5 +72,22 @@ P0 coverage = covered applicable combinations / all applicable combinations
 | Resolved Edge Precision | 所有 `query_graph` 返回的邻居 | 邻居属于该 case 的 resolved gold |
 | Negative Edge Correctness | 动态 key、反射、高阶参数等无唯一 target 的 case | 不产生未声明的 resolved 邻居 |
 | Case Coverage | 全部已登记 edge case | 每个 case 都被 E2E 加载并执行 |
+| Exact Case Pass Rate | 全部已登记 edge case | 完整 `in/out` 集合与 gold 完全相等 |
 
 动态调用没有确定 target，不能进入 Resolved Edge Recall 的分母；否则“正确地不知道目标”的行为会被错误地计为漏召回。
+
+指标必须由测试执行时的公开 `query_graph` 响应实时计算。提交的 metrics JSON 是可重现快照；
+CI 必须重新计算并与快照逐字段比较，禁止只断言手写常量。
+
+## 6. 真实仓库的边界
+
+真实仓库不是语法一致性覆盖率的必要条件，因为真实代码无法提供稳定、完备的五类边 gold，
+也很难保证每种语法都恰好出现。后续可以增加不带 Recall 声明的 smoke，单独报告：
+
+- 索引成功率；
+- 各 edge kind 数量；
+- resolved/candidate/dynamic/unresolved 分布；
+- 索引与查询耗时；
+- 崩溃和不支持配置。
+
+这些数据不能与本套件的合成语法 Recall/Precision 混为一个指标。

@@ -58,7 +58,7 @@ def test_files_table_and_busy_timeout(tmp_path):
         "INSERT INTO files(path,mtime,size,file_hash) VALUES('a.py', 1.0, 3, 'x')")
     row = conn.execute("SELECT * FROM files").fetchone()
     assert row["path"] == "a.py" and row["size"] == 3
-    assert INDEX_VERSION == 7
+    assert INDEX_VERSION == 8
     # busy_timeout 生效（PRAGMA 返回毫秒）
     assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     conn.close()

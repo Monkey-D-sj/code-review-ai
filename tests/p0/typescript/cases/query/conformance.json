@@ -1,0 +1,56 @@
+{
+  "language": "typescript",
+  "fixture": "fixture_repo",
+  "edge_kind": "call",
+  "cases": [
+    {
+      "case_id": "TS-CALL-NESTED-POS",
+      "syntax_ids": ["TS-CALL-NESTED"],
+      "qualified_name": "conformance::nestedCaller",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["conformance::nestedCaller.localCaller", "conformance::nestedTarget"]
+    },
+    {
+      "case_id": "TS-CALL-RECURSION-POS",
+      "syntax_ids": ["TS-CALL-RECURSION"],
+      "qualified_name": "conformance::mutualA",
+      "direction": "both",
+      "expected_in": ["conformance::mutualB"],
+      "expected_out": ["conformance::mutualB"]
+    },
+    {
+      "case_id": "TS-CALL-OPTIONAL-POS",
+      "syntax_ids": ["TS-CALL-OPTIONAL"],
+      "qualified_name": "conformance::optionalCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["conformance::OptionalWorker.run"]
+    },
+    {
+      "case_id": "TS-CALL-COMPUTED-CONSTANT-POS",
+      "syntax_ids": ["TS-CALL-COMPUTED-CONSTANT"],
+      "qualified_name": "conformance::computedCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["conformance::OptionalWorker.run"]
+    },
+    {
+      "case_id": "TS-CALL-CLASS-FIELD-ARROW-POS",
+      "syntax_ids": ["TS-CALL-CLASS-FIELD-ARROW"],
+      "qualified_name": "conformance::FieldOwner.field",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["conformance::fieldTarget"]
+    },
+    {
+      "case_id": "TS-CONTAINS-CLASS-FIELD-FUNCTION-POS",
+      "syntax_ids": ["TS-CONTAINS-CLASS-FIELD-FUNCTION"],
+      "edge_kind": "contains",
+      "qualified_name": "conformance::FieldOwner",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["conformance::FieldOwner.field"]
+    }
+  ]
+}

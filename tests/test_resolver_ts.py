@@ -57,6 +57,21 @@ def test_ts_default_class_static_call_resolves(tmp_path):
                and e.resolution == "resolved" for e in edges)
 
 
+def test_ts_optional_and_constant_computed_member_calls_resolve(tmp_path):
+    (tmp_path / "app.ts").write_text(
+        "class Worker { run() { return 1; } }\n"
+        "export function main(worker: Worker) {\n"
+        "  worker?.run();\n"
+        "  worker[\"run\"]();\n"
+        "}\n", encoding="utf-8")
+    parsed = [parse_file(str(tmp_path / "app.ts"), str(tmp_path))]
+    qnames = {node.qualified_name for pf in parsed for node in pf.nodes}
+    edges = resolve_calls(parsed, qnames)
+    target = Q("app", "run", Q("app", "Worker"))
+    resolved = {(e.source, e.target, e.resolution) for e in edges}
+    assert (Q("app", "main"), target, "resolved") in resolved
+
+
 # ── JS-M07: `export * from` barrels ──────────────────────────────────
 
 

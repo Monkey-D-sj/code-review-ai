@@ -23,21 +23,16 @@ from code_review_ai.indexer import rebuild
 from code_review_ai.parser import SOURCE_GLOBS, filter_excluded, list_source_files
 
 MODES = ("diff_only", "search_baseline", "graph_agent", "hybrid_agent")
+DIFFICULTIES = ("trivial", "medium", "hard")
+DEFAULT_DIFFICULTY = "unclassified"
 HYBRID_MAX_CHARS = 12_000
-SHARED_REVIEW_POLICY = (
-    "Apply this review policy regardless of which context tools are available. "
-    "For every changed symbol, first inspect the diff and its local code, then "
-    "decide whether the change is self-contained. Treat comment, formatting, "
-    "rename-only, and function-local implementation changes as self-contained "
-    "only when they do not alter a public signature, return type, exception "
-    "behavior, externally observed semantics, or cross-module calls. For every "
-    "non-self-contained change, inspect upstream callers first. Inspect "
-    "downstream callees when arguments, calls, or consumed return values change. "
-    "Also inspect relevant tests, configuration, routing, dependency injection, "
-    "and public API boundaries when applicable. Use the available context to "
-    "collect only the evidence needed for this process, and do not re-read "
-    "evidence already available to you. "
-)
+SHARED_REVIEW_POLICY = """无论有哪些上下文工具可用，都应遵循此评审策略。对于每个发生变更的符号，
+先检查差异及其局部代码，然后判断该变更是否自包含。只有在不改变公共签名、
+返回类型、异常行为、外部可观察语义或跨模块调用的情况下，才将注释、格式调整、
+仅重命名以及函数局部实现变更视为自包含。对于每个非自包含变更，先检查上游调用方。
+当参数、调用或所使用的返回值发生变化时，还要检查下游被调用方。适用时，还应检查
+相关测试、配置、路由、依赖注入和公共 API 边界。利用可用上下文仅收集完成此流程
+所需的证据，不要重新读取已经掌握的证据。"""
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
@@ -49,6 +44,11 @@ class GoldFinding:
     line_end: int | None
     keywords: tuple[str, ...]
     alternate_files: tuple[str, ...] = ()
+    # Minimum number of distinct keywords that must appear in the prediction
+    # text. 1 = the legacy OR-match (any single keyword scores). >1 forces a
+    # causal description: a finding that merely echoes a surface keyword (e.g.
+    # "timeout is None") without naming the failure mechanism scores nothing.
+    min_matches: int = 1
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,7 @@ class AgentEvalCase:
     repo_url: str | None = None
     mutation_paths: tuple[str, ...] = ()
     complexity_tags: tuple[str, ...] = ()
+    difficulty: str = DEFAULT_DIFFICULTY
 
 
 @dataclass(frozen=True)
@@ -133,9 +134,14 @@ def _parse_case(record: object, position: int) -> AgentEvalCase:
     repo_url = record.get("repo_url")
     mutation_paths = record.get("mutation_paths", [])
     complexity_tags = record.get("complexity_tags", [])
+    difficulty = record.get("difficulty", DEFAULT_DIFFICULTY)
     if not isinstance(complexity_tags, list) or not all(
             isinstance(tag, str) and tag for tag in complexity_tags):
         raise ValueError(f"case {case_id} has invalid complexity_tags")
+    if difficulty not in (*DIFFICULTIES, DEFAULT_DIFFICULTY):
+        raise ValueError(
+            f"case {case_id} has invalid difficulty; expected one of "
+            f"{', '.join(DIFFICULTIES)}")
     external_fields = (repo_name, repo_url, mutation_paths)
     is_external = any(value not in (None, []) for value in external_fields)
     if is_external:
@@ -154,7 +160,7 @@ def _parse_case(record: object, position: int) -> AgentEvalCase:
         case_id, prompt, diff, tuple(symbols), findings, source_commit,
         repo_name if is_external else None, repo_url if is_external else None,
         tuple(mutation_paths) if is_external else (),
-        tuple(complexity_tags),
+        tuple(complexity_tags), difficulty,
     )
 
 
@@ -167,6 +173,7 @@ def _parse_gold(record: object, case_id: str) -> GoldFinding:
     line_end = record.get("line_end", line_start)
     keywords = record.get("keywords", [])
     alternate_files = record.get("alternate_files", [])
+    min_matches = record.get("min_matches", 1)
     valid_lines = ((line_start is None and line_end is None) or
                    (isinstance(line_start, int) and isinstance(line_end, int)
                     and 1 <= line_start <= line_end))
@@ -175,15 +182,18 @@ def _parse_gold(record: object, case_id: str) -> GoldFinding:
     valid_alternates = isinstance(alternate_files, list) and all(
         isinstance(path, str) and path and not Path(path).is_absolute()
         and ".." not in Path(path).parts for path in alternate_files)
+    valid_min_matches = (isinstance(min_matches, int) and min_matches >= 1
+                         and min_matches <= len(keywords))
     if not isinstance(finding_id, str) or not finding_id:
         raise ValueError(f"case {case_id} gold finding requires id")
     if not isinstance(file_path, str) or not file_path or not valid_lines:
         raise ValueError(f"case {case_id} gold finding has invalid file/lines")
-    if not valid_keywords or not valid_alternates:
+    if not valid_keywords or not valid_alternates or not valid_min_matches:
         raise ValueError(f"case {case_id} gold finding has invalid keywords")
     return GoldFinding(finding_id, _normalize(file_path), line_start, line_end,
                        tuple(keyword.lower() for keyword in keywords),
-                       tuple(_normalize(path) for path in alternate_files))
+                       tuple(_normalize(path) for path in alternate_files),
+                       min_matches=min_matches)
 
 
 def run_agent_eval(config: Config, conn: sqlite3.Connection,
@@ -269,6 +279,7 @@ def preflight_agent_eval(config: Config, conn: sqlite3.Connection,
                 "case_id": case.case_id, "source_commit": case.source_commit,
                 "repo_name": case.repo_name,
                 "complexity_tags": list(case.complexity_tags),
+                "difficulty": case.difficulty,
                 "changed_symbols": list(context_case.changed_symbols),
                 "found_symbols": found_symbols,
                 "symbol_found_rate": round(
@@ -720,6 +731,7 @@ def _run_once(config: Config, case: AgentEvalCase, mode: str, repetition: int,
         "case_id": case.case_id, "mode": mode, "repetition": repetition,
         "source_commit": case.source_commit,
         "complexity_tags": list(case.complexity_tags),
+        "difficulty": case.difficulty,
         "success": run.returncode == 0 and parse_error is None,
         "returncode": run.returncode, "elapsed_ms": round(run.elapsed_ms, 3),
         "parse_error": parse_error, **score,
@@ -842,7 +854,7 @@ def _matches(prediction: dict, gold: GoldFinding) -> bool:
             return False
     if gold.keywords:
         text = f"{prediction.get('title', '')} {prediction.get('description', '')}".lower()
-        if not any(keyword in text for keyword in gold.keywords):
+        if sum(keyword in text for keyword in gold.keywords) < gold.min_matches:
             return False
     return True
 

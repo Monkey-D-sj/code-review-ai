@@ -13,7 +13,7 @@ def test_load_config_defaults(tmp_path):
     assert cfg.repo_path == "."
     assert cfg.diff_base == "origin/main"        # default
     assert cfg.entry_names == ["main"]            # default heuristic
-    assert cfg.dependency_markers == ["Depends"]  # default DI marker
+    assert cfg.dependency_markers == ["Depends", "Security"]  # FastAPI DI markers
     assert cfg.path_aliases == {}                 # default: no aliases
 
 

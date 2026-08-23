@@ -71,6 +71,27 @@ def test_local_var_method_resolves_via_declared_type():
     assert ("com.foo::App.main", "com.foo::UserService.authenticate", "resolved") in by
 
 
+def test_var_constructor_inference_resolves_receiver(tmp_path):
+    owner = tmp_path / "Owner.java"
+    owner.write_text(
+        "package com.example;\n"
+        "class Owner { void run() {} }\n",
+        encoding="utf-8",
+    )
+    caller = tmp_path / "Caller.java"
+    caller.write_text(
+        "package com.example;\n"
+        "class Caller { void use() { var owner = new Owner(); owner.run(); } }\n",
+        encoding="utf-8",
+    )
+    files = [parse_file(str(owner), str(tmp_path)),
+             parse_file(str(caller), str(tmp_path))]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert ("com.example::Caller.use", "com.example::Owner.run", "resolved") in by
+
+
 def test_inherit_edges_resolved():
     edges = _resolve()
     by = {(e.source, e.target, e.kind, e.resolution) for e in edges}

@@ -1,0 +1,22 @@
+{
+  "case_id": "PY-CONTAINS-ASYNC-POS",
+  "language": "python",
+  "p0_capabilities": ["P0-G02"],
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.conformance",
+  "edge_kind": "contains",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": [
+    "p0_fixture.conformance::nested_target",
+    "p0_fixture.conformance::nested_caller",
+    "p0_fixture.conformance::mutual_a",
+    "p0_fixture.conformance::mutual_b",
+    "p0_fixture.conformance::closure_factory",
+    "p0_fixture.conformance::async_target",
+    "p0_fixture.conformance::async_caller",
+    "p0_fixture.conformance::generator_target",
+    "p0_fixture.conformance::generator_caller"
+  ],
+  "syntax_ids": ["PY-CONTAINS-ASYNC"]
+}

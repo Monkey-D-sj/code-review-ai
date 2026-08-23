@@ -9,6 +9,7 @@ import pytest
 
 from code_review_ai.config import load_config
 from code_review_ai.mcp_server import create_server
+from p0_conformance import score_query_conformance
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -29,6 +30,28 @@ REQUIRED_CASES = {
     "py_all_edges",
     "py_query_contract",
     "py_nonresolved_call_edges",
+    "PY-CALL-NESTED-POS",
+    "PY-CALL-MUTUAL-RECURSIVE-POS",
+    "PY-CALL-CLOSURE-POS",
+    "PY-CONTAINS-BOUNDARY",
+    "PY-IMPORT-BOUNDARY",
+    "PY-EXTENDS-BOUNDARY",
+    "PY-CALL-ASYNC-POS",
+    "PY-CALL-GENERATOR-POS",
+    "PY-CONTAINS-FUNCTION-NESTED-POS",
+    "PY-CALL-STATICMETHOD-POS",
+    "PY-CONTAINS-CLASS-NESTED-CLASS-POS",
+    "PY-CONTAINS-DECORATED-POS",
+    "PY-CONTAINS-ASYNC-POS",
+    "PY-CALL-LAMBDA-POS",
+    "PY-IMPORT-DYNAMIC-CONSTANT-NEG",
+    "PY-IMPORT-DYNAMIC-VARIABLE-NEG",
+    "PY-EXTENDS-DYNAMIC-NEG",
+    "PY-CALL-CALLABLE-NEG",
+    "PY-CALL-PROPERTY-NEG",
+    "PY-CALL-MAGIC-NEG",
+    "PY-CALL-WITH-NEG",
+    "PY-CALL-PARTIAL-NEG",
 }
 
 
@@ -138,7 +161,10 @@ def test_query_contract_direction_limit_and_not_found(query_tools: dict):
             max_neighbors=2,
         )
     )
-    assert len(limited["in"]) == 2
+    assert _qnames(limited, "in") == {
+        "p0_fixture.calls.cross_module::cross_consumer",
+        "p0_fixture.calls.imports::import_consumer",
+    }
 
     missing = json.loads(
         query_tool(
@@ -267,26 +293,18 @@ def test_coverage_manifest_is_a_ci_gate_for_all_python_p0_cases():
     ]
     assert loaded_ids == applicable
     assert all(item.get("evidence") for item in items if item["status"] == "covered")
+    assert {
+        evidence
+        for item in items if item["status"] == "covered"
+        for evidence in item["evidence"]
+    } <= loaded_ids
 
 
-def test_p0_metrics_report_records_a_complete_public_e2e_suite():
+def test_p0_metrics_report_is_reproduced_from_public_queries(
+    query_tools: dict,
+):
     report = json.loads(METRICS_FILE.read_text(encoding="utf-8"))
-    assert report["language"] == "python"
-    assert report["suite"] == "query_p0"
-    assert report["metrics"] == {
-        "resolved_edge_recall": 1.0,
-        "resolved_edge_precision": 1.0,
-        "negative_edge_correctness": 1.0,
-        "case_coverage": 1.0,
-        "overall_correctness": 1.0,
-    }
-    assert report["counts"] == {
-        "resolved_neighbor_assertions": 26,
-        "resolved_neighbor_assertions_passed": 26,
-        "negative_mechanisms": 3,
-        "negative_mechanisms_without_phantom_neighbors": 3,
-        "applicable_cases": 10,
-        "cases_with_passing_e2e": 10,
-        "overall_assertions": 29,
-        "overall_assertions_passed": 29,
-    }
+    cases = [_load_case(case_file) for case_file in CASE_FILES]
+    actual = score_query_conformance(
+        query_tools["query_graph"].fn, cases, language="python")
+    assert report == actual

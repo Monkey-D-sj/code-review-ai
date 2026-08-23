@@ -1,17 +1,27 @@
 {
   "case_id": "java_nonresolved_call_edges",
   "language": "java",
-  "p0_capabilities": ["P0-G01"],
+  "p0_capabilities": [
+    "P0-G01"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "com.acme.p0.negative::DynamicCalls.negativeConsumer",
   "edge_kind": "call",
   "direction": "out",
   "negative_kind": "reflection",
-  "negative_kinds": ["reflection", "dynamic_proxy", "functional_argument"],
+  "negative_kinds": [
+    "reflection",
+    "dynamic_proxy",
+    "functional_argument"
+  ],
   "expected_in": [],
   "expected_out": [
     "com.acme.p0.negative::DynamicCalls.applyCallback",
     "com.acme.p0.negative::DynamicCalls.getMethod",
     "com.acme.p0.negative::DynamicCalls.normalTarget"
+  ],
+  "syntax_ids": [
+    "JAVA-CALL-REFLECTION-DYNAMIC"
+    ,"JAVA-CALL-REFLECTION-CONSTANT"
   ]
 }

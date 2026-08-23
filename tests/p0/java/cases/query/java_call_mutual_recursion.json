@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-CALL-MUTUAL-RECURSION-POS",
+  "language": "java",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::Recursion.even",
+  "edge_kind": "call",
+  "direction": "both",
+  "expected_in": ["com.acme.p0.calls::Recursion.odd"],
+  "expected_out": ["com.acme.p0.calls::Recursion.odd"],
+  "syntax_ids": ["JAVA-CALL-MUTUAL-RECURSION"]
+}

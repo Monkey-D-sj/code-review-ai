@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-IMPORT-BOUNDARY",
+  "syntax_ids": ["JAVA-IMPORT-REGULAR"],
+  "language": "java",
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.scope",
+  "edge_kind": "import",
+  "direction": "out",
+  "negative_kind": "no_imports",
+  "expected_in": [],
+  "expected_out": []
+}

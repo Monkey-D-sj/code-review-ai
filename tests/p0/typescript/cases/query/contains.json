@@ -3,8 +3,108 @@
   "fixture": "fixture_repo",
   "edge_kind": "contains",
   "cases": [
-    {"case_id":"CONTAINS-001","p0_capabilities":["P0-G02"],"qualified_name":"contains","direction":"out","expected_in":[],"expected_out":["contains::Container","contains::moduleEntry"]},
-    {"case_id":"CONTAINS-002","p0_capabilities":["P0-G02"],"qualified_name":"contains::Container","direction":"both","expected_in":["contains"],"expected_out":["contains::Container.constructor","contains::Container.create","contains::Container.read","contains::Container.static_block"]},
-    {"case_id":"CONTAINS-003","p0_capabilities":["P0-G02"],"qualified_name":"contains::Container.read","direction":"in","expected_in":["contains::Container"],"expected_out":[]}
+    {
+      "case_id": "CONTAINS-001",
+      "p0_capabilities": [
+        "P0-G02"
+      ],
+      "qualified_name": "contains",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "contains::Container",
+        "contains::moduleEntry"
+      ],
+      "syntax_ids": [
+        "TS-CONTAINS-MODULE-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CONTAINS-002",
+      "p0_capabilities": [
+        "P0-G02"
+      ],
+      "qualified_name": "contains::Container",
+      "direction": "both",
+      "expected_in": [
+        "contains"
+      ],
+      "expected_out": [
+        "contains::Container.constructor",
+        "contains::Container.create",
+        "contains::Container.read",
+        "contains::Container.static_block"
+      ],
+      "syntax_ids": [
+        "TS-CONTAINS-MODULE-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CONTAINS-003",
+      "p0_capabilities": [
+        "P0-G02"
+      ],
+      "qualified_name": "contains::Container.read",
+      "direction": "in",
+      "expected_in": [
+        "contains::Container"
+      ],
+      "expected_out": [],
+      "syntax_ids": [
+        "TS-CONTAINS-MODULE-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "TS-CONTAINS-BOUNDARY",
+      "p0_capabilities": ["P0-G02"],
+      "qualified_name": "side-effect",
+      "direction": "out",
+      "negative_kind": "empty_container",
+      "expected_in": [],
+      "expected_out": [],
+      "syntax_ids": ["TS-CONTAINS-MODULE-FUNCTION"]
+    },
+    {
+      "case_id": "TS-CONTAINS-INTERFACE-MEMBER-POS",
+      "p0_capabilities": ["P0-G02"],
+      "qualified_name": "contracts::ReadableStore",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["contracts::ReadableStore.read"],
+      "syntax_ids": ["TS-CONTAINS-INTERFACE-MEMBER"]
+    },
+    {
+      "case_id": "TS-CONTAINS-ENUM-MEMBER-POS",
+      "p0_capabilities": ["P0-G02"],
+      "qualified_name": "enum_members::Color",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "enum_members::Color.Red",
+        "enum_members::Color.Blue"
+      ],
+      "syntax_ids": ["TS-CONTAINS-ENUM-MEMBER"]
+    },
+    {
+      "case_id": "TS-CONTAINS-NAMESPACE-POS",
+      "p0_capabilities": ["P0-G02"],
+      "qualified_name": "namespace_members::Utilities",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["namespace_members::Utilities.normalize"],
+      "syntax_ids": ["TS-CONTAINS-NAMESPACE"]
+    },
+    {
+      "case_id": "TS-CONTAINS-OBJECT-METHOD-POS",
+      "p0_capabilities": ["P0-G02"],
+      "qualified_name": "object_methods::objectHolder",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "object_methods::objectHolder.run",
+        "object_methods::objectHolder.fn"
+      ],
+      "syntax_ids": ["TS-CONTAINS-OBJECT-METHOD"]
+    }
   ]
 }

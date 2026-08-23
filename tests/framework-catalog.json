@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "scope": "framework semantic conformance",
+  "items": [
+    {"id": "FASTAPI-ROUTE-DECORATOR", "framework": "fastapi", "status": "covered", "case": "test_fastapi_routes_and_recursive_dependencies"},
+    {"id": "FASTAPI-DEPENDS", "framework": "fastapi", "status": "covered", "case": "test_fastapi_routes_and_recursive_dependencies"},
+    {"id": "FASTAPI-SECURITY", "framework": "fastapi", "status": "covered", "case": "test_fastapi_routes_and_recursive_dependencies"},
+    {"id": "FASTAPI-INCLUDE-ROUTER-PREFIX", "framework": "fastapi", "status": "partial", "case": "test_fastapi_routes_and_recursive_dependencies", "limitation": "Router registration and prefix composition are not materialized as route nodes yet."},
+    {"id": "SPRING-BOOT-CONTROLLER-MAPPING", "framework": "spring-boot", "status": "covered", "case": "test_spring_boot_controller_mapping_and_di"},
+    {"id": "SPRING-BOOT-REQUESTMAPPING-PREFIX", "framework": "spring-boot", "status": "covered", "case": "test_spring_boot_controller_mapping_and_di"},
+    {"id": "SPRING-BOOT-AUTOWIRED-FIELD", "framework": "spring-boot", "status": "covered", "case": "test_spring_boot_controller_mapping_and_di"},
+    {"id": "SPRING-BOOT-CONSTRUCTOR-DI", "framework": "spring-boot", "status": "covered", "case": "test_spring_boot_controller_mapping_and_di"},
+    {"id": "SPRING-BOOT-BEAN", "framework": "spring-boot", "status": "covered", "case": "test_spring_boot_controller_mapping_and_di"},
+    {"id": "SPRING-BOOT-REPOSITORY-DI", "framework": "spring-boot", "status": "covered", "case": "test_spring_boot_controller_mapping_and_di"},
+    {"id": "SPRING-BOOT-MOCKMVC-ROUTE", "framework": "spring-boot", "status": "covered", "case": "existing java_routing tests"}
+  ]
+}

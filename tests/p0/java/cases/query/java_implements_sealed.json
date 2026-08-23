@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-IMPLEMENTS-SEALED-POS",
+  "language": "java",
+  "p0_capabilities": ["P0-G05"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.inheritance::SealedImpl",
+  "edge_kind": "implements",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": ["com.acme.p0.inheritance::SealedContract"],
+  "syntax_ids": ["JAVA-IMPLEMENTS-SEALED"]
+}

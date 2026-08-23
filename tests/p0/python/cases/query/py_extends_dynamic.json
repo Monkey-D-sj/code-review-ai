@@ -1,0 +1,12 @@
+{
+  "case_id": "PY-EXTENDS-DYNAMIC-NEG",
+  "language": "python",
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.dynamic_extends::DynamicChild",
+  "edge_kind": "extends",
+  "direction": "out",
+  "negative_kind": "dynamic_base_expression",
+  "expected_in": [],
+  "expected_out": [],
+  "syntax_ids": ["PY-EXTENDS-DYNAMIC"]
+}

@@ -179,7 +179,7 @@ def test_java_var_types_collected(tmp_path):
     assert show["model"] == "Model"                        # 参数
     assert show["owner"] == "Owner"                        # 局部变量
     assert "ownerId" not in show                           # 基元类型跳过
-    assert "repo" not in show                              # var 跳过
+    assert "repo" not in show                              # method-call initializer stays unknown
     ctor = pf.var_types["com.example::OwnerController.OwnerController"]
     assert ctor["clinicService"] == "OwnerRepository"      # 构造器参数
 

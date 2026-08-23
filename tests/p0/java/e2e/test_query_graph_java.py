@@ -9,6 +9,7 @@ import pytest
 
 from code_review_ai.config import load_config
 from code_review_ai.mcp_server import create_server
+from p0_conformance import score_query_conformance
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -31,6 +32,30 @@ REQUIRED_CASES = {
     "java_all_edges",
     "java_query_contract",
     "java_nonresolved_call_edges",
+    "JAVA-CALL-VAR-POS",
+    "JAVA-CONTAINS-BOUNDARY",
+    "JAVA-IMPORT-BOUNDARY",
+    "JAVA-EXTENDS-BOUNDARY",
+    "JAVA-IMPLEMENTS-BOUNDARY",
+    "JAVA-CALL-SUPER-POS",
+    "JAVA-CALL-MUTUAL-RECURSION-POS",
+    "JAVA-CONTAINS-INTERFACE-METHOD-POS",
+    "JAVA-CALL-INNER-CLASS-POS",
+    "JAVA-CALL-LAMBDA-POS",
+    "JAVA-CALL-ANONYMOUS-CLASS-POS",
+    "JAVA-CONTAINS-ENUM-MEMBER-POS",
+    "JAVA-CONTAINS-RECORD-COMPONENT-POS",
+    "JAVA-CONTAINS-INITIALIZER-POS",
+    "JAVA-CALL-ENUM-BODY-POS",
+    "JAVA-CALL-INTERFACE-POS",
+    "JAVA-CALL-RECORD-CTOR-POS",
+    "JAVA-CALL-LOCAL-CLASS-POS",
+    "JAVA-CALL-RETURN-CHAIN-POS",
+    "JAVA-CALL-METHOD-REFERENCE-BOUNDARY",
+    "JAVA-CALL-ABSTRACT-POS",
+    "JAVA-CALL-GENERIC-POS",
+    "JAVA-EXTENDS-SEALED-POS",
+    "JAVA-IMPLEMENTS-SEALED-POS",
 }
 
 
@@ -136,7 +161,10 @@ def test_query_contract_direction_limit_and_not_found(query_tools: dict):
             max_neighbors=2,
         )
     )
-    assert len(limited["out"]) == 2
+    assert _qnames(limited, "out") == {
+        "com.acme.p0.calls::FlowCaller.bareTarget",
+        "com.acme.p0.calls::FlowCaller.catchTarget",
+    }
 
     missing = json.loads(
         query_tool(
@@ -223,32 +251,16 @@ def test_coverage_manifest_is_a_ci_gate_for_all_java_p0_cases():
     assert all(item["status"] == "covered" for item in items)
     assert all(item.get("evidence") for item in items)
     assert all(item["case_id"] in loaded_ids for item in items)
+    assert {
+        evidence for item in items for evidence in item["evidence"]
+    } <= loaded_ids
 
 
-def test_p0_metrics_report_records_a_complete_public_e2e_suite():
+def test_p0_metrics_report_is_reproduced_from_public_queries(
+    query_tools: dict,
+):
     report = json.loads(METRICS_FILE.read_text(encoding="utf-8"))
-    assert report["language"] == "java"
-    assert report["suite"] == "query_p0"
-    assert report["metrics"] == {
-        "resolved_edge_recall": 1.0,
-        "resolved_edge_precision": 1.0,
-        "negative_edge_correctness": 1.0,
-        "case_coverage": 1.0,
-        "overall_context_recall": 0.9464285714,
-    }
-    assert report["counts"] == {
-        "resolved_neighbor_assertions": 53,
-        "resolved_neighbor_assertions_passed": 53,
-        "negative_mechanisms": 3,
-        "negative_mechanisms_without_phantom_neighbors": 3,
-        "contexts_recovered": 53,
-        "contexts_not_recovered": 3,
-        "context_opportunities": 56,
-        "applicable_cases": 12,
-        "cases_with_passing_e2e": 12,
-    }
-    assert (
-        report["counts"]["contexts_recovered"]
-        / report["counts"]["context_opportunities"]
-        == pytest.approx(report["metrics"]["overall_context_recall"])
-    )
+    cases = [_load_case(case_file) for case_file in CASE_FILES]
+    actual = score_query_conformance(
+        query_tools["query_graph"].fn, cases, language="java")
+    assert report == actual

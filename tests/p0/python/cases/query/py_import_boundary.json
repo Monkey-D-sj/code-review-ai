@@ -1,0 +1,12 @@
+{
+  "case_id": "PY-IMPORT-BOUNDARY",
+  "syntax_ids": ["PY-IMPORT-MODULE"],
+  "language": "python",
+  "fixture": "fixture_repo",
+  "edge_kind": "import",
+  "qualified_name": "p0_fixture.calls",
+  "direction": "out",
+  "negative_kind": "no_imports",
+  "expected_in": [],
+  "expected_out": []
+}

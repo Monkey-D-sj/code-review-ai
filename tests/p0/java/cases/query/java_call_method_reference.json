@@ -1,0 +1,13 @@
+{
+  "case_id": "JAVA-CALL-METHOD-REFERENCE-BOUNDARY",
+  "language": "java",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "negative_kind": "method_reference",
+  "qualified_name": "com.acme.p0.calls::Advanced.methodReferenceCaller",
+  "edge_kind": "call",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": [],
+  "syntax_ids": ["JAVA-CALL-METHOD-REFERENCE"]
+}

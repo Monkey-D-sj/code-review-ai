@@ -3,6 +3,31 @@
   "fixture": "fixture_repo",
   "edge_kind": "all",
   "cases": [
-    {"case_id":"ts_all_edges","p0_capabilities":["P0-G06"],"qualified_name":"user-store::UserStore","direction":"both","expected_in":["admin-store::AdminStore","user-store"],"expected_out":["base-store::BaseStore","contracts::PersistableStore","contracts::ReadableStore","user-store::UserStore.persist","user-store::UserStore.read"]}
+    {
+      "case_id": "ts_all_edges",
+      "p0_capabilities": [
+        "P0-G06"
+      ],
+      "qualified_name": "user-store::UserStore",
+      "direction": "both",
+      "expected_in": [
+        "admin-store::AdminStore",
+        "user-store"
+      ],
+      "expected_out": [
+        "base-store::BaseStore",
+        "contracts::PersistableStore",
+        "contracts::ReadableStore",
+        "user-store::UserStore.persist",
+        "user-store::UserStore.read"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION",
+        "TS-CONTAINS-MODULE-FUNCTION",
+        "TS-IMPORT-NAMED",
+        "TS-EXTENDS-SAME-MODULE",
+        "TS-IMPLEMENTS-ONE"
+      ]
+    }
   ]
 }

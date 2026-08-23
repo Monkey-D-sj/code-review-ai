@@ -41,17 +41,18 @@ def _build_review_prompt() -> str:
         for line in load_skill_body("code-review-methodology").splitlines())
     return (
         "对以下代码变更影响做代码评审。输入是 code-review-ai 生成的变更摘要 JSON。"
-        "1. get_change_summary 确认变更明细。"
+        "1. 先根据输入摘要与局部改动判断是否自包含;自包含改动不要调用图工具。"
         f"2. {methodology}"
-        "3. 需要上下文的真实改动 → 默认用 query_graph 看该函数的上游(direction=in,即调用方):"
+        "3. 只有需要上下文的真实改动才调用一次 get_change_context,传入摘要已有的symbols或"
+        "受影响files;工具会在服务端解析qname,不要先调search_symbol。默认direction=in看上游调用方:"
         "改动一个函数,最可能的破坏在调用它的人。仅当改动涉及下游时才同时看下游(direction=out):"
         "改了传给被调方的入参/实参、新增或移除对某函数的调用、返回值被下游进一步消费等;"
         "函数自身签名入参变化(如新增必填参数)砸的是调用方,归入上游。"
         "4. 需要上下文的改动里,跨服务/RPC/API 变更、删除的函数、被跨模块调用的接口变更"
-        "需要最深检查:沿 query_graph 上游方向(direction=in)递归追到受影响业务入口,"
+        "需要最深检查;先用get_change_context拿紧凑邻域,证据仍不足时再定点Read,"
         "形成完整影响链;私有或同模块内小范围的改动只看直接调用点即可。"
         "变更摘要里的 risk 分值只是排序与提醒信号,不作为查询深度的硬门槛。"
-        "5. search_symbol / Read 按需补充;不要用 git diff / grep 自己重算。"
+        "5. 不要重复grep或Read工具已经返回的关系;只定点读取具体finding缺少的证据。"
         "再按语言用 code-review 系列 skill 评审,按 error / warning / info 三级输出发现,"
         "每条给出文件、行号、问题描述与具体失败场景,用中文回答。"
     )

@@ -1,0 +1,4483 @@
+{
+  "schema_version": 1,
+  "description": "P0 syntax denominator for call, contains, import, extends and implements edges.",
+  "languages": [
+    "python",
+    "typescript",
+    "java"
+  ],
+  "edge_kinds": [
+    "call",
+    "contains",
+    "import",
+    "extends",
+    "implements"
+  ],
+  "items": [
+    {
+      "id": "PY-CALL-TOP",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "TOP",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-SAME-MODULE",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "SAME-MODULE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-CROSS-MODULE",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "CROSS-MODULE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-IMPORT-ALIAS",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "IMPORT-ALIAS",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-MODULE-ATTR",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "MODULE-ATTR",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-NESTED",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "NESTED",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-NESTED-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Lexical-scope POS and public boundary query evidence are registered.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-CLOSURE",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "CLOSURE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-CLOSURE-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Lexical-scope POS and public boundary query evidence are registered.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-RECURSIVE",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "RECURSIVE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-MUTUAL-RECURSIVE",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "MUTUAL-RECURSIVE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-MUTUAL-RECURSIVE-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Lexical-scope POS and public boundary query evidence are registered.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-SELF-METHOD",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "SELF-METHOD",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-CLS-METHOD",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "CLS-METHOD",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-CLASS-METHOD",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "CLASS-METHOD",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-STATICMETHOD",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "STATICMETHOD",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-STATICMETHOD-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "A dedicated public query proves class-qualified staticmethod resolution.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-CONSTRUCTOR",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "CONSTRUCTOR",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-NEW",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "NEW",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-GENERATOR-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-CALL-SUPER",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "SUPER",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-CALL-ASYNC",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "ASYNC",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-ASYNC-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-CONTROL-IF",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "CONTROL-IF",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-CONTROL-LOOP",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "CONTROL-LOOP",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-TRY",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "TRY",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-COMPREHENSION",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "COMPREHENSION",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-CALL-LAMBDA",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "LAMBDA",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-LAMBDA-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Lambda assignments are indexed as stable callable symbols and resolved by a dedicated query.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-CALLABLE",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "CALLABLE",
+      "classification": "static",
+      "status": "dynamic",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-CALLABLE-NEG"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Calling an object dispatches through runtime __call__ semantics.",
+      "limitations": [
+        "The callable object target is not uniquely determined from syntax alone."
+      ]
+    },
+    {
+      "id": "PY-CALL-PROPERTY",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "PROPERTY",
+      "classification": "static",
+      "status": "dynamic",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-PROPERTY-NEG"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Property access invokes a descriptor protocol rather than a statically named call target.",
+      "limitations": [
+        "Getter/setter dispatch is intentionally excluded from resolved call edges."
+      ]
+    },
+    {
+      "id": "PY-CALL-MAGIC",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "MAGIC",
+      "classification": "static",
+      "status": "dynamic",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-MAGIC-NEG"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Operator and iteration protocol calls are selected by runtime type semantics.",
+      "limitations": [
+        "Magic protocol dispatch does not create a unique static call edge."
+      ]
+    },
+    {
+      "id": "PY-CALL-WITH",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "WITH",
+      "classification": "static",
+      "status": "dynamic",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-WITH-NEG"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Context manager enter/exit dispatch is implicit protocol behavior.",
+      "limitations": [
+        "Only explicit expressions are queried; implicit protocol calls stay outside resolved edges."
+      ]
+    },
+    {
+      "id": "PY-CALL-GENERATOR",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "GENERATOR",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-GENERATOR-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CALL-DECORATOR",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "DECORATOR",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-CALL-PARTIAL",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "PARTIAL",
+      "classification": "static",
+      "status": "dynamic",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges",
+        "PY-CALL-PARTIAL-NEG"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "functools.partial returns a runtime callable wrapper whose final target depends on binding.",
+      "limitations": [
+        "Partial wrappers are not expanded into resolved call edges."
+      ]
+    },
+    {
+      "id": "PY-CALL-DYNAMIC-ATTR",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "DYNAMIC-ATTR",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Target depends on a runtime value or object.",
+      "limitations": [
+        "Runtime-dependent targets must not enter resolved query results."
+      ]
+    },
+    {
+      "id": "PY-CALL-SUBSCRIPT",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "SUBSCRIPT",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Target depends on a runtime value or object.",
+      "limitations": [
+        "Runtime-dependent targets must not enter resolved query results."
+      ]
+    },
+    {
+      "id": "PY-CALL-EVAL",
+      "language": "python",
+      "edge_kind": "call",
+      "syntax": "EVAL",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "py_call_top_level_and_control_flow",
+        "py_call_scope_and_recursion",
+        "py_call_methods_and_constructor",
+        "py_call_cross_module",
+        "py_nonresolved_call_edges",
+        "py_query_contract",
+        "py_all_edges"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Target depends on a runtime value or object.",
+      "limitations": [
+        "Runtime-dependent targets must not enter resolved query results."
+      ]
+    },
+    {
+      "id": "PY-CONTAINS-MODULE-FUNCTION",
+      "language": "python",
+      "edge_kind": "contains",
+      "syntax": "MODULE-FUNCTION",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_contains_edges",
+        "py_all_edges",
+        "PY-CONTAINS-BOUNDARY",
+        "PY-CONTAINS-FUNCTION-NESTED-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CONTAINS-MODULE-CLASS",
+      "language": "python",
+      "edge_kind": "contains",
+      "syntax": "MODULE-CLASS",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_contains_edges",
+        "py_all_edges",
+        "PY-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CONTAINS-CLASS-METHOD",
+      "language": "python",
+      "edge_kind": "contains",
+      "syntax": "CLASS-METHOD",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_contains_edges",
+        "py_all_edges",
+        "PY-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CONTAINS-CLASS-NESTED-CLASS",
+      "language": "python",
+      "edge_kind": "contains",
+      "syntax": "CLASS-NESTED-CLASS",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_contains_edges",
+        "py_all_edges",
+        "PY-CONTAINS-BOUNDARY",
+        "PY-CONTAINS-CLASS-NESTED-CLASS-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "A dedicated public query proves nested class containment.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CONTAINS-FUNCTION-NESTED",
+      "language": "python",
+      "edge_kind": "contains",
+      "syntax": "FUNCTION-NESTED",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_contains_edges",
+        "py_all_edges",
+        "PY-CONTAINS-BOUNDARY",
+        "PY-CONTAINS-FUNCTION-NESTED-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CONTAINS-DECORATED",
+      "language": "python",
+      "edge_kind": "contains",
+      "syntax": "DECORATED",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_contains_edges",
+        "py_all_edges",
+        "PY-CONTAINS-BOUNDARY",
+        "PY-CONTAINS-DECORATED-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "A dedicated public query proves decorated definitions remain contained by their module.",
+      "limitations": []
+    },
+    {
+      "id": "PY-CONTAINS-ASYNC",
+      "language": "python",
+      "edge_kind": "contains",
+      "syntax": "ASYNC",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_contains_edges",
+        "py_all_edges",
+        "PY-CONTAINS-BOUNDARY",
+        "PY-CONTAINS-ASYNC-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "A dedicated public query proves async functions are contained as ordinary module members.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-MODULE",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "MODULE",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-SUBMODULE",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "SUBMODULE",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-MODULE-ALIAS",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "MODULE-ALIAS",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-FROM",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "FROM",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-FROM-ALIAS",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "FROM-ALIAS",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-RELATIVE-ONE",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "RELATIVE-ONE",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-RELATIVE-MULTI",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "RELATIVE-MULTI",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-REEXPORT",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "REEXPORT",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-STAR-ALL",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "STAR-ALL",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-STAR-AMBIGUOUS",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "STAR-AMBIGUOUS",
+      "classification": "ambiguous",
+      "status": "partial",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-IMPORT-SRC-LAYOUT",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "SRC-LAYOUT",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-IMPORT-NAMESPACE-PACKAGE",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "NAMESPACE-PACKAGE",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-IMPORT-STUB",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "STUB",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-IMPORT-DYNAMIC-CONSTANT",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "DYNAMIC-CONSTANT",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY",
+        "PY-IMPORT-DYNAMIC-CONSTANT-NEG"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "A constant passed to a runtime import API still does not establish a repository import edge.",
+      "limitations": [
+        "Runtime import APIs are intentionally excluded from resolved import edges."
+      ]
+    },
+    {
+      "id": "PY-IMPORT-DYNAMIC-VARIABLE",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "DYNAMIC-VARIABLE",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY",
+        "PY-IMPORT-DYNAMIC-VARIABLE-NEG"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Target depends on a runtime value or object.",
+      "limitations": [
+        "Runtime-dependent targets must not enter resolved query results."
+      ]
+    },
+    {
+      "id": "PY-IMPORT-EXTERNAL",
+      "language": "python",
+      "edge_kind": "import",
+      "syntax": "EXTERNAL",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "py_import_edges",
+        "py_all_edges",
+        "PY-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-EXTENDS-SAME-MODULE",
+      "language": "python",
+      "edge_kind": "extends",
+      "syntax": "SAME-MODULE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_extends_edges",
+        "py_all_edges",
+        "PY-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-EXTENDS-IMPORTED",
+      "language": "python",
+      "edge_kind": "extends",
+      "syntax": "IMPORTED",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_extends_edges",
+        "py_all_edges",
+        "PY-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-EXTENDS-ALIAS",
+      "language": "python",
+      "edge_kind": "extends",
+      "syntax": "ALIAS",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "py_extends_edges",
+        "py_all_edges",
+        "PY-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-EXTENDS-MULTIPLE",
+      "language": "python",
+      "edge_kind": "extends",
+      "syntax": "MULTIPLE",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "py_extends_edges",
+        "py_all_edges",
+        "PY-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-EXTENDS-TRANSITIVE",
+      "language": "python",
+      "edge_kind": "extends",
+      "syntax": "TRANSITIVE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "py_extends_edges",
+        "py_all_edges",
+        "PY-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "PY-EXTENDS-EXTERNAL",
+      "language": "python",
+      "edge_kind": "extends",
+      "syntax": "EXTERNAL",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "py_extends_edges",
+        "py_all_edges",
+        "PY-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "PY-EXTENDS-DYNAMIC",
+      "language": "python",
+      "edge_kind": "extends",
+      "syntax": "DYNAMIC",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "py_extends_edges",
+        "py_all_edges",
+        "PY-EXTENDS-BOUNDARY",
+        "PY-EXTENDS-DYNAMIC-NEG"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Target depends on a runtime value or object.",
+      "limitations": [
+        "Runtime-dependent targets must not enter resolved query results."
+      ]
+    },
+    {
+      "id": "PY-IMPLEMENTS-NONE",
+      "language": "python",
+      "edge_kind": "implements",
+      "syntax": "NONE",
+      "classification": "static",
+      "status": "not_applicable",
+      "case_ids": [],
+      "expected_resolution": "not_applicable",
+      "reason": "Python has no language-level implements syntax.",
+      "limitations": [
+        "Python has no language-level implements syntax."
+      ]
+    },
+    {
+      "id": "TS-CALL-FUNCTION",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "FUNCTION",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-FUNCTION-EXPR",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "FUNCTION-EXPR",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-ARROW",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "ARROW",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-ASYNC",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "ASYNC",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-CALL-GENERATOR",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "GENERATOR",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-CALL-NESTED",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "NESTED",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-NESTED-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-IIFE",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "IIFE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-IIFE-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Calls nested inside an immediately invoked arrow retain the enclosing callable scope.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-TOP-LEVEL",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "TOP-LEVEL",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-CLASS-METHOD",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "CLASS-METHOD",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-THIS",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "THIS",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-SUPER",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "SUPER",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-STATIC",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "STATIC",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-CONSTRUCTOR",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "CONSTRUCTOR",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-CLASS-FIELD-ARROW",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "CLASS-FIELD-ARROW",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-CLASS-FIELD-ARROW-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-OBJECT-METHOD",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "OBJECT-METHOD",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-OBJECT-METHOD-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "A dedicated object-literal method call resolves through the stable object binding.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-OBJECT-FUNCTION",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "OBJECT-FUNCTION",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-OBJECT-FUNCTION-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Object-literal arrow properties are indexed as callable members.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-PRIVATE",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "PRIVATE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-PRIVATE-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Private method names are retained in class scope and resolved through this-receiver binding.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-GETTER-SETTER",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "GETTER-SETTER",
+      "classification": "static",
+      "status": "dynamic",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-GETTER-SETTER-BOUNDARY"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Property access dispatches through TypeScript getter/setter runtime semantics rather than a call expression.",
+      "limitations": [
+        "Accessor reads and writes are intentionally excluded from resolved call edges."
+      ]
+    },
+    {
+      "id": "TS-CALL-OPTIONAL",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "OPTIONAL",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-OPTIONAL-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-COMPUTED-CONSTANT",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "COMPUTED-CONSTANT",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-COMPUTED-CONSTANT-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-COMPUTED-DYNAMIC",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "COMPUTED-DYNAMIC",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Target depends on a runtime value or object.",
+      "limitations": [
+        "Runtime-dependent targets must not enter resolved query results."
+      ]
+    },
+    {
+      "id": "TS-CALL-TAGGED-TEMPLATE",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "TAGGED-TEMPLATE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-TAGGED-TEMPLATE-POS",
+        "TS-CALL-TAGGED-TEMPLATE-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Tagged templates are represented by tree-sitter as call expressions, so the tag function resolves through the normal call resolver.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-CALLBACK",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "CALLBACK",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "The public higher-order callback query resolves the callback runner without inventing a callback target edge.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-OVERLOAD",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "OVERLOAD",
+      "classification": "ambiguous",
+      "status": "partial",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-CALL-RECURSION",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "RECURSION",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-RECURSION-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-INTERFACE-RECEIVER",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "INTERFACE-RECEIVER",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-INTERFACE-RECEIVER-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "A typed interface receiver resolves to its unique repository interface member.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-UNION-RECEIVER",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "UNION-RECEIVER",
+      "classification": "type",
+      "status": "partial",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-UNION-RECEIVER-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Union receivers are retained as an unresolved type boundary instead of selecting one runtime member implementation.",
+      "limitations": [
+        "The query graph does not expose candidate call edges; union narrowing is not modeled yet."
+      ]
+    },
+    {
+      "id": "TS-CALL-GENERIC-RECEIVER",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "GENERIC-RECEIVER",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-GENERIC-RECEIVER-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Generic type annotations bind to their concrete generic class receiver.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CALL-STRUCTURAL",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "STRUCTURAL",
+      "classification": "ambiguous",
+      "status": "partial",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges",
+        "TS-CALL-STRUCTURAL-BOUNDARY"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "Inline structural object types do not identify a unique repository declaration, so the call remains a candidate boundary.",
+      "limitations": [
+        "Structural candidate edges are retained outside resolved query results."
+      ]
+    },
+    {
+      "id": "TS-CALL-REFLECT",
+      "language": "typescript",
+      "edge_kind": "call",
+      "syntax": "REFLECT",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "CALL-001",
+        "CALL-002",
+        "CALL-003",
+        "CALL-004",
+        "CALL-005",
+        "CALL-006",
+        "CALL-007",
+        "CALL-008",
+        "CALL-009",
+        "CALL-010",
+        "CALL-011",
+        "CALL-012",
+        "CALL-013",
+        "CALL-014",
+        "ts_query_contract",
+        "ts_all_edges"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Target depends on a runtime value or object.",
+      "limitations": [
+        "Runtime-dependent targets must not enter resolved query results."
+      ]
+    },
+    {
+      "id": "TS-CONTAINS-MODULE-FUNCTION",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "MODULE-FUNCTION",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CONTAINS-MODULE-ARROW",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "MODULE-ARROW",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CONTAINS-MODULE-CLASS",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "MODULE-CLASS",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CONTAINS-CLASS-CONSTRUCTOR",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "CLASS-CONSTRUCTOR",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CONTAINS-CLASS-METHOD",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "CLASS-METHOD",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CONTAINS-CLASS-STATIC-BLOCK",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "CLASS-STATIC-BLOCK",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CONTAINS-CLASS-FIELD-FUNCTION",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "CLASS-FIELD-FUNCTION",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-CLASS-FIELD-FUNCTION-POS",
+        "TS-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CONTAINS-NAMESPACE",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "NAMESPACE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-BOUNDARY",
+        "TS-CONTAINS-NAMESPACE-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Internal namespaces are indexed as containers with direct function members.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CONTAINS-INTERFACE-MEMBER",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "INTERFACE-MEMBER",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-BOUNDARY",
+        "TS-CONTAINS-INTERFACE-MEMBER-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Interface method signatures are indexed as direct interface members and verified by a public contains query.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CONTAINS-ENUM-MEMBER",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "ENUM-MEMBER",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-BOUNDARY",
+        "TS-CONTAINS-ENUM-MEMBER-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Enum constants are indexed as direct enum members and verified by a public contains query.",
+      "limitations": []
+    },
+    {
+      "id": "TS-CONTAINS-OBJECT-METHOD",
+      "language": "typescript",
+      "edge_kind": "contains",
+      "syntax": "OBJECT-METHOD",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "CONTAINS-001",
+        "CONTAINS-002",
+        "CONTAINS-003",
+        "ts_all_edges",
+        "TS-CONTAINS-BOUNDARY",
+        "TS-CONTAINS-OBJECT-METHOD-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Object-literal shorthand methods are indexed beneath their stable object binding.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-NAMED",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "NAMED",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-DEFAULT",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "DEFAULT",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-NAMESPACE",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "NAMESPACE",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-ALIAS",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "ALIAS",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-SIDE-EFFECT",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "SIDE-EFFECT",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-RELATIVE",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "RELATIVE",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-EXTENSION",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "EXTENSION",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-INDEX",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "INDEX",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-EXPORT-LOCAL",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "EXPORT-LOCAL",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-REEXPORT-NAMED",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "REEXPORT-NAMED",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-REEXPORT-STAR",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "REEXPORT-STAR",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-BARREL-CONFLICT",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "BARREL-CONFLICT",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-BASEURL",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "BASEURL",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-PATHS",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "PATHS",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-PATHS-MULTI",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "PATHS-MULTI",
+      "classification": "ambiguous",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "The tsconfig path resolver selects the first target of a multi-target alias and does not expose all alternatives.",
+      "limitations": [
+        "Multi-target paths remain a configuration-level candidate set outside resolved query results."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-TSCONFIG-EXTENDS",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "TSCONFIG-EXTENDS",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Basic tsconfig extends merging is implemented, but package-name extends and cross-project config provenance are not indexed as graph nodes.",
+      "limitations": [
+        "Only repository-relative compiler options affect import resolution."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-PROJECT-REFERENCE",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "PROJECT-REFERENCE",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Project references are build-graph metadata; source import edges are resolved only when the referenced source is in the indexed repository.",
+      "limitations": [
+        "The referenced project's config is not emitted as an import node."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-WORKSPACE",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "WORKSPACE",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Workspace package boundaries are resolved from repository source paths, not from package-manager workspace metadata.",
+      "limitations": [
+        "Workspace manifests are not indexed as module graph nodes."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-PACKAGE-EXPORTS",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "PACKAGE-EXPORTS",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Package export maps are external package metadata; local relative and path-alias exports are resolved from indexed source files.",
+      "limitations": [
+        "node_modules package export maps are intentionally not traversed."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-IMPORT-EQUALS",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "IMPORT-EQUALS",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-EXPORT-EQUALS",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "EXPORT-EQUALS",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-REQUIRE",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "REQUIRE",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing CommonJS public query evidence and boundary case are registered.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-MODULE-EXPORTS",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "MODULE-EXPORTS",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing CommonJS public query evidence and boundary case are registered.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-DYNAMIC-CONSTANT",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "DYNAMIC-CONSTANT",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY",
+        "TS-IMPORT-DYNAMIC-CONSTANT-NEG"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Dynamic import expressions are runtime module loads, not static repository import edges.",
+      "limitations": [
+        "Constant specifiers are retained as runtime boundaries rather than resolved imports."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-DYNAMIC-VARIABLE",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "DYNAMIC-VARIABLE",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY",
+        "TS-IMPORT-DYNAMIC-VARIABLE-NEG"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Target depends on a runtime value or object.",
+      "limitations": [
+        "Runtime-dependent targets must not enter resolved query results."
+      ]
+    },
+    {
+      "id": "TS-IMPORT-TYPE-ONLY",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "TYPE-ONLY",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY",
+        "TS-IMPORT-TYPE-ONLY-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Dedicated public query POS and boundary evidence are registered.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPORT-EXTERNAL",
+      "language": "typescript",
+      "edge_kind": "import",
+      "syntax": "EXTERNAL",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "IMPORT-001",
+        "IMPORT-002",
+        "IMPORT-003",
+        "IMPORT-004",
+        "IMPORT-005",
+        "ts_all_edges",
+        "TS-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-EXTENDS-SAME-MODULE",
+      "language": "typescript",
+      "edge_kind": "extends",
+      "syntax": "SAME-MODULE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "EXTENDS-001",
+        "EXTENDS-002",
+        "EXTENDS-003",
+        "ts_all_edges",
+        "TS-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-EXTENDS-IMPORTED",
+      "language": "typescript",
+      "edge_kind": "extends",
+      "syntax": "IMPORTED",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "EXTENDS-001",
+        "EXTENDS-002",
+        "EXTENDS-003",
+        "ts_all_edges",
+        "TS-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-EXTENDS-ALIAS",
+      "language": "typescript",
+      "edge_kind": "extends",
+      "syntax": "ALIAS",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "EXTENDS-001",
+        "EXTENDS-002",
+        "EXTENDS-003",
+        "ts_all_edges",
+        "TS-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-EXTENDS-TRANSITIVE",
+      "language": "typescript",
+      "edge_kind": "extends",
+      "syntax": "TRANSITIVE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "EXTENDS-001",
+        "EXTENDS-002",
+        "EXTENDS-003",
+        "ts_all_edges",
+        "TS-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-EXTENDS-GENERIC",
+      "language": "typescript",
+      "edge_kind": "extends",
+      "syntax": "GENERIC",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "EXTENDS-001",
+        "EXTENDS-002",
+        "EXTENDS-003",
+        "ts_all_edges",
+        "TS-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-EXTENDS-MIXIN",
+      "language": "typescript",
+      "edge_kind": "extends",
+      "syntax": "MIXIN",
+      "classification": "ambiguous",
+      "status": "partial",
+      "case_ids": [
+        "EXTENDS-001",
+        "EXTENDS-002",
+        "EXTENDS-003",
+        "ts_all_edges",
+        "TS-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-EXTENDS-EXTERNAL",
+      "language": "typescript",
+      "edge_kind": "extends",
+      "syntax": "EXTERNAL",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "EXTENDS-001",
+        "EXTENDS-002",
+        "EXTENDS-003",
+        "ts_all_edges",
+        "TS-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-IMPLEMENTS-ONE",
+      "language": "typescript",
+      "edge_kind": "implements",
+      "syntax": "ONE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "IMPLEMENTS-001",
+        "IMPLEMENTS-002",
+        "ts_all_edges",
+        "TS-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPLEMENTS-MULTIPLE",
+      "language": "typescript",
+      "edge_kind": "implements",
+      "syntax": "MULTIPLE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "IMPLEMENTS-001",
+        "IMPLEMENTS-002",
+        "ts_all_edges",
+        "TS-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPLEMENTS-IMPORTED",
+      "language": "typescript",
+      "edge_kind": "implements",
+      "syntax": "IMPORTED",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "IMPLEMENTS-001",
+        "IMPLEMENTS-002",
+        "ts_all_edges",
+        "TS-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "TS-IMPLEMENTS-ALIAS",
+      "language": "typescript",
+      "edge_kind": "implements",
+      "syntax": "ALIAS",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "IMPLEMENTS-001",
+        "IMPLEMENTS-002",
+        "ts_all_edges",
+        "TS-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-IMPLEMENTS-GENERIC",
+      "language": "typescript",
+      "edge_kind": "implements",
+      "syntax": "GENERIC",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "IMPLEMENTS-001",
+        "IMPLEMENTS-002",
+        "ts_all_edges",
+        "TS-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "TS-IMPLEMENTS-EXTERNAL",
+      "language": "typescript",
+      "edge_kind": "implements",
+      "syntax": "EXTERNAL",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "IMPLEMENTS-001",
+        "IMPLEMENTS-002",
+        "ts_all_edges",
+        "TS-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-CALL-BARE",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "BARE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-THIS",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "THIS",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-STATIC",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "STATIC",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-STATIC-IMPORT",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "STATIC-IMPORT",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-FQCN",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "FQCN",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-CONSTRUCTOR",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "CONSTRUCTOR",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-CONSTRUCTOR-OVERLOAD",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "CONSTRUCTOR-OVERLOAD",
+      "classification": "ambiguous",
+      "status": "partial",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-CALL-SUPER",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "SUPER",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-SUPER-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Dedicated public query POS and boundary evidence are registered.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-FIELD-TYPE",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "FIELD-TYPE",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-PARAM-TYPE",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "PARAM-TYPE",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-LOCAL-TYPE",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "LOCAL-TYPE",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-VAR",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "VAR",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-VAR-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-RETURN-CHAIN",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "RETURN-CHAIN",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-RETURN-CHAIN-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Declared Java return types bind a method-invocation receiver to the next member in a return chain.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-OVERLOAD",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "OVERLOAD",
+      "classification": "ambiguous",
+      "status": "partial",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-CALL-RECURSION",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "RECURSION",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-MUTUAL-RECURSION",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "MUTUAL-RECURSION",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-MUTUAL-RECURSION-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "A dedicated public POS query proves mutual recursion resolution.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-INNER-CLASS",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "INNER-CLASS",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-INNER-CLASS-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Nested class receiver types are resolved to the nested member call target by a dedicated public query.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-ANONYMOUS-CLASS",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "ANONYMOUS-CLASS",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-ANONYMOUS-CLASS-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Anonymous class method invocation resolves to a stable synthetic method scope.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-LOCAL-CLASS",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "LOCAL-CLASS",
+      "classification": "type",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-LOCAL-CLASS-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Local class declarations are kept in the enclosing method scope and resolve typed local receivers.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-ENUM-BODY",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "ENUM-BODY",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-ENUM-BODY-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Enum body methods retain the enum class scope and resolve same-enum calls.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-RECORD-CTOR",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "RECORD-CTOR",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-RECORD-CTOR-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Compact record constructors are indexed and constructor calls resolve to the record type.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-LAMBDA",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "LAMBDA",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-LAMBDA-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Calls inside a Java lambda retain the enclosing method scope and resolve statically.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-METHOD-REFERENCE",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "METHOD-REFERENCE",
+      "classification": "type",
+      "status": "dynamic",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-METHOD-REFERENCE-BOUNDARY"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "A Java method reference creates a deferred functional value; it is not an executed call at the reference site.",
+      "limitations": [
+        "The eventual functional-interface invocation is outside the reference expression."
+      ]
+    },
+    {
+      "id": "JAVA-CALL-INTERFACE",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "INTERFACE",
+      "classification": "ambiguous",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-INTERFACE-POS"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "A uniquely typed interface receiver resolves to its repository interface method.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-ABSTRACT",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "ABSTRACT",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-ABSTRACT-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "An abstract receiver with a declared repository type resolves to the abstract method declaration.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-GENERIC",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "GENERIC",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "JAVA-CALL-GENERIC-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Generic receiver arguments are erased to the repository class while preserving the declared member target.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CALL-REFLECTION-CONSTANT",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "REFLECTION-CONSTANT",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges",
+        "java_nonresolved_call_edges"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Reflection method names remain runtime dispatch even when the string literal is constant.",
+      "limitations": [
+        "Reflection APIs do not create resolved repository call edges."
+      ]
+    },
+    {
+      "id": "JAVA-CALL-REFLECTION-DYNAMIC",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "REFLECTION-DYNAMIC",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Target depends on a runtime value or object.",
+      "limitations": [
+        "Runtime-dependent targets must not enter resolved query results."
+      ]
+    },
+    {
+      "id": "JAVA-CALL-PROXY",
+      "language": "java",
+      "edge_kind": "call",
+      "syntax": "PROXY",
+      "classification": "runtime",
+      "status": "dynamic",
+      "case_ids": [
+        "java_call_static_and_constructor",
+        "java_call_same_class_and_control_flow",
+        "java_call_recursion",
+        "java_call_overload_and_scope",
+        "java_call_cross_package_and_static_import",
+        "java_nonresolved_call_edges",
+        "java_query_contract",
+        "java_all_edges"
+      ],
+      "expected_resolution": "dynamic",
+      "reason": "Target depends on a runtime value or object.",
+      "limitations": [
+        "Runtime-dependent targets must not enter resolved query results."
+      ]
+    },
+    {
+      "id": "JAVA-CONTAINS-PACKAGE-CLASS",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "PACKAGE-CLASS",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CONTAINS-PACKAGE-INTERFACE",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "PACKAGE-INTERFACE",
+      "classification": "ambiguous",
+      "status": "partial",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-CONTAINS-PACKAGE-ENUM",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "PACKAGE-ENUM",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-CONTAINS-PACKAGE-RECORD",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "PACKAGE-RECORD",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-CONTAINS-CLASS-METHOD",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "CLASS-METHOD",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CONTAINS-CLASS-CONSTRUCTOR",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "CLASS-CONSTRUCTOR",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CONTAINS-CLASS-INNER",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "CLASS-INNER",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CONTAINS-INTERFACE-METHOD",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "INTERFACE-METHOD",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY",
+        "JAVA-CONTAINS-INTERFACE-METHOD-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "A dedicated public contains query proves interface method membership.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CONTAINS-ENUM-MEMBER",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "ENUM-MEMBER",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY",
+        "JAVA-CONTAINS-ENUM-MEMBER-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Java enum constants are indexed as direct enum members.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CONTAINS-RECORD-COMPONENT",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "RECORD-COMPONENT",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY",
+        "JAVA-CONTAINS-RECORD-COMPONENT-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Java record components are indexed as direct record members.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-CONTAINS-INITIALIZER",
+      "language": "java",
+      "edge_kind": "contains",
+      "syntax": "INITIALIZER",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_contains_edges",
+        "java_all_edges",
+        "JAVA-CONTAINS-BOUNDARY",
+        "JAVA-CONTAINS-INITIALIZER-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Static and instance initializer blocks are indexed as direct class members.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPORT-REGULAR",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "REGULAR",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPORT-STATIC",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "STATIC",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPORT-WILDCARD",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "WILDCARD",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPORT-STATIC-WILDCARD",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "STATIC-WILDCARD",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-IMPORT-SAME-PACKAGE",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "SAME-PACKAGE",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPORT-FQCN",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "FQCN",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPORT-CROSS-PACKAGE",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "CROSS-PACKAGE",
+      "classification": "module",
+      "status": "covered",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPORT-MAVEN-SOURCESET",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "MAVEN-SOURCESET",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-IMPORT-GRADLE-SOURCESET",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "GRADLE-SOURCESET",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Java source imports are indexed independently of Gradle source-set metadata.",
+      "limitations": [
+        "build.gradle source-set declarations are not emitted as module nodes."
+      ]
+    },
+    {
+      "id": "JAVA-IMPORT-MULTI-MODULE",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "MULTI-MODULE",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Package imports resolve across all indexed Java files, but Maven/Gradle project-module boundaries are not modeled.",
+      "limitations": [
+        "External or unindexed modules remain unresolved."
+      ]
+    },
+    {
+      "id": "JAVA-IMPORT-JPMS-REQUIRES",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "JPMS-REQUIRES",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "JPMS module directives are build metadata and are not Java source import declarations in the current graph model.",
+      "limitations": [
+        "module-info.java is not indexed as a module descriptor node."
+      ]
+    },
+    {
+      "id": "JAVA-IMPORT-JPMS-USES-PROVIDES",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "JPMS-USES-PROVIDES",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "JPMS service uses/provides directives are runtime module wiring rather than statically named source imports.",
+      "limitations": [
+        "Service-loader provider selection is not represented as a resolved call/import edge."
+      ]
+    },
+    {
+      "id": "JAVA-IMPORT-EXTERNAL",
+      "language": "java",
+      "edge_kind": "import",
+      "syntax": "EXTERNAL",
+      "classification": "module",
+      "status": "partial",
+      "case_ids": [
+        "java_import_edges",
+        "java_all_edges",
+        "JAVA-IMPORT-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-EXTENDS-CLASS",
+      "language": "java",
+      "edge_kind": "extends",
+      "syntax": "CLASS",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_extends_edges",
+        "java_all_edges",
+        "JAVA-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-EXTENDS-INTERFACE",
+      "language": "java",
+      "edge_kind": "extends",
+      "syntax": "INTERFACE",
+      "classification": "ambiguous",
+      "status": "covered",
+      "case_ids": [
+        "java_extends_edges",
+        "java_all_edges",
+        "JAVA-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-EXTENDS-MULTI-INTERFACE",
+      "language": "java",
+      "edge_kind": "extends",
+      "syntax": "MULTI-INTERFACE",
+      "classification": "ambiguous",
+      "status": "partial",
+      "case_ids": [
+        "java_extends_edges",
+        "java_all_edges",
+        "JAVA-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "candidate",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-EXTENDS-CROSS-PACKAGE",
+      "language": "java",
+      "edge_kind": "extends",
+      "syntax": "CROSS-PACKAGE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_extends_edges",
+        "java_all_edges",
+        "JAVA-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-EXTENDS-WILDCARD",
+      "language": "java",
+      "edge_kind": "extends",
+      "syntax": "WILDCARD",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_extends_edges",
+        "java_all_edges",
+        "JAVA-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-EXTENDS-TRANSITIVE",
+      "language": "java",
+      "edge_kind": "extends",
+      "syntax": "TRANSITIVE",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "java_extends_edges",
+        "java_all_edges",
+        "JAVA-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-EXTENDS-GENERIC",
+      "language": "java",
+      "edge_kind": "extends",
+      "syntax": "GENERIC",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "java_extends_edges",
+        "java_all_edges",
+        "JAVA-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-EXTENDS-SEALED",
+      "language": "java",
+      "edge_kind": "extends",
+      "syntax": "SEALED",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_extends_edges",
+        "java_all_edges",
+        "JAVA-EXTENDS-BOUNDARY",
+        "JAVA-EXTENDS-SEALED-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Sealed class inheritance is resolved through the ordinary Java extends relation.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-EXTENDS-EXTERNAL",
+      "language": "java",
+      "edge_kind": "extends",
+      "syntax": "EXTERNAL",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "java_extends_edges",
+        "java_all_edges",
+        "JAVA-EXTENDS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-IMPLEMENTS-ONE",
+      "language": "java",
+      "edge_kind": "implements",
+      "syntax": "ONE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_implements_edges",
+        "java_all_edges",
+        "JAVA-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPLEMENTS-MULTIPLE",
+      "language": "java",
+      "edge_kind": "implements",
+      "syntax": "MULTIPLE",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_implements_edges",
+        "java_all_edges",
+        "JAVA-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPLEMENTS-IMPORTED",
+      "language": "java",
+      "edge_kind": "implements",
+      "syntax": "IMPORTED",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_implements_edges",
+        "java_all_edges",
+        "JAVA-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPLEMENTS-WILDCARD",
+      "language": "java",
+      "edge_kind": "implements",
+      "syntax": "WILDCARD",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_implements_edges",
+        "java_all_edges",
+        "JAVA-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Public P0 query evidence covers the syntax and a registered boundary case.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPLEMENTS-ENUM",
+      "language": "java",
+      "edge_kind": "implements",
+      "syntax": "ENUM",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "java_implements_edges",
+        "java_all_edges",
+        "JAVA-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-IMPLEMENTS-RECORD",
+      "language": "java",
+      "edge_kind": "implements",
+      "syntax": "RECORD",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "java_implements_edges",
+        "java_all_edges",
+        "JAVA-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-IMPLEMENTS-GENERIC",
+      "language": "java",
+      "edge_kind": "implements",
+      "syntax": "GENERIC",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "java_implements_edges",
+        "java_all_edges",
+        "JAVA-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    },
+    {
+      "id": "JAVA-IMPLEMENTS-SEALED",
+      "language": "java",
+      "edge_kind": "implements",
+      "syntax": "SEALED",
+      "classification": "static",
+      "status": "covered",
+      "case_ids": [
+        "java_implements_edges",
+        "java_all_edges",
+        "JAVA-IMPLEMENTS-BOUNDARY",
+        "JAVA-IMPLEMENTS-SEALED-POS"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Sealed interface implementation is resolved through the ordinary Java implements relation.",
+      "limitations": []
+    },
+    {
+      "id": "JAVA-IMPLEMENTS-EXTERNAL",
+      "language": "java",
+      "edge_kind": "implements",
+      "syntax": "EXTERNAL",
+      "classification": "static",
+      "status": "partial",
+      "case_ids": [
+        "java_implements_edges",
+        "java_all_edges",
+        "JAVA-IMPLEMENTS-BOUNDARY"
+      ],
+      "expected_resolution": "resolved",
+      "reason": "Existing P0 cases prove only a subset of this atomic syntax; POS/NEAR/BOUNDARY conformance is still required.",
+      "limitations": [
+        "Add independent POS, NEAR and BOUNDARY cases before promoting to covered."
+      ]
+    }
+  ]
+}

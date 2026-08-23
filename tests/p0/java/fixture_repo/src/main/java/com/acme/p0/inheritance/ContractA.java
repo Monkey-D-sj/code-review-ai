@@ -1,3 +1,5 @@
 package com.acme.p0.inheritance;
 
-public interface ContractA {}
+public interface ContractA {
+    void contract();
+}

@@ -1,11 +1,18 @@
 {
   "case_id": "java_call_static_and_constructor",
   "language": "java",
-  "p0_capabilities": ["P0-G01"],
+  "p0_capabilities": [
+    "P0-G01"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "com.acme.p0.calls::ConstructorService.ConstructorService",
   "edge_kind": "call",
   "direction": "in",
-  "expected_in": ["com.acme.p0.calls::ConstructorCaller.createService"],
-  "expected_out": []
+  "expected_in": [
+    "com.acme.p0.calls::ConstructorCaller.createService"
+  ],
+  "expected_out": [],
+  "syntax_ids": [
+    "JAVA-CALL-BARE"
+  ]
 }

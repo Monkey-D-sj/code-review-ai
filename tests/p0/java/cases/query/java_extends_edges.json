@@ -1,11 +1,18 @@
 {
   "case_id": "java_extends_edges",
   "language": "java",
-  "p0_capabilities": ["P0-G04"],
+  "p0_capabilities": [
+    "P0-G04"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "com.acme.p0.inheritance::DerivedService",
   "edge_kind": "extends",
   "direction": "both",
   "expected_in": [],
-  "expected_out": ["com.acme.p0.inheritance::BaseService"]
+  "expected_out": [
+    "com.acme.p0.inheritance::BaseService"
+  ],
+  "syntax_ids": [
+    "JAVA-EXTENDS-CLASS"
+  ]
 }

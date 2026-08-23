@@ -1,0 +1,12 @@
+{
+  "case_id": "PY-CALL-PROPERTY-NEG",
+  "language": "python",
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.dynamic_call_forms::property_form",
+  "edge_kind": "call",
+  "direction": "out",
+  "negative_kind": "property_protocol",
+  "expected_in": [],
+  "expected_out": [],
+  "syntax_ids": ["PY-CALL-PROPERTY"]
+}

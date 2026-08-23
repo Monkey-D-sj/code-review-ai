@@ -1,0 +1,16 @@
+{
+  "case_id": "JAVA-CONTAINS-INITIALIZER-POS",
+  "language": "java",
+  "p0_capabilities": ["P0-G02"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::InitBox",
+  "edge_kind": "contains",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": [
+    "com.acme.p0.calls::InitBox.static_initializer",
+    "com.acme.p0.calls::InitBox.initializer",
+    "com.acme.p0.calls::InitBox.bootstrap"
+  ],
+  "syntax_ids": ["JAVA-CONTAINS-INITIALIZER"]
+}

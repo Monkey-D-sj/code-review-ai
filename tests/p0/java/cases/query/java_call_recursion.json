@@ -1,11 +1,20 @@
 {
   "case_id": "java_call_recursion",
   "language": "java",
-  "p0_capabilities": ["P0-G01"],
+  "p0_capabilities": [
+    "P0-G01"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "com.acme.p0.calls::Recursion.direct",
   "edge_kind": "call",
   "direction": "both",
-  "expected_in": ["com.acme.p0.calls::Recursion.direct"],
-  "expected_out": ["com.acme.p0.calls::Recursion.direct"]
+  "expected_in": [
+    "com.acme.p0.calls::Recursion.direct"
+  ],
+  "expected_out": [
+    "com.acme.p0.calls::Recursion.direct"
+  ],
+  "syntax_ids": [
+    "JAVA-CALL-BARE"
+  ]
 }

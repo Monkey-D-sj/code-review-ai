@@ -87,12 +87,14 @@ def test_install_hooks_review_captures_debug_log(tmp_path):
     assert ".debug.log" in content
 
 
-def test_install_hooks_review_prompt_orders_change_summary_first(tmp_path):
+def test_install_hooks_review_prompt_uses_optional_change_context(tmp_path):
     repo = tmp_path / "proj"
     (repo / ".git").mkdir(parents=True)
     written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
     content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
-    assert content.index("get_change_summary") < content.index("query_graph")
+    assert "get_change_context" in content
+    assert "自包含改动不要调用图工具" in content
+    assert "不要先调search_symbol" in content
 
 
 def test_install_hooks_review_archives_by_date(tmp_path):
@@ -173,8 +175,8 @@ def test_install_hooks_review_prompt_contains_risk_routing(tmp_path):
     written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
     content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
     assert "自包含" in content            # 重要性判据
-    assert "query_graph" in content       # 默认动作
+    assert "get_change_context" in content  # 非局部改动的条件动作
     assert "direction=in" in content      # 默认看上游
     assert "risk" in content              # 风险信号
     assert "不作为查询深度的硬门槛" in content
-    assert content.index("get_change_summary") < content.index("query_graph")
+    assert "自包含改动不要调用图工具" in content

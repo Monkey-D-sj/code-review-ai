@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-CONTAINS-BOUNDARY",
+  "syntax_ids": ["JAVA-CONTAINS-PACKAGE-CLASS"],
+  "language": "java",
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.inheritance::BoundaryContract",
+  "edge_kind": "contains",
+  "direction": "out",
+  "negative_kind": "empty_container",
+  "expected_in": [],
+  "expected_out": []
+}

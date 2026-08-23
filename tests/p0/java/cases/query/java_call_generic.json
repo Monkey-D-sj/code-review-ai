@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-CALL-GENERIC-POS",
+  "language": "java",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::GenericCaller.callGeneric",
+  "edge_kind": "call",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": ["com.acme.p0.calls::GenericBox.consume"],
+  "syntax_ids": ["JAVA-CALL-GENERIC"]
+}

@@ -5,26 +5,23 @@
     "resolved_edge_recall": 1.0,
     "resolved_edge_precision": 1.0,
     "negative_edge_correctness": 1.0,
-    "case_coverage": 1.0,
-    "overall_context_recall": 0.9464285714
+    "exact_case_pass_rate": 1.0
   },
   "counts": {
-    "resolved_neighbor_assertions": 53,
-    "resolved_neighbor_assertions_passed": 53,
-    "negative_mechanisms": 3,
-    "negative_mechanisms_without_phantom_neighbors": 3,
-    "contexts_recovered": 53,
-    "contexts_not_recovered": 3,
-    "context_opportunities": 56,
-    "applicable_cases": 12,
-    "cases_with_passing_e2e": 12
+    "gold_resolved_neighbors": 71,
+    "returned_resolved_neighbors": 71,
+    "true_positives": 71,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "negative_mechanisms": 8,
+    "negative_mechanisms_without_phantom_neighbors": 8,
+    "registered_cases": 36,
+    "exact_cases": 36
   },
   "denominators": {
-    "resolved_edge_recall": "gold resolved in/out neighbor assertions",
-    "resolved_edge_precision": "returned resolved neighbors against complete gold sets",
-    "negative_edge_correctness": "reflection, dynamic proxy, and functional argument cases",
-    "case_coverage": "applicable registered cases",
-    "overall_context_recall": "contexts_recovered / (contexts_recovered + contexts_not_recovered); each negative mechanism counts as one unrecovered context opportunity"
-  },
-  "evidence": "tests/p0/java/e2e/test_query_graph_java.py"
+    "resolved_edge_recall": "TP / (TP + FN) over directional gold resolved neighbors",
+    "resolved_edge_precision": "TP / (TP + FP) over directional returned resolved neighbors",
+    "negative_edge_correctness": "dynamic/reflection mechanisms whose case produced no undeclared resolved neighbor",
+    "exact_case_pass_rate": "cases whose complete in/out neighbor sets equal gold"
+  }
 }

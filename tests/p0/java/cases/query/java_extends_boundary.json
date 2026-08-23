@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-EXTENDS-BOUNDARY",
+  "syntax_ids": ["JAVA-EXTENDS-CLASS"],
+  "language": "java",
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.inheritance::BaseService",
+  "edge_kind": "extends",
+  "direction": "out",
+  "negative_kind": "root_class",
+  "expected_in": [],
+  "expected_out": []
+}

@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-IMPLEMENTS-BOUNDARY",
+  "syntax_ids": ["JAVA-IMPLEMENTS-ONE"],
+  "language": "java",
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.inheritance::ContractA",
+  "edge_kind": "implements",
+  "direction": "out",
+  "negative_kind": "interface_not_implementor",
+  "expected_in": [],
+  "expected_out": []
+}

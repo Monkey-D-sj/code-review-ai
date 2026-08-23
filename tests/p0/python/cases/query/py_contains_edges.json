@@ -1,7 +1,9 @@
 {
   "case_id": "py_contains_edges",
   "language": "python",
-  "p0_capabilities": ["P0-G02"],
+  "p0_capabilities": [
+    "P0-G02"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "p0_fixture.classes.worker",
   "edge_kind": "contains",
@@ -12,5 +14,8 @@
     "p0_fixture.classes.worker::class_method_call",
     "p0_fixture.classes.worker::method_and_constructor",
     "p0_fixture.classes.worker::static_method_call"
+  ],
+  "syntax_ids": [
+    "PY-CONTAINS-MODULE-FUNCTION"
   ]
 }

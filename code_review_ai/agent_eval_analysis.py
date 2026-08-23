@@ -7,7 +7,8 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
-from code_review_ai.agent_eval import (AgentEvalCase, _create_case_snapshot,
+from code_review_ai.agent_eval import (DEFAULT_DIFFICULTY, DIFFICULTIES,
+                                       AgentEvalCase, _create_case_snapshot,
                                        _remove_case_snapshot)
 from code_review_ai.changes import assess_symbol_risk
 from code_review_ai.config import Config
@@ -25,7 +26,7 @@ def analyze_agent_report(report: dict, bootstrap_samples: int = 5000,
     if baseline not in modes:
         baseline = "diff_only" if "diff_only" in modes else modes[0]
     paired_key = f"paired_vs_{baseline}"
-    return {
+    result = {
         "schema_version": 1,
         "source_schema_version": report.get("schema_version"),
         "run_count": len(runs),
@@ -40,6 +41,53 @@ def analyze_agent_report(report: dict, bootstrap_samples: int = 5000,
             for mode in modes if mode != baseline
         },
     }
+    result["by_difficulty"] = _difficulty_analyses(
+        runs, baseline, bootstrap_samples, seed)
+    return result
+
+
+def _difficulty_analyses(runs: list[dict], requested_baseline: str,
+                         samples: int, seed: int) -> dict:
+    """Repeat the paired report within each preregistered difficulty tier."""
+    case_difficulties: dict[str, set[str]] = defaultdict(set)
+    for run in runs:
+        difficulty = run.get("difficulty", DEFAULT_DIFFICULTY)
+        if difficulty not in (*DIFFICULTIES, DEFAULT_DIFFICULTY):
+            raise ValueError(f"invalid run difficulty: {difficulty}")
+        case_difficulties[run["case_id"]].add(difficulty)
+    inconsistent = sorted(
+        case_id for case_id, values in case_difficulties.items()
+        if len(values) != 1)
+    if inconsistent:
+        raise ValueError(
+            "inconsistent difficulty labels for cases: " + ", ".join(inconsistent))
+
+    result = {}
+    order = (*DIFFICULTIES, DEFAULT_DIFFICULTY)
+    for offset, difficulty in enumerate(order):
+        selected = [run for run in runs
+                    if run.get("difficulty", DEFAULT_DIFFICULTY) == difficulty]
+        if not selected:
+            continue
+        modes = list(dict.fromkeys(run["mode"] for run in selected))
+        baseline = requested_baseline if requested_baseline in modes else modes[0]
+        paired_key = f"paired_vs_{baseline}"
+        result[difficulty] = {
+            "case_count": len({run["case_id"] for run in selected}),
+            "run_count": len(selected),
+            "baseline_mode": baseline,
+            "modes": {
+                mode: _mode_analysis(selected, mode, samples,
+                                     seed + offset * 100)
+                for mode in modes
+            },
+            paired_key: {
+                mode: _paired_analysis(selected, baseline, mode, samples,
+                                       seed + offset * 100)
+                for mode in modes if mode != baseline
+            },
+        }
+    return result
 
 
 def _mode_analysis(runs: list[dict], mode: str, samples: int,
@@ -58,6 +106,14 @@ def _mode_analysis(runs: list[dict], mode: str, samples: int,
         "f1": _clustered_estimate(cases, "f1", samples, seed + 2),
         "total_cost_usd": round(sum(costs), 6),
         "mean_cost_usd": round(sum(costs) / len(selected), 6),
+        "mean_input_tokens": _mean_values(
+            [_usage_metric(run, "input_tokens") for run in selected]),
+        "mean_output_tokens": _mean_values(
+            [_usage_metric(run, "output_tokens") for run in selected]),
+        "mean_total_tokens": _mean_values(
+            [_total_tokens(run) for run in selected]),
+        "mean_files_read": _mean_values(
+            [float(len(run.get("files_read", []))) for run in selected]),
         "stable_case_hits": sum(all(run["recall"] == 1 for run in case_runs)
                                 for case_runs in cases.values()),
         "cases_with_any_hit": sum(any(run["recall"] > 0 for run in case_runs)
@@ -95,7 +151,32 @@ def _paired_analysis(runs: list[dict], baseline_mode: str, mode: str,
         "f1_losses": sum(delta < 0 for delta in f1_deltas),
         "cost_delta_usd": round(sum(_cost(candidate) - _cost(baseline)
                                     for baseline, candidate in pairs), 6),
+        "input_tokens_delta": _paired_metric(
+            pairs, lambda run: _usage_metric(run, "input_tokens"),
+            samples, seed + 2),
+        "output_tokens_delta": _paired_metric(
+            pairs, lambda run: _usage_metric(run, "output_tokens"),
+            samples, seed + 3),
+        "total_tokens_delta": _paired_metric(
+            pairs, _total_tokens, samples, seed + 4),
+        "elapsed_ms_delta": _paired_metric(
+            pairs, lambda run: float(run.get("elapsed_ms", 0)),
+            samples, seed + 5),
+        "tool_calls_delta": _paired_metric(
+            pairs, _tool_call_count, samples, seed + 6),
+        "files_read_delta": _paired_metric(
+            pairs, lambda run: float(len(run.get("files_read", []))),
+            samples, seed + 7),
     }
+
+
+def _paired_metric(pairs: list[tuple[dict, dict]], getter,
+                   samples: int, seed: int) -> dict:
+    grouped: dict[str, list[float]] = defaultdict(list)
+    for baseline, candidate in pairs:
+        grouped[baseline["case_id"]].append(
+            float(getter(candidate)) - float(getter(baseline)))
+    return _clustered_values(grouped, samples, seed)
 
 
 def _group_deltas(pairs: list[tuple[dict, dict]], metric: str
@@ -139,6 +220,27 @@ def _percentile(values: list[float], fraction: float) -> float:
 def _cost(run: dict) -> float:
     value = run.get("usage", {}).get("total_cost_usd")
     return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _usage_metric(run: dict, key: str) -> float:
+    value = run.get("usage", {}).get(key)
+    return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _total_tokens(run: dict) -> float:
+    return (_usage_metric(run, "input_tokens") +
+            _usage_metric(run, "output_tokens"))
+
+
+def _tool_call_count(run: dict) -> float:
+    value = run.get("tool_call_count")
+    if isinstance(value, int):
+        return float(value)
+    return float(len(run.get("tool_calls", [])))
+
+
+def _mean_values(values: list[float]) -> float:
+    return round(sum(values) / len(values), 4) if values else 0.0
 
 
 def analyze_file(report_path: str, output_path: str | None = None) -> dict:

@@ -1,17 +1,28 @@
 {
   "case_id": "java_all_edges",
   "language": "java",
-  "p0_capabilities": ["P0-G06"],
+  "p0_capabilities": [
+    "P0-G06"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "com.acme.p0.inheritance::DerivedService",
   "edge_kind": "all",
   "direction": "both",
-  "expected_in": ["com.acme.p0.inheritance"],
+  "expected_in": [
+    "com.acme.p0.inheritance"
+  ],
   "expected_out": [
     "com.acme.p0.inheritance::BaseService",
     "com.acme.p0.inheritance::ContractA",
     "com.acme.p0.inheritance::ContractB",
     "com.acme.p0.inheritance::DerivedService.DerivedService",
     "com.acme.p0.inheritance::DerivedService.derivedMethod"
+  ],
+  "syntax_ids": [
+    "JAVA-CALL-BARE",
+    "JAVA-CONTAINS-PACKAGE-CLASS",
+    "JAVA-IMPORT-REGULAR",
+    "JAVA-EXTENDS-CLASS",
+    "JAVA-IMPLEMENTS-ONE"
   ]
 }

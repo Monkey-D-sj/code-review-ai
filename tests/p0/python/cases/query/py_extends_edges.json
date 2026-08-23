@@ -1,11 +1,20 @@
 {
   "case_id": "py_extends_edges",
   "language": "python",
-  "p0_capabilities": ["P0-G04"],
+  "p0_capabilities": [
+    "P0-G04"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "p0_fixture.inheritance.child::Mid",
   "edge_kind": "extends",
   "direction": "both",
-  "expected_in": ["p0_fixture.inheritance.child::Child"],
-  "expected_out": ["p0_fixture.inheritance.base::Base"]
+  "expected_in": [
+    "p0_fixture.inheritance.child::Child"
+  ],
+  "expected_out": [
+    "p0_fixture.inheritance.base::Base"
+  ],
+  "syntax_ids": [
+    "PY-EXTENDS-SAME-MODULE"
+  ]
 }

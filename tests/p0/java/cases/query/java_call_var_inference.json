@@ -1,0 +1,11 @@
+{
+  "case_id": "JAVA-CALL-VAR-POS",
+  "syntax_ids": ["JAVA-CALL-VAR"],
+  "language": "java",
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::VarTarget.run",
+  "edge_kind": "call",
+  "direction": "in",
+  "expected_in": ["com.acme.p0.calls::VarCaller.use"],
+  "expected_out": []
+}

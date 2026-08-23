@@ -6,49 +6,49 @@
       "case_id": "py_call_top_level_and_control_flow",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-001", "CALL-002", "CALL-003", "CALL-004", "CALL-005"]
+      "evidence": ["py_call_top_level_and_control_flow"]
     },
     {
       "capability": "P0-G01",
       "case_id": "py_call_scope_and_recursion",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-006", "CALL-007"]
+      "evidence": ["py_call_scope_and_recursion"]
     },
     {
       "capability": "P0-G01",
       "case_id": "py_call_methods_and_constructor",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-008", "CALL-009", "CALL-010", "CALL-011"]
+      "evidence": ["py_call_methods_and_constructor"]
     },
     {
       "capability": "P0-G01",
       "case_id": "py_call_cross_module",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-012", "CALL-013", "CALL-014", "CALL-015"]
+      "evidence": ["py_call_cross_module"]
     },
     {
       "capability": "P0-G02",
       "case_id": "py_contains_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CONTAINS-001", "CONTAINS-002", "CONTAINS-003", "CONTAINS-004"]
+      "evidence": ["py_contains_edges"]
     },
     {
       "capability": "P0-G03",
       "case_id": "py_import_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["IMPORT-001", "IMPORT-002", "IMPORT-003", "IMPORT-004"]
+      "evidence": ["py_import_edges"]
     },
     {
       "capability": "P0-G04",
       "case_id": "py_extends_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["EXTENDS-001", "EXTENDS-002", "EXTENDS-003"]
+      "evidence": ["py_extends_edges"]
     },
     {
       "capability": "P0-G05",
@@ -61,21 +61,175 @@
       "case_id": "py_all_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["ALL-001"]
+      "evidence": ["py_all_edges"]
     },
     {
       "capability": "P0-G07",
       "case_id": "py_query_contract",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["QUERY-001", "QUERY-002", "QUERY-003", "QUERY-004"]
+      "evidence": ["py_query_contract"]
     },
     {
       "capability": "P0-G01",
       "case_id": "py_nonresolved_call_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-NEG-001", "CALL-NEG-002", "CALL-NEG-003"]
+      "evidence": ["py_nonresolved_call_edges"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-NESTED-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-NESTED-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-MUTUAL-RECURSIVE-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-MUTUAL-RECURSIVE-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-CLOSURE-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-CLOSURE-POS"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "PY-CONTAINS-BOUNDARY",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CONTAINS-BOUNDARY"]
+    },
+    {
+      "capability": "P0-G03",
+      "case_id": "PY-IMPORT-BOUNDARY",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-IMPORT-BOUNDARY"]
+    },
+    {
+      "capability": "P0-G04",
+      "case_id": "PY-EXTENDS-BOUNDARY",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-EXTENDS-BOUNDARY"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-ASYNC-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-ASYNC-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-GENERATOR-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-GENERATOR-POS"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "PY-CONTAINS-FUNCTION-NESTED-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CONTAINS-FUNCTION-NESTED-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-STATICMETHOD-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-STATICMETHOD-POS"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "PY-CONTAINS-CLASS-NESTED-CLASS-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CONTAINS-CLASS-NESTED-CLASS-POS"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "PY-CONTAINS-DECORATED-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CONTAINS-DECORATED-POS"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "PY-CONTAINS-ASYNC-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CONTAINS-ASYNC-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-LAMBDA-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-LAMBDA-POS"]
+    },
+    {
+      "capability": "P0-G03",
+      "case_id": "PY-IMPORT-DYNAMIC-CONSTANT-NEG",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-IMPORT-DYNAMIC-CONSTANT-NEG"]
+    },
+    {
+      "capability": "P0-G03",
+      "case_id": "PY-IMPORT-DYNAMIC-VARIABLE-NEG",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-IMPORT-DYNAMIC-VARIABLE-NEG"]
+    },
+    {
+      "capability": "P0-G04",
+      "case_id": "PY-EXTENDS-DYNAMIC-NEG",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-EXTENDS-DYNAMIC-NEG"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-CALLABLE-NEG",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-CALLABLE-NEG"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-PROPERTY-NEG",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-PROPERTY-NEG"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-MAGIC-NEG",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-MAGIC-NEG"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-WITH-NEG",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-WITH-NEG"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "PY-CALL-PARTIAL-NEG",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["PY-CALL-PARTIAL-NEG"]
     }
   ]
 }

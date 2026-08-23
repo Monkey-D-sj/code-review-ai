@@ -1,7 +1,9 @@
 {
   "case_id": "py_call_cross_module",
   "language": "python",
-  "p0_capabilities": ["P0-G01"],
+  "p0_capabilities": [
+    "P0-G01"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "p0_fixture.modules.api::cross_target",
   "edge_kind": "call",
@@ -11,5 +13,8 @@
     "p0_fixture.calls.imports::import_consumer",
     "p0_fixture.modules.api::aggregate"
   ],
-  "expected_out": []
+  "expected_out": [],
+  "syntax_ids": [
+    "PY-CALL-TOP"
+  ]
 }

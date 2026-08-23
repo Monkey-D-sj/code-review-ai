@@ -3,6 +3,26 @@
   "fixture": "fixture_repo",
   "edge_kind": "call",
   "cases": [
-    {"case_id":"ts_query_contract","p0_capabilities":["P0-G07"],"qualified_name":"api::fetchUser","direction":"both","expected_in":["calls::arrowCall","calls::branchCall","calls::crossFileAliasCall","calls::topLevelCall","calls::tryCall","hooks::useUser","modules::useModuleImports"],"expected_out":[]}
+    {
+      "case_id": "ts_query_contract",
+      "p0_capabilities": [
+        "P0-G07"
+      ],
+      "qualified_name": "api::fetchUser",
+      "direction": "both",
+      "expected_in": [
+        "calls::arrowCall",
+        "calls::branchCall",
+        "calls::crossFileAliasCall",
+        "calls::topLevelCall",
+        "calls::tryCall",
+        "hooks::useUser",
+        "modules::useModuleImports"
+      ],
+      "expected_out": [],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION"
+      ]
+    }
   ]
 }

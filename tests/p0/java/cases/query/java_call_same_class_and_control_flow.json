@@ -1,7 +1,9 @@
 {
   "case_id": "java_call_same_class_and_control_flow",
   "language": "java",
-  "p0_capabilities": ["P0-G01"],
+  "p0_capabilities": [
+    "P0-G01"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "com.acme.p0.calls::FlowCaller.run",
   "edge_kind": "call",
@@ -23,5 +25,8 @@
     "com.acme.p0.imports::StaticImports.staticLoad",
     "com.acme.p0.imports::StaticImports.staticSave",
     "com.acme.p0.imports::TargetService.save"
+  ],
+  "syntax_ids": [
+    "JAVA-CALL-BARE"
   ]
 }

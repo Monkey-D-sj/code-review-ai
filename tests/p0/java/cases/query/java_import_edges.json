@@ -1,7 +1,9 @@
 {
   "case_id": "java_import_edges",
   "language": "java",
-  "p0_capabilities": ["P0-G03"],
+  "p0_capabilities": [
+    "P0-G03"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "com.acme.p0.calls",
   "edge_kind": "import",
@@ -11,5 +13,8 @@
     "com.acme.p0.imports",
     "com.acme.p0.inheritance",
     "com.acme.p0.scope"
+  ],
+  "syntax_ids": [
+    "JAVA-IMPORT-REGULAR"
   ]
 }

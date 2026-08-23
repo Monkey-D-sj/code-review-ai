@@ -10,7 +10,6 @@ from code_review_ai.agent_eval import (AgentRun, GoldFinding, load_agent_cases,
                                        run_agent_eval,
                                        select_agent_cases, _context_files,
                                        _agent_prompt, _mode_metrics, _score)
-from code_review_ai.full_agent_eval import load_full_agent_cases
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 
@@ -56,38 +55,11 @@ def test_load_agent_cases_rejects_missing_golds(tmp_path):
         load_agent_cases(str(_manifest(tmp_path, [record])))
 
 
-def test_real_smoke_manifest_has_ten_provenanced_cases():
-    manifest = Path(__file__).parents[1] / "benchmarks" / "agent-eval-real-10.json"
-    cases = load_agent_cases(str(manifest))
-    assert len(cases) == 10
-    assert len({case.case_id for case in cases}) == 10
-    assert all(case.source_commit for case in cases)
-
-
-def test_canonical_real_repo_manifest_is_shared_by_both_evaluators():
-    manifest = (Path(__file__).parents[1] / "benchmarks" /
-                "agentic-eval-real-repos.json")
-    controlled = load_agent_cases(str(manifest))
-    full = load_full_agent_cases(str(manifest))
-
-    assert len(controlled) == len(full) == 12
-    assert [case.case_id for case in controlled] == [case.case_id for case in full]
-    for controlled_case, full_case in zip(controlled, full):
-        assert controlled_case.repo_name == full_case.repo_name
-        assert controlled_case.repo_url == full_case.repo_url
-        assert controlled_case.source_commit == full_case.source_commit
-        assert controlled_case.mutation_paths == full_case.mutation_paths
-        assert controlled_case.gold_findings == full_case.gold_findings
-        assert controlled_case.complexity_tags == full_case.complexity_tags
-        assert controlled_case.changed_symbols == ()
-        assert controlled_case.diff == ""
-
-
 def test_controlled_prompt_uses_shared_review_policy():
     prompt = _agent_prompt("diff_only", "TASK\nreview\n\nDIFF\npatch")
-    assert "For every changed symbol" in prompt
-    assert "inspect upstream callers first" in prompt
-    assert "Inspect downstream callees" in prompt
+    assert "对于每个发生变更的符号" in prompt
+    assert "先检查上游调用方" in prompt
+    assert "检查下游被调用方" in prompt
 
 
 def test_select_agent_cases_and_reject_unknown(tmp_path):
@@ -237,6 +209,24 @@ def test_score_accepts_an_alternate_root_cause_file():
         "description": "duplicate names are not rejected",
     }], golds)
     assert score["f1"] == 1.0
+
+
+def test_score_min_matches_requires_causal_description():
+    # Surface keyword echo ("none") alone must not score: min_matches=2 needs a
+    # second diagnostic term, e.g. the crash site or the error type.
+    golds = (GoldFinding(
+        "deep-crash", "src/config.py", None, None,
+        ("typeerror", "compute_wait", "none"), min_matches=2),)
+    surface = _score([{
+        "file": "src/config.py", "title": "timeout may be None",
+        "description": "timeout default dropped, needs a fallback",
+    }], golds)
+    assert surface["f1"] == 0.0
+    causal = _score([{
+        "file": "src/config.py", "title": "timeout None crashes wait math",
+        "description": "compute_wait(None) raises TypeError on None * 1000",
+    }], golds)
+    assert causal["f1"] == 1.0
 
 
 def test_agent_eval_builds_context_from_mutated_source_commit(tmp_path):

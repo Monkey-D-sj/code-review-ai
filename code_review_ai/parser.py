@@ -66,6 +66,8 @@ LANG = {
             "function_declaration": "function",
             "class_declaration": "class",
             "interface_declaration": "interface",
+            "enum_declaration": "enum",
+            "internal_module": "namespace",
             "method_definition": "method",
         },
         "scope_nodes": {
@@ -114,10 +116,12 @@ LANG = {
             "record_declaration": "class",
             "method_declaration": "method",
             "constructor_declaration": "method",
+            "compact_constructor_declaration": "method",
         },
         "scope_nodes": {
             "class_declaration", "interface_declaration", "enum_declaration",
             "record_declaration", "method_declaration", "constructor_declaration",
+            "compact_constructor_declaration",
         },
         "call_node": {"method_invocation", "object_creation_expression"},
         "constructor_node": "object_creation_expression",
@@ -313,6 +317,7 @@ class ParsedFile:
     imports: list[ImportEntry] = field(default_factory=list)
     inherits: list[RawInherit] = field(default_factory=list)
     var_types: dict[str, dict[str, str]] = field(default_factory=dict)
+    return_types: dict[str, str] = field(default_factory=dict)
     di_decls: list[DiDecl] = field(default_factory=list)
     module_all: set[str] | None = None
     default_export: str | None = None
@@ -455,6 +460,8 @@ def _type_base_name(type_node) -> str | None:
     ``var`` (Java 10 inference) -> None."""
     if type_node is None:
         return None
+    if type_node.type == "scoped_type_identifier":
+        return type_node.text.decode("utf-8")
     if type_node.type == "type_identifier":
         text = type_node.text.decode("utf-8")
         return None if text == "var" else text
@@ -472,6 +479,40 @@ def _collect_java_var_types(root, module_qname, lang) -> dict[str, dict[str, str
     for child in root.children:
         if class_defs and child.type in class_defs:
             _java_class_var_types(child, module_qname, lang, out)
+    return out
+
+
+def _collect_java_return_types(root, module_qname, lang) -> dict[str, str]:
+    """Build ``{method_qname: return_type}`` for statically named Java methods.
+
+    This deliberately records only declared, named return types.  It gives the
+    resolver enough information for ``factory.create().run()`` without trying
+    to infer return values from arbitrary control flow or overload selection.
+    """
+    out: dict[str, str] = {}
+    class_defs = lang.get("class_def_nodes") or set()
+
+    def visit_class(node, parent_qname: str | None = None) -> None:
+        name_node = node.child_by_field_name("name")
+        if name_node is None:
+            return
+        cls_qname = qname.join(module_qname, name_node.text.decode("utf-8"),
+                               parent_qname)
+        body = node.child_by_field_name("body")
+        for member in (body.children if body is not None else []):
+            if member.type == "method_declaration":
+                method_name = member.child_by_field_name("name")
+                return_node = member.child_by_field_name("type")
+                return_type = _type_base_name(return_node)
+                if method_name is not None and return_type is not None:
+                    out[qname.join(module_qname, method_name.text.decode("utf-8"),
+                                   cls_qname)] = return_type
+            if member.type in class_defs:
+                visit_class(member, cls_qname)
+
+    for child in root.children:
+        if child.type in class_defs:
+            visit_class(child)
     return out
 
 
@@ -528,14 +569,27 @@ def _java_locals(node, scope) -> None:
     for child in node.children:
         if child.type == "local_variable_declaration":
             type_name = _type_base_name(child.child_by_field_name("type"))
-            if type_name is None:
-                continue
             for decl in child.children:
                 if decl.type == "variable_declarator":
                     name_node = decl.child_by_field_name("name")
                     if name_node is not None:
-                        scope[name_node.text.decode("utf-8")] = type_name
+                        inferred = type_name or _java_initializer_type(decl)
+                        if inferred is not None:
+                            scope[name_node.text.decode("utf-8")] = inferred
         _java_locals(child, scope)
+
+
+def _java_initializer_type(declarator) -> str | None:
+    """Infer a local receiver type from a Java ``var`` initializer.
+
+    Only declarations whose initializer names a concrete constructor are
+    deterministic.  Method-call initializers remain unknown because resolving
+    those requires return-type/signature analysis and must not be guessed.
+    """
+    value = declarator.child_by_field_name("value")
+    if value is None or value.type != "object_creation_expression":
+        return None
+    return _type_base_name(value.child_by_field_name("type"))
 
 
 # Receiver declared-type binding (PY-M12) collects annotated variable types for
@@ -706,6 +760,14 @@ def _ts_type_text(node) -> str | None:
                if child.type == "type_annotation"), None)
     if ta is None:
         return None
+    generic = next((child for child in ta.children
+                    if child.type == "generic_type"), None)
+    if generic is not None:
+        name_node = generic.child_by_field_name("name") or next(
+            (child for child in generic.children
+             if child.type == "type_identifier"), None)
+        if name_node is not None:
+            return name_node.text.decode("utf-8")
     inner = next((child for child in ta.children
                   if child.type in _TS_SIMPLE_TYPE_NODES), None)
     return inner.text.decode("utf-8") if inner is not None else None
@@ -1086,6 +1148,87 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
     pending: list[str] = []
     for child in node.children:
         t = child.type
+        if parent_kind == "object" and t == "pair":
+            key = child.child_by_field_name("key")
+            value = child.child_by_field_name("value")
+            if key is not None and value is not None and value.type in (
+                    "arrow_function", "function_expression"):
+                name = key.text.decode("utf-8")
+                function_qn = qname.join(module_qname, name, scope_qname)
+                output.append(ParsedNode(
+                    qualified_name=function_qn, kind="function", file_path="",
+                    start_line=child.start_point[0] + 1,
+                    end_line=child.end_point[0] + 1,
+                    signature=_sig(source, value), parent_qname=scope_qname,
+                ))
+                _walk_defs_typed(value, source, module_qname, function_qn,
+                                 "function", lang, output)
+            continue
+        if lang.get("class_def") == "class_definition" and t in (
+                "assignment", "expression_statement"):
+            if _maybe_lambda_def(child, source, module_qname, scope_qname,
+                                 output):
+                continue
+        if lang.get("class_def_nodes") and parent_kind == "class" and t == "enum_constant":
+            name_node = child.child_by_field_name("name")
+            if name_node is not None:
+                name = name_node.text.decode("utf-8")
+                output.append(ParsedNode(
+                    qualified_name=qname.join(module_qname, name, scope_qname),
+                    kind="enum_member", file_path="",
+                    start_line=child.start_point[0] + 1,
+                    end_line=child.end_point[0] + 1,
+                    signature=_sig(source, child), parent_qname=scope_qname,
+                ))
+            continue
+        if lang.get("class_def_nodes") and parent_kind == "class" and t == "formal_parameter":
+            name_node = child.child_by_field_name("name")
+            if name_node is not None:
+                name = name_node.text.decode("utf-8")
+                output.append(ParsedNode(
+                    qualified_name=qname.join(module_qname, name, scope_qname),
+                    kind="record_component", file_path="",
+                    start_line=child.start_point[0] + 1,
+                    end_line=child.end_point[0] + 1,
+                    signature=_sig(source, child), parent_qname=scope_qname,
+                ))
+            continue
+        if (lang.get("class_def_nodes") and parent_kind == "class"
+                and t in ("static_initializer", "block")):
+            initializer_name = "static_initializer" if t == "static_initializer" else "initializer"
+            initializer_qn = qname.join(module_qname, initializer_name, scope_qname)
+            output.append(ParsedNode(
+                qualified_name=initializer_qn, kind="initializer", file_path="",
+                start_line=child.start_point[0] + 1,
+                end_line=child.end_point[0] + 1,
+                signature=_sig(source, child), parent_qname=scope_qname,
+            ))
+            _walk_defs_typed(child, source, module_qname, initializer_qn,
+                             "initializer", lang, output)
+            continue
+        if parent_kind == "enum" and t == "property_identifier":
+            name = t and child.text.decode("utf-8")
+            qn = qname.join(module_qname, name, scope_qname)
+            output.append(ParsedNode(
+                qualified_name=qn, kind="enum_member", file_path="",
+                start_line=child.start_point[0] + 1,
+                end_line=child.end_point[0] + 1,
+                signature=_sig(source, child), parent_qname=scope_qname,
+            ))
+            continue
+        if parent_kind == "interface" and t in (
+                "method_signature", "property_signature"):
+            name_node = child.child_by_field_name("name")
+            if name_node is not None:
+                name = name_node.text.decode("utf-8")
+                qn = qname.join(module_qname, name, scope_qname)
+                output.append(ParsedNode(
+                    qualified_name=qn, kind="method" if t == "method_signature" else "field",
+                    file_path="", start_line=child.start_point[0] + 1,
+                    end_line=child.end_point[0] + 1, signature=_sig(source, child),
+                    parent_qname=scope_qname,
+                ))
+            continue
         if deco_types and t in deco_types:
             pending.append(_decorator_name(child))
             continue
@@ -1104,7 +1247,7 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
         if t in lang["def_nodes"]:
             # method_definition outside a class is just an object-literal
             # shorthand — not a real definition
-            if t == "method_definition" and parent_kind != "class":
+            if t == "method_definition" and parent_kind not in ("class", "object"):
                 _walk_defs_typed(child, source, module_qname, scope_qname, parent_kind, lang, output)
                 continue
             name_node = child.child_by_field_name("name")
@@ -1114,6 +1257,8 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
             qn = qname.join(module_qname, name, scope_qname)
             kind = lang["def_nodes"][t]
             if kind == "function" and parent_kind == "class":
+                kind = "method"
+            elif kind == "method" and parent_kind == "object":
                 kind = "method"
             decorators = list(pending)
             if deco_types:
@@ -1126,9 +1271,16 @@ def _walk_defs_typed(node, source, module_qname, scope_qname, parent_kind, lang,
             ))
             pending = []
             _walk_defs_typed(child, source, module_qname, qn, kind, lang, output)
-        elif lang.get("detect_arrow_in_vars") and t == "variable_declarator":
+        elif lang.get("detect_arrow_in_vars") and t in (
+                "variable_declarator", "public_field_definition"):
             pending = []
-            _maybe_arrow_def(child, source, module_qname, scope_qname, parent_kind, lang, output)
+            value = child.child_by_field_name("value")
+            if value is not None and value.type == "object":
+                _maybe_object_def(child, source, module_qname, scope_qname,
+                                  parent_kind, lang, output)
+            else:
+                _maybe_arrow_def(child, source, module_qname, scope_qname,
+                                 parent_kind, lang, output)
         else:
             if child.children:
                 pending = []
@@ -1156,6 +1308,52 @@ def _maybe_arrow_def(node, source, module_qname, scope_qname, parent_kind, lang,
         signature=_sig(source, value), parent_qname=scope_qname,
     ))
     _walk_defs_typed(value, source, module_qname, qn, kind, lang, output)
+
+
+def _maybe_object_def(node, source, module_qname, scope_qname, parent_kind,
+                      lang, output):
+    """Index a named object literal and its method shorthand members.
+
+    The object binding is a stable receiver symbol, so ``holder.run()`` can
+    resolve exactly like a class receiver without guessing the object's
+    runtime shape.
+    """
+    name_node = node.child_by_field_name("name")
+    value = node.child_by_field_name("value")
+    if name_node is None or value is None:
+        return
+    name = name_node.text.decode("utf-8")
+    object_qn = qname.join(module_qname, name, scope_qname)
+    output.append(ParsedNode(
+        qualified_name=object_qn, kind="object", file_path="",
+        start_line=node.start_point[0] + 1, end_line=node.end_point[0] + 1,
+        signature=_sig(source, value), parent_qname=scope_qname,
+    ))
+    _walk_defs_typed(value, source, module_qname, object_qn, "object", lang,
+                     output)
+
+
+def _maybe_lambda_def(node, source, module_qname, scope_qname, output) -> bool:
+    """Index a Python ``name = lambda ...`` binding as a callable node."""
+    assignment = node if node.type == "assignment" else next(
+        (child for child in node.children if child.type == "assignment"), None)
+    if assignment is None:
+        return False
+    left = assignment.child_by_field_name("left")
+    right = assignment.child_by_field_name("right")
+    if left is None or left.type != "identifier" or right is None:
+        return False
+    if right.type != "lambda":
+        return False
+    name = left.text.decode("utf-8")
+    output.append(ParsedNode(
+        qualified_name=qname.join(module_qname, name, scope_qname),
+        kind="function", file_path="",
+        start_line=assignment.start_point[0] + 1,
+        end_line=assignment.end_point[0] + 1,
+        signature=_sig(source, right), parent_qname=scope_qname,
+    ))
+    return True
 
 
 _INHERIT_BASE_TYPES = ("identifier", "type_identifier", "property_identifier",
@@ -1280,6 +1478,7 @@ def parse_file(file_path: str, repo_root: str, lang: dict | None = None) -> Pars
     _walk_inherits(root, module_qname, lang, pf.inherits)
     if lang_name == "java":
         pf.var_types = _collect_java_var_types(root, module_qname, lang)
+        pf.return_types = _collect_java_return_types(root, module_qname, lang)
         pf.di_decls = _collect_java_di(root, module_qname, lang)
         mappings = _collect_java_mappings(root, module_qname, lang)
         for n in pf.nodes:
@@ -1341,7 +1540,21 @@ def _call_target(func_node) -> tuple[str, str]:
     if t == "identifier":
         return func_node.text.decode("utf-8"), CALL_SIMPLE
     if t in ("attribute", "member_expression"):
-        return func_node.text.decode("utf-8"), CALL_ATTRIBUTE
+        expr = func_node.text.decode("utf-8")
+        # Constant computed and optional members have deterministic static
+        # names. Normalize them to the ordinary attribute form so the resolver
+        # can apply declared receiver binding; dynamic keys remain CALL_OTHER.
+        expr = expr.replace("?.", ".")
+        match = re.fullmatch(r"(.+)\[['\"]([A-Za-z_$][A-Za-z0-9_$]*)['\"]\]", expr)
+        if match:
+            expr = f"{match.group(1)}.{match.group(2)}"
+        return expr, CALL_ATTRIBUTE
+    if t in ("subscript", "subscript_expression"):
+        expr = func_node.text.decode("utf-8")
+        match = re.fullmatch(r"(.+)\[['\"]([A-Za-z_$][A-Za-z0-9_$]*)['\"]\]", expr)
+        if match:
+            return f"{match.group(1)}.{match.group(2)}", CALL_ATTRIBUTE
+        return expr, CALL_OTHER
     return func_node.text.decode("utf-8"), CALL_OTHER
 
 
@@ -1466,8 +1679,21 @@ def _walk_calls(node, module_qname, cur_scope, lang, out,
                 _walk_calls(child, module_qname, new_scope, lang, out, mockmvc_requests)
             else:
                 _walk_calls(child, module_qname, cur_scope, lang, out, mockmvc_requests)
-        elif lang.get("detect_arrow_in_vars") and child.type == "variable_declarator":
+        elif lang.get("detect_arrow_in_vars") and child.type in (
+                "variable_declarator", "public_field_definition"):
             _maybe_arrow_scope(child, module_qname, cur_scope, lang, out, mockmvc_requests)
+        elif child.type == "pair" and cur_scope:
+            key = child.child_by_field_name("key")
+            value = child.child_by_field_name("value")
+            if key is not None and value is not None and value.type in (
+                    "arrow_function", "function_expression"):
+                name = key.text.decode("utf-8")
+                function_scope = qname.join(module_qname, name, cur_scope)
+                _walk_calls(value, module_qname, function_scope, lang, out,
+                             mockmvc_requests)
+            else:
+                _walk_calls(child, module_qname, cur_scope, lang, out,
+                            mockmvc_requests)
         else:
             _walk_calls(child, module_qname, cur_scope, lang, out, mockmvc_requests)
 

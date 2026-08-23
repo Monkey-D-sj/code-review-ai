@@ -1,7 +1,9 @@
 {
   "case_id": "java_implements_edges",
   "language": "java",
-  "p0_capabilities": ["P0-G05"],
+  "p0_capabilities": [
+    "P0-G05"
+  ],
   "fixture": "fixture_repo",
   "qualified_name": "com.acme.p0.inheritance::DerivedService",
   "edge_kind": "implements",
@@ -10,5 +12,8 @@
   "expected_out": [
     "com.acme.p0.inheritance::ContractA",
     "com.acme.p0.inheritance::ContractB"
+  ],
+  "syntax_ids": [
+    "JAVA-IMPLEMENTS-ONE"
   ]
 }

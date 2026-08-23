@@ -1,0 +1,11 @@
+{
+  "case_id": "JAVA-CALL-SUPER-POS",
+  "syntax_ids": ["JAVA-CALL-SUPER"],
+  "language": "java",
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::SuperBase.run",
+  "edge_kind": "call",
+  "direction": "in",
+  "expected_in": ["com.acme.p0.calls::SuperChild.callParent"],
+  "expected_out": []
+}

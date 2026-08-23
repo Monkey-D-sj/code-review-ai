@@ -6,84 +6,252 @@
       "case_id": "java_call_same_class_and_control_flow",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-001", "CALL-002", "CALL-003", "CALL-004", "CALL-005"]
+      "evidence": ["java_call_same_class_and_control_flow"]
     },
     {
       "capability": "P0-G01",
       "case_id": "java_call_static_and_constructor",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-006", "CALL-007"]
+      "evidence": ["java_call_static_and_constructor"]
     },
     {
       "capability": "P0-G01",
       "case_id": "java_call_cross_package_and_static_import",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-008", "CALL-009", "CALL-010"]
+      "evidence": ["java_call_cross_package_and_static_import"]
     },
     {
       "capability": "P0-G01",
       "case_id": "java_call_overload_and_scope",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-011", "CALL-012"]
+      "evidence": ["java_call_overload_and_scope"]
     },
     {
       "capability": "P0-G01",
       "case_id": "java_call_recursion",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-013", "CALL-014"]
+      "evidence": ["java_call_recursion"]
     },
     {
       "capability": "P0-G02",
       "case_id": "java_contains_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CONTAINS-001", "CONTAINS-002", "CONTAINS-003"]
+      "evidence": ["java_contains_edges"]
     },
     {
       "capability": "P0-G03",
       "case_id": "java_import_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["IMPORT-001", "IMPORT-002", "IMPORT-003"]
+      "evidence": ["java_import_edges"]
     },
     {
       "capability": "P0-G04",
       "case_id": "java_extends_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["EXTENDS-001", "EXTENDS-002"]
+      "evidence": ["java_extends_edges"]
     },
     {
       "capability": "P0-G05",
       "case_id": "java_implements_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["IMPLEMENTS-001", "IMPLEMENTS-002"]
+      "evidence": ["java_implements_edges"]
     },
     {
       "capability": "P0-G06",
       "case_id": "java_all_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["ALL-001"]
+      "evidence": ["java_all_edges"]
     },
     {
       "capability": "P0-G07",
       "case_id": "java_query_contract",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["QUERY-001", "QUERY-002", "QUERY-003", "QUERY-004"]
+      "evidence": ["java_query_contract"]
     },
     {
       "capability": "P0-G01",
       "case_id": "java_nonresolved_call_edges",
       "test_kind": "query_e2e",
       "status": "covered",
-      "evidence": ["CALL-NEG-001", "CALL-NEG-002", "CALL-NEG-003"]
+      "evidence": ["java_nonresolved_call_edges"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-VAR-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-VAR-POS"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "JAVA-CONTAINS-BOUNDARY",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CONTAINS-BOUNDARY"]
+    },
+    {
+      "capability": "P0-G03",
+      "case_id": "JAVA-IMPORT-BOUNDARY",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-IMPORT-BOUNDARY"]
+    },
+    {
+      "capability": "P0-G04",
+      "case_id": "JAVA-EXTENDS-BOUNDARY",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-EXTENDS-BOUNDARY"]
+    },
+    {
+      "capability": "P0-G05",
+      "case_id": "JAVA-IMPLEMENTS-BOUNDARY",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-IMPLEMENTS-BOUNDARY"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-SUPER-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-SUPER-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-MUTUAL-RECURSION-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-MUTUAL-RECURSION-POS"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "JAVA-CONTAINS-INTERFACE-METHOD-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CONTAINS-INTERFACE-METHOD-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-INNER-CLASS-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-INNER-CLASS-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-LAMBDA-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-LAMBDA-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-ANONYMOUS-CLASS-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-ANONYMOUS-CLASS-POS"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "JAVA-CONTAINS-ENUM-MEMBER-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CONTAINS-ENUM-MEMBER-POS"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "JAVA-CONTAINS-RECORD-COMPONENT-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CONTAINS-RECORD-COMPONENT-POS"]
+    },
+    {
+      "capability": "P0-G02",
+      "case_id": "JAVA-CONTAINS-INITIALIZER-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CONTAINS-INITIALIZER-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-ENUM-BODY-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-ENUM-BODY-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-INTERFACE-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-INTERFACE-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-RECORD-CTOR-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-RECORD-CTOR-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-LOCAL-CLASS-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-LOCAL-CLASS-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-RETURN-CHAIN-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-RETURN-CHAIN-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-METHOD-REFERENCE-BOUNDARY",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-METHOD-REFERENCE-BOUNDARY"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-ABSTRACT-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-ABSTRACT-POS"]
+    },
+    {
+      "capability": "P0-G01",
+      "case_id": "JAVA-CALL-GENERIC-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-CALL-GENERIC-POS"]
+    },
+    {
+      "capability": "P0-G04",
+      "case_id": "JAVA-EXTENDS-SEALED-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-EXTENDS-SEALED-POS"]
+    },
+    {
+      "capability": "P0-G05",
+      "case_id": "JAVA-IMPLEMENTS-SEALED-POS",
+      "test_kind": "query_e2e",
+      "status": "covered",
+      "evidence": ["JAVA-IMPLEMENTS-SEALED-POS"]
     }
   ]
 }

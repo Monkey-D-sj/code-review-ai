@@ -1,10 +1,14 @@
 import json
+from pathlib import Path
 
 import pytest
 
-from code_review_ai.agent_eval import AgentRun, GoldFinding
+from code_review_ai.agent_eval import (AgentRun, GoldFinding,
+                                       SHARED_REVIEW_POLICY)
 from code_review_ai.full_agent_eval import (
-    FullAgentCase, PreparedCase, _case_config, load_full_agent_cases,
+    DEFAULT_FULL_EVAL_MODES, FULL_EVAL_MODES, FullAgentCase, PreparedCase,
+    _CORE_EXCLUDED_MCP_TOOLS, _CORE_MCP_TOOLS, _case_config,
+    load_full_agent_cases,
     run_full_agent_eval, rescore_full_agent_report, select_full_agent_cases,
 )
 from code_review_ai.full_agent_eval import _prompt
@@ -15,6 +19,7 @@ def _case():
         "real-fix", "sample", "https://github.com/example/sample.git", "abc123",
         ("src/app.py",), "review it",
         (GoldFinding("bug", "src/app.py", None, None, ("regression",)),),
+        difficulty="medium",
     )
 
 
@@ -24,14 +29,30 @@ def test_load_full_agent_cases_validates_manifest(tmp_path):
         "id": "real-fix", "repo_name": "sample",
         "repo_url": "https://github.com/example/sample.git",
         "source_commit": "abc123", "mutation_paths": ["src/app.py"],
+        "difficulty": "hard",
         "prompt": "review", "gold_findings": [{
             "id": "bug", "file": "src/app.py", "keywords": ["regression"]}],
     }]), encoding="utf-8")
     cases = load_full_agent_cases(str(manifest))
     assert cases[0].mutation_paths == ("src/app.py",)
+    assert cases[0].difficulty == "hard"
     assert select_full_agent_cases(cases, ["real-fix"]) == cases
     with pytest.raises(ValueError, match="unknown full eval"):
         select_full_agent_cases(cases, ["missing"])
+
+
+def test_load_full_agent_cases_rejects_invalid_difficulty(tmp_path):
+    manifest = tmp_path / "cases.json"
+    manifest.write_text(json.dumps([{
+        "id": "real-fix", "repo_name": "sample",
+        "repo_url": "https://github.com/example/sample.git",
+        "source_commit": "abc123", "mutation_paths": ["src/app.py"],
+        "difficulty": "impossible", "prompt": "review",
+        "gold_findings": [{
+            "id": "bug", "file": "src/app.py", "keywords": ["regression"]}],
+    }]), encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid difficulty"):
+        load_full_agent_cases(str(manifest))
 
 
 def test_case_config_uses_metadata_only_change_summary(tmp_path):
@@ -47,24 +68,57 @@ def test_native_and_project_share_the_same_review_policy(tmp_path):
     native = _prompt(prepared, "native_agent")
     project = _prompt(prepared, "full_project_agent")
 
-    shared_requirements = (
-        "For every changed symbol",
-        "inspect upstream callers first",
-        "Inspect downstream callees",
-        "inspect relevant tests, configuration, routing, dependency injection",
-        "public API boundaries",
-    )
-    for requirement in shared_requirements:
-        assert requirement in native
-        assert requirement in project
+    assert SHARED_REVIEW_POLICY in native
+    assert SHARED_REVIEW_POLICY in project
 
-    assert "Use them to obtain the repository evidence" in native
+    assert "使用这些工具获取评审策略所需的仓库证据" in native
     assert "get_change_summary" not in native
     assert "query_graph" not in native
     assert "code-review-ai MCP tools" not in native
     assert "get_change_summary" in project
     assert "query_graph" in project
-    assert "do not call rebuild_index" in project
+    assert "不要调用 rebuild_index" in project
+
+
+def test_querygraph_mode_prompt_mentions_only_query_graph(tmp_path):
+    prepared = PreparedCase(
+        _case(), str(tmp_path), "diff --git a/src/app.py b/src/app.py")
+    querygraph = _prompt(prepared, "full_project_querygraph")
+    assert "query_graph" in querygraph
+    assert "get_change_summary" not in querygraph
+    assert "get_impact" not in querygraph
+    assert "不要调用 rebuild_index" in querygraph
+    assert "最多调用两次 query_graph" in querygraph
+    assert "max_neighbors=5" in querygraph
+    assert "不要查询每个变更符号" in querygraph
+    assert SHARED_REVIEW_POLICY in querygraph
+
+
+def test_core_mode_exposes_review_tools_except_explicit_exclusions(tmp_path):
+    prepared = PreparedCase(
+        _case(), str(tmp_path), "diff --git a/src/app.py b/src/app.py")
+    core = _prompt(prepared, "full_project_core")
+    assert _CORE_MCP_TOOLS == (
+        "get_impact", "get_test_impact", "get_change_summary",
+        "get_change_context", "search_symbol", "get_symbol_detail",
+    )
+    assert _CORE_EXCLUDED_MCP_TOOLS == {
+        "rebuild_index", "get_communities", "get_community",
+        "call_external_service", "find_dead_code", "list_entry_points",
+        "query_graph",
+    }
+    for tool in (*_CORE_MCP_TOOLS, *_CORE_EXCLUDED_MCP_TOOLS):
+        assert tool in core
+    assert "将同一缺陷的多个表现合并为一个发现" in core
+    assert "按独立修复单元组织发现" in core
+    assert "修复一个生产代码位置后另一个回归仍然存在" in core
+    assert "不要用一个宽泛总括项吞并多个可独立修复的缺陷" in core
+    assert "本评估强制以只读方式执行" in core
+    assert "允许列表中的只读 Bash 命令" in core
+    assert "不能运行脚本、测试、包管理器" in core
+    assert "禁止使用 git log、git show 或任何 git diff" in core
+    assert "Read/Glob/Grep/Bash" not in core
+    assert SHARED_REVIEW_POLICY in core
 
 
 def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
@@ -73,7 +127,7 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
                             "diff --git a/src/app.py b/src/app.py")
     monkeypatch.setattr(
         "code_review_ai.full_agent_eval.prepare_full_agent_cases",
-        lambda cases, repos_dir, work_dir: [prepared],
+        lambda cases, repos_dir, work_dir, **kwargs: [prepared],
     )
     prebuilt_db = tmp_path / "prebuilt.db"
     monkeypatch.setattr(
@@ -88,12 +142,44 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
     def fake_executor(command, prompt, cwd, env, timeout):
         assert env["CRAI_EVAL_TOOL_PROFILE"] in {"native", "full_project"}
         assert env["CRAI_EVAL_DB_PATH"] == str(prebuilt_db)
-        if env["CRAI_EVAL_TOOL_PROFILE"] == "full_project":
-            assert "do not call rebuild_index" in prompt
+        mode = env["CRAI_EVAL_MODE"]
+        if mode == "full_project_agent":
+            assert "不要调用 rebuild_index" in prompt
             assert "query_graph" in prompt
+            assert "get_change_summary" in prompt
             assert "get_impact" not in prompt
-        calls = (["Read", "mcp__code-review-ai__query_graph"]
-                 if env["CRAI_EVAL_TOOL_PROFILE"] == "full_project" else ["Read"])
+            calls = ["Read", "mcp__code-review-ai__query_graph"]
+        elif mode == "full_project_querygraph":
+            assert "不要调用 rebuild_index" in prompt
+            assert "query_graph" in prompt
+            assert "get_change_summary" not in prompt
+            assert "get_impact" not in prompt
+            assert env["CRAI_EVAL_MCP_TOOLS"] == "query_graph"
+            calls = ["Read", "mcp__code-review-ai__query_graph"]
+        elif mode == "full_project_summary":
+            assert "不要调用 rebuild_index" in prompt
+            assert "get_change_summary" in prompt
+            assert "query_graph" not in prompt
+            assert env["CRAI_EVAL_MCP_TOOLS"] == "get_change_summary"
+            calls = ["Read", "mcp__code-review-ai__get_change_summary"]
+        elif mode == "full_project_search":
+            assert "不要调用 rebuild_index" in prompt
+            assert "search_symbol" in prompt
+            assert "query_graph" not in prompt
+            assert env["CRAI_EVAL_MCP_TOOLS"] == "search_symbol"
+            calls = ["Read", "mcp__code-review-ai__search_symbol"]
+        elif mode == "full_project_core":
+            assert "get_change_context" in prompt
+            assert "query_graph" in prompt
+            assert "get_change_summary" in prompt
+            assert "search_symbol" in prompt
+            assert "get_impact" in prompt
+            assert env["CRAI_EVAL_MCP_TOOLS"] == (
+                "get_impact,get_test_impact,get_change_summary,"
+                "get_change_context,search_symbol,get_symbol_detail")
+            calls = ["Read", "mcp__code-review-ai__get_change_context"]
+        else:
+            calls = ["Read"]
         payload = {"findings": [{
             "file": "src/app.py", "line": 1, "title": "regression",
             "description": "concrete regression"}],
@@ -104,15 +190,27 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
 
     report = run_full_agent_eval(
         [case], str(tmp_path / "repos"), str(tmp_path / "runs"), ["agent"],
+        modes=FULL_EVAL_MODES,
         executor=fake_executor,
     )
-    assert len(report["runs"]) == 2
+    assert len(report["runs"]) == 6
     assert report["aggregate"]["native_agent"]["macro_f1"] == 1.0
+    assert report["difficulty_counts"] == {"medium": 1}
+    assert {run["difficulty"] for run in report["runs"]} == {"medium"}
     assert report["aggregate"]["full_project_agent"]["mcp_adoption_rate"] == 1.0
     adoption = report["aggregate"]["full_project_agent"]["mcp_tool_adoption_rate"]
     assert adoption["query_graph"] == 1.0
     assert adoption["rebuild_index"] == 0.0
+    assert report["aggregate"]["full_project_querygraph"]["mcp_adoption_rate"] == 1.0
+    assert report["aggregate"]["full_project_core"]["mcp_adoption_rate"] == 1.0
+    assert report["aggregate"]["full_project_core"][
+        "mcp_tool_adoption_rate"
+    ]["get_change_context"] == 1.0
     assert report["index_setup"][0]["timed_with_agent"] is False
+
+
+def test_default_full_eval_is_native_vs_compact_core():
+    assert DEFAULT_FULL_EVAL_MODES == ("native_agent", "full_project_core")
 
 
 def test_rescore_uses_stored_outputs_and_filters_unavailable_tools(tmp_path):
@@ -137,4 +235,5 @@ def test_rescore_uses_stored_outputs_and_filters_unavailable_tools(tmp_path):
         str(report_path), [case], str(transcript_dir))
     assert rescored["runs"][0]["f1"] == 1.0
     assert rescored["runs"][0]["tool_calls"] == ["Read"]
+    assert rescored["runs"][0]["difficulty"] == "medium"
     assert rescored["rescored"]["gold_finding_count"] == 1

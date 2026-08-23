@@ -21,31 +21,20 @@ def current_head(config: Config) -> str | None:
     return out.stdout.strip()
 
 
-def _git_diff(base: str, files: list[str] | None,
-              cwd: str | None = None) -> tuple[dict[str, list[tuple[int, int]]], set[str]]:
-    """Return ({file: [(start, count), ...]}, deleted_files).
+def diff_ranges_from_text(diff_text: str) -> tuple[dict[str, list[tuple[int, int]]], set[str]]:
+    """Return ({file: [(start, count), ...]}, deleted_files) from diff text.
 
     Each hunk is git's new-side ``+b,m`` (start, count) — position and size
     together. deleted_files is the set of pure deletions (``+++ /dev/null``),
-    which produce no + hunks and so would otherwise be invisible.
+    which produce no + hunks and so would otherwise be invisible. Shared by
+    ``_git_diff`` (live repo) and patch-mode eval cases whose scratch repos
+    have no commit history to diff against.
     """
-    args = ["git", "diff", "--unified=0", base]
-    if files:
-        args += ["--"] + files
-    # git diff output is UTF-8; text=True would decode with the locale codepage
-    # (GBK on zh-CN Windows) and crash on non-ASCII content. errors="replace"
-    # keeps the @@ line-range parsing robust to any undecodable bytes.
-    out = subprocess.run(args, capture_output=True, text=True,
-                         encoding="utf-8", errors="replace", cwd=cwd)
-    if out.returncode != 0:
-        raise RuntimeError(
-            f"git diff failed (exit {out.returncode}): {out.stderr.strip()}"
-        )
     ranges: dict[str, list[tuple[int, int]]] = {}
     deleted: set[str] = set()
     cur_file: str | None = None
     cur_a: str | None = None
-    for line in out.stdout.splitlines():
+    for line in diff_text.splitlines():
         a = re.match(r"^--- a/(.+)$", line)
         if a:
             cur_a = a.group(1)
@@ -68,6 +57,27 @@ def _git_diff(base: str, files: list[str] | None,
             # lines inside a surviving function still resolves to that symbol.
             ranges[cur_file].append((max(start, 1), max(count, 1)))
     return ranges, deleted
+
+
+def _git_diff(base: str, files: list[str] | None,
+              cwd: str | None = None) -> tuple[dict[str, list[tuple[int, int]]], set[str]]:
+    """Return ({file: [(start, count), ...]}, deleted_files) for the live repo.
+
+    Runs ``git diff --unified=0 <base>`` then parses via ``diff_ranges_from_text``.
+    """
+    args = ["git", "diff", "--unified=0", base]
+    if files:
+        args += ["--"] + files
+    # git diff output is UTF-8; text=True would decode with the locale codepage
+    # (GBK on zh-CN Windows) and crash on non-ASCII content. errors="replace"
+    # keeps the @@ line-range parsing robust to any undecodable bytes.
+    out = subprocess.run(args, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", cwd=cwd)
+    if out.returncode != 0:
+        raise RuntimeError(
+            f"git diff failed (exit {out.returncode}): {out.stderr.strip()}"
+        )
+    return diff_ranges_from_text(out.stdout)
 
 
 def _overlaps(start: int, end: int, hunks: list[tuple[int, int]]) -> bool:
@@ -238,6 +248,18 @@ def detect_changed_symbols(config: Config,
     if symbols is not None:
         return list(symbols)
     diff, _ = _git_diff(_resolve_diff_base(config), files, config.repo_path)
+    return [record["qname"] for record in _changed_functions(
+        config, diff, kinds=("function", "method"))]
+
+
+def detect_changed_symbols_from_patch(config: Config, patch_text: str) -> list[str]:
+    """Changed symbol qnames for a patch-mode case (no git history required).
+
+    The scratch repo a patch-mode case runs on is a fresh ``git init`` with no
+    commits, so ``detect_changed_symbols``'s ``git diff HEAD`` cannot work
+    there. This parses the inline fixed→buggy diff instead and attributes its
+    hunks to function/method nodes exactly like the git-backed path."""
+    diff, _ = diff_ranges_from_text(patch_text)
     return [record["qname"] for record in _changed_functions(
         config, diff, kinds=("function", "method"))]
 

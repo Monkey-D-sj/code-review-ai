@@ -9,6 +9,7 @@ import pytest
 
 from code_review_ai.config import load_config
 from code_review_ai.mcp_server import create_server
+from p0_conformance import score_query_conformance
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -116,7 +117,10 @@ def test_query_contract_direction_limit_and_not_found(query_tools: dict):
         direction="in",
         max_neighbors=2,
     ))
-    assert len(limited["in"]) == 2
+    assert {node["qname"] for node in limited["in"]} == {
+        "calls::arrowCall",
+        "calls::branchCall",
+    }
 
     missing = json.loads(query_tool(
         qualified_name="missing::symbol",
@@ -190,24 +194,10 @@ def test_coverage_manifest_has_evidence_for_every_registered_query_case():
     assert evidence_ids <= loaded_ids
 
 
-def test_p0_metrics_report_records_a_complete_public_e2e_suite():
+def test_p0_metrics_report_is_reproduced_from_public_queries(
+    query_tools: dict,
+):
     report = json.loads(METRICS_FILE.read_text(encoding="utf-8"))
-    assert report["language"] == "typescript"
-    assert report["suite"] == "query_p0"
-    assert report["metrics"] == {
-        "resolved_edge_recall": 1.0,
-        "resolved_edge_precision": 1.0,
-        "negative_edge_correctness": 1.0,
-        "case_coverage": 1.0,
-        "overall_correctness": 1.0,
-    }
-    assert report["counts"] == {
-        "resolved_neighbor_assertions": 57,
-        "resolved_neighbor_assertions_passed": 57,
-        "negative_mechanisms": 3,
-        "negative_mechanisms_without_phantom_neighbors": 3,
-        "applicable_cases": 29,
-        "cases_with_passing_e2e": 29,
-        "overall_assertions": 60,
-        "overall_assertions_passed": 60,
-    }
+    actual = score_query_conformance(
+        query_tools["query_graph"].fn, ALL_CASES, language="typescript")
+    assert report == actual

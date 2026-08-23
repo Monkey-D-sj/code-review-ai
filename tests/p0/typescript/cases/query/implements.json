@@ -3,7 +3,46 @@
   "fixture": "fixture_repo",
   "edge_kind": "implements",
   "cases": [
-    {"case_id":"IMPLEMENTS-001","p0_capabilities":["P0-G05"],"qualified_name":"user-store::UserStore","direction":"out","expected_in":[],"expected_out":["contracts::PersistableStore","contracts::ReadableStore"]},
-    {"case_id":"IMPLEMENTS-002","p0_capabilities":["P0-G05"],"qualified_name":"contracts::ReadableStore","direction":"in","expected_in":["user-store::UserStore"],"expected_out":[]}
+    {
+      "case_id": "IMPLEMENTS-001",
+      "p0_capabilities": [
+        "P0-G05"
+      ],
+      "qualified_name": "user-store::UserStore",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "contracts::PersistableStore",
+        "contracts::ReadableStore"
+      ],
+      "syntax_ids": [
+        "TS-IMPLEMENTS-ONE"
+      ]
+    },
+    {
+      "case_id": "IMPLEMENTS-002",
+      "p0_capabilities": [
+        "P0-G05"
+      ],
+      "qualified_name": "contracts::ReadableStore",
+      "direction": "in",
+      "expected_in": [
+        "user-store::UserStore"
+      ],
+      "expected_out": [],
+      "syntax_ids": [
+        "TS-IMPLEMENTS-ONE"
+      ]
+    },
+    {
+      "case_id": "TS-IMPLEMENTS-BOUNDARY",
+      "p0_capabilities": ["P0-G05"],
+      "qualified_name": "contracts::ReadableStore",
+      "direction": "out",
+      "negative_kind": "interface_not_implementor",
+      "expected_in": [],
+      "expected_out": [],
+      "syntax_ids": ["TS-IMPLEMENTS-ONE"]
+    }
   ]
 }

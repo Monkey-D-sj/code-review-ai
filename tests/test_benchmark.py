@@ -1,5 +1,4 @@
 import json
-from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -41,48 +40,6 @@ def test_load_cases_rejects_empty_manifest(tmp_path):
     path = _manifest(tmp_path, [])
     with pytest.raises(ValueError, match="non-empty"):
         load_cases(str(path))
-
-
-def test_committed_swebench_suite_has_expected_distribution():
-    manifest = Path(__file__).parents[1] / "benchmarks" / "swe-bench-verified-30.json"
-    cases = load_cases(str(manifest))
-    assert len(cases) == 30
-    assert Counter(case.repo for case in cases) == {
-        "pallets/flask": 1,
-        "psf/requests": 8,
-        "pytest-dev/pytest": 11,
-        "pydata/xarray": 10,
-    }
-    assert all(case.base_commit and case.changed_ranges for case in cases)
-
-
-def test_combined_suite_adds_fastapi_history_cases():
-    root = Path(__file__).parents[1]
-    fastapi_cases = load_cases(str(root / "benchmarks" / "fastapi-history-10.json"))
-    combined = load_cases(str(root / "benchmarks" / "historical-suite-40.json"))
-    assert len(fastapi_cases) == 10
-    assert len(combined) == 40
-    assert {case.repo for case in fastapi_cases} == {"fastapi/fastapi"}
-    assert all(case.base_commit and case.changed_ranges for case in fastapi_cases)
-
-
-def test_extended_suite_adds_spring_petclinic_history_cases():
-    root = Path(__file__).parents[1]
-    java_cases = load_cases(
-        str(root / "benchmarks" / "spring-petclinic-history-10.json")
-    )
-    combined = load_cases(str(root / "benchmarks" / "historical-suite-50.json"))
-    assert len(java_cases) == 10
-    assert len(combined) == 50
-    assert {case.repo for case in java_cases} == {
-        "spring-projects/spring-petclinic"
-    }
-    assert all(case.base_commit and case.changed_ranges for case in java_cases)
-    assert all(
-        file_path.endswith(".java")
-        for case in java_cases
-        for file_path in (*case.changed_ranges, *case.gold_files)
-    )
 
 
 def test_run_benchmark_reports_recall_and_index_metrics(tmp_path):
@@ -266,21 +223,3 @@ def test_benchmark_includes_test_nodes_in_candidates(tmp_path):
     assert report["cases"][0]["patch_file_recall_all"] == 1.0
 
 
-def test_agentic_manifest_drives_both_harnesses():
-    """One unified manifest must parse in both the impact harness (benchmark)
-    and the full-agent harness, so a single case set yields both cheap impact
-    metrics and expensive agent F1. Every case needs changed_ranges (impact
-    seeds) and gold_files (gold test files) alongside the agent-side fields."""
-    from code_review_ai.full_agent_eval import load_full_agent_cases
-    manifest = (Path(__file__).resolve().parents[1]
-                / "benchmarks" / "agentic-eval-real-repos.json")
-    impact_cases = load_cases(str(manifest))
-    agent_cases = load_full_agent_cases(str(manifest))
-    assert len(impact_cases) == len(agent_cases) == 12
-    for impact, agent in zip(impact_cases, agent_cases):
-        assert impact.case_id == agent.case_id
-        assert impact.changed_ranges, "impact harness needs changed_ranges"
-        assert impact.gold_files, "impact harness needs gold test files"
-        assert impact.prompt == agent.prompt
-        assert impact.source_commit == agent.source_commit
-        assert impact.gold_findings

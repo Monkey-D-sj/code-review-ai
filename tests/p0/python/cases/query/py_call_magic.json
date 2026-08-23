@@ -1,0 +1,12 @@
+{
+  "case_id": "PY-CALL-MAGIC-NEG",
+  "language": "python",
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.dynamic_call_forms::magic_form",
+  "edge_kind": "call",
+  "direction": "out",
+  "negative_kind": "magic_protocol",
+  "expected_in": [],
+  "expected_out": [],
+  "syntax_ids": ["PY-CALL-MAGIC"]
+}

@@ -29,6 +29,42 @@ def test_analyze_agent_report_builds_mode_and_paired_statistics():
     assert analysis["bootstrap_samples"] == 200
 
 
+def _tier_run(case_id, difficulty, mode, f1, tokens, files):
+    return {
+        "case_id": case_id, "difficulty": difficulty, "mode": mode,
+        "repetition": 1, "f1": f1, "recall": f1, "precision": f1,
+        "success": True, "elapsed_ms": 10, "files_read": files,
+        "tool_calls": ["Read"], "tool_call_count": 1,
+        "usage": {"input_tokens": tokens, "output_tokens": 10,
+                  "total_cost_usd": 0.1},
+    }
+
+
+def test_analyze_agent_report_groups_paired_efficiency_by_difficulty():
+    runs = [
+        _tier_run("easy", "trivial", "native_agent", 1.0, 30, ["a.py"]),
+        _tier_run("easy", "trivial", "full_project_querygraph", 1.0, 40,
+                  ["a.py"]),
+        _tier_run("deep", "hard", "native_agent", 0.0, 100,
+                  ["a.py", "b.py", "c.py"]),
+        _tier_run("deep", "hard", "full_project_querygraph", 1.0, 40,
+                  ["a.py"]),
+    ]
+    analysis = analyze_agent_report({
+        "schema_version": 2, "baseline_mode": "native_agent",
+        "repetitions": 1, "runs": runs,
+    }, bootstrap_samples=200)
+
+    assert set(analysis["by_difficulty"]) == {"trivial", "hard"}
+    hard = analysis["by_difficulty"]["hard"]
+    assert hard["case_count"] == 1
+    paired = hard["paired_vs_native_agent"]["full_project_querygraph"]
+    assert paired["f1_delta"]["mean"] == 1.0
+    assert paired["input_tokens_delta"]["mean"] == -60.0
+    assert paired["total_tokens_delta"]["mean"] == -60.0
+    assert paired["files_read_delta"]["mean"] == -2.0
+
+
 def test_analyze_agent_report_rejects_empty_or_tiny_bootstrap():
     with pytest.raises(ValueError, match="no runs"):
         analyze_agent_report({"runs": []})

@@ -1,0 +1,12 @@
+{
+  "case_id": "PY-CALL-LAMBDA-POS",
+  "language": "python",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.lambda_calls::lambda_caller",
+  "edge_kind": "call",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": ["p0_fixture.lambda_calls::lambda_target"],
+  "syntax_ids": ["PY-CALL-LAMBDA"]
+}

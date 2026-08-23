@@ -23,11 +23,12 @@ def _hand_built_conn(tmp_path):
     return conn
 
 
-def _insert_node(conn, qualified_name, kind="function", file_path="x.py"):
+def _insert_node(conn, qualified_name, kind="function", file_path="x.py",
+                 is_test=0):
     conn.execute(
-        "INSERT INTO nodes(qualified_name,kind,language,file_path,start_line,end_line,signature) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (qualified_name, kind, "python", file_path, 1, 2, "sig"))
+        "INSERT INTO nodes(qualified_name,kind,language,file_path,start_line,end_line,signature,is_test) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (qualified_name, kind, "python", file_path, 1, 2, "sig", is_test))
 
 
 def _insert_edge(conn, source, target, kind="call", resolution="resolved"):
@@ -80,6 +81,15 @@ def test_direction_filters(tmp_path):
     _insert_edge(conn, "a::mid", "a::callee")
     assert [n["qname"] for n in query_graph(conn, "a::mid", direction="in")["in"]] == ["a::caller"]
     assert [n["qname"] for n in query_graph(conn, "a::mid", direction="out")["out"]] == ["a::callee"]
+
+
+def test_neighbor_marks_test_nodes(tmp_path):
+    conn = _hand_built_conn(tmp_path)
+    _insert_node(conn, "a::target")
+    _insert_node(conn, "tests::test_target", is_test=1)
+    _insert_edge(conn, "tests::test_target", "a::target")
+    neighbor = query_graph(conn, "a::target", direction="in")["in"][0]
+    assert neighbor["is_test"] is True
 
 
 def test_neighbors_dedup(tmp_path):

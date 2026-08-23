@@ -5,7 +5,9 @@ from pathlib import Path
 
 # Bumped whenever the schema or its meaning changes in a way that makes an
 # older index.db incompatible; indexers check this before rebuilding.
-INDEX_VERSION = 7
+# 8: resolved call edges now carry call-site evidence (line + args) in
+#    evidence_json, surfaced by query_graph; older indexes lack it.
+INDEX_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (

@@ -217,6 +217,25 @@ def test_resolve_cls_method_receiver(tmp_path):
     assert (Q("svc", "authenticate", svc), Q("svc", "_check", svc), "resolved") in by
 
 
+def test_resolve_nested_function_uses_lexical_scope(tmp_path):
+    """A nested caller binds its sibling target before module-level names."""
+    mod = tmp_path / "svc.py"
+    mod.write_text(
+        "def outer():\n"
+        "    def target():\n"
+        "        return 1\n"
+        "    def caller():\n"
+        "        return target()\n",
+        encoding="utf-8",
+    )
+    pf = parse_file(str(mod), str(tmp_path))
+    qnames = {n.qualified_name for n in pf.nodes}
+    edges = resolve_calls([pf], qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    outer = Q("svc", "outer")
+    assert (Q("svc", "caller", outer), Q("svc", "target", outer), "resolved") in by
+
+
 def test_resolve_module_level_class_receiver(tmp_path):
     """Config.get() where Config is a same-module class resolves to the class
     method — the `head in local` branch must join the scoped qname with '.' not

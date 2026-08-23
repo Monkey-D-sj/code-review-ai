@@ -3,8 +3,60 @@
   "fixture": "fixture_repo",
   "edge_kind": "extends",
   "cases": [
-    {"case_id":"EXTENDS-001","p0_capabilities":["P0-G04"],"qualified_name":"user-store::UserStore","direction":"out","expected_in":[],"expected_out":["base-store::BaseStore"]},
-    {"case_id":"EXTENDS-002","p0_capabilities":["P0-G04"],"qualified_name":"base-store::BaseStore","direction":"in","expected_in":["user-store::UserStore"],"expected_out":[]},
-    {"case_id":"EXTENDS-003","p0_capabilities":["P0-G04"],"qualified_name":"admin-store::AdminStore","direction":"out","expected_in":[],"expected_out":["user-store::UserStore"]}
+    {
+      "case_id": "EXTENDS-001",
+      "p0_capabilities": [
+        "P0-G04"
+      ],
+      "qualified_name": "user-store::UserStore",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "base-store::BaseStore"
+      ],
+      "syntax_ids": [
+        "TS-EXTENDS-SAME-MODULE"
+      ]
+    },
+    {
+      "case_id": "EXTENDS-002",
+      "p0_capabilities": [
+        "P0-G04"
+      ],
+      "qualified_name": "base-store::BaseStore",
+      "direction": "in",
+      "expected_in": [
+        "user-store::UserStore"
+      ],
+      "expected_out": [],
+      "syntax_ids": [
+        "TS-EXTENDS-SAME-MODULE"
+      ]
+    },
+    {
+      "case_id": "EXTENDS-003",
+      "p0_capabilities": [
+        "P0-G04"
+      ],
+      "qualified_name": "admin-store::AdminStore",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "user-store::UserStore"
+      ],
+      "syntax_ids": [
+        "TS-EXTENDS-SAME-MODULE"
+      ]
+    },
+    {
+      "case_id": "TS-EXTENDS-BOUNDARY",
+      "p0_capabilities": ["P0-G04"],
+      "qualified_name": "base-store::BaseStore",
+      "direction": "out",
+      "negative_kind": "root_class",
+      "expected_in": [],
+      "expected_out": [],
+      "syntax_ids": ["TS-EXTENDS-SAME-MODULE"]
+    }
   ]
 }

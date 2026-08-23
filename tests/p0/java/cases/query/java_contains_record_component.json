@@ -1,0 +1,15 @@
+{
+  "case_id": "JAVA-CONTAINS-RECORD-COMPONENT-POS",
+  "language": "java",
+  "p0_capabilities": ["P0-G02"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::Point",
+  "edge_kind": "contains",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": [
+    "com.acme.p0.calls::Point.x",
+    "com.acme.p0.calls::Point.y"
+  ],
+  "syntax_ids": ["JAVA-CONTAINS-RECORD-COMPONENT"]
+}

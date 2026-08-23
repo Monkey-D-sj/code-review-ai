@@ -15,12 +15,15 @@ DEFAULTS = dict(
     entry_decorators=[
         "app.route", "*.route", "click.command",
         "router.get", "router.post", "celery.task",
+        # FastAPI route decorators; aliases such as api_router.get match too.
+        "*.get", "*.post", "*.put", "*.patch", "*.delete",
+        "*.options", "*.head", "*.trace", "*.websocket", "*.api_route",
         # Spring MVC: mapping annotations make an HTTP handler a business entry
         # even though nothing in the repo calls it statically.
         "GetMapping", "PostMapping", "PutMapping", "DeleteMapping",
-        "PatchMapping", "RequestMapping",
+        "PatchMapping", "RequestMapping", "Bean",
     ],
-    dependency_markers=["Depends"],  # DI calls whose callable args become source->arg edges
+    dependency_markers=["Depends", "Security"],  # FastAPI DI callables become source->provider edges
     di_annotations=["Autowired", "Inject", "Resource", "MockBean"],  # annotation names tagging a Java field as an injection point
     exclude=["*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
     test_globs=["*/tests/*", "test_*.py", "*_test.py", "*/test/*", "*Test.java", "*Tests.java", "*.test.*", "*.spec.*", "*/__tests__/*"],  # per-language defaults; not */test* — would tag prod files whose name starts with "test" (e.g. testimpact.py)

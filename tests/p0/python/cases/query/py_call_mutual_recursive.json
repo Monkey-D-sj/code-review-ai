@@ -1,0 +1,11 @@
+{
+  "case_id": "PY-CALL-MUTUAL-RECURSIVE-POS",
+  "syntax_ids": ["PY-CALL-MUTUAL-RECURSIVE"],
+  "language": "python",
+  "fixture": "fixture_repo",
+  "edge_kind": "call",
+  "qualified_name": "p0_fixture.conformance::mutual_a",
+  "direction": "both",
+  "expected_in": ["p0_fixture.conformance::mutual_b"],
+  "expected_out": ["p0_fixture.conformance::mutual_b"]
+}

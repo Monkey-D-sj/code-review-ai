@@ -5,24 +5,23 @@
     "resolved_edge_recall": 1.0,
     "resolved_edge_precision": 1.0,
     "negative_edge_correctness": 1.0,
-    "case_coverage": 1.0,
-    "overall_correctness": 1.0
+    "exact_case_pass_rate": 1.0
   },
   "counts": {
-    "resolved_neighbor_assertions": 26,
-    "resolved_neighbor_assertions_passed": 26,
-    "negative_mechanisms": 3,
-    "negative_mechanisms_without_phantom_neighbors": 3,
-    "applicable_cases": 10,
-    "cases_with_passing_e2e": 10,
-    "overall_assertions": 29,
-    "overall_assertions_passed": 29
+    "gold_resolved_neighbors": 49,
+    "returned_resolved_neighbors": 49,
+    "true_positives": 49,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "negative_mechanisms": 14,
+    "negative_mechanisms_without_phantom_neighbors": 14,
+    "registered_cases": 32,
+    "exact_cases": 32
   },
   "denominators": {
-    "resolved_edge_recall": "gold resolved in/out neighbor assertions",
-    "resolved_edge_precision": "returned resolved in/out neighbors against complete gold sets",
-    "negative_edge_correctness": "dynamic member, runtime import, and higher-order argument cases",
-    "case_coverage": "applicable registered cases"
-  },
-  "evidence": "tests/p0/python/e2e/test_query_graph_python.py"
+    "resolved_edge_recall": "TP / (TP + FN) over directional gold resolved neighbors",
+    "resolved_edge_precision": "TP / (TP + FP) over directional returned resolved neighbors",
+    "negative_edge_correctness": "dynamic/reflection mechanisms whose case produced no undeclared resolved neighbor",
+    "exact_case_pass_rate": "cases whose complete in/out neighbor sets equal gold"
+  }
 }

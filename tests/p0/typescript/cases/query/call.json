@@ -3,19 +3,325 @@
   "fixture": "fixture_repo",
   "edge_kind": "call",
   "cases": [
-    {"case_id":"CALL-001","p0_capabilities":["P0-G01"],"qualified_name":"calls::topLevelCall","direction":"both","expected_in":[],"expected_out":["api::fetchUser"]},
-    {"case_id":"CALL-002","p0_capabilities":["P0-G01"],"qualified_name":"calls::LocalStore.load","direction":"both","expected_in":["calls::instanceMethodCall"],"expected_out":["calls::LocalStore.save"]},
-    {"case_id":"CALL-003","p0_capabilities":["P0-G01"],"qualified_name":"calls::constructorCall","direction":"out","expected_in":[],"expected_out":["calls::LocalStore","calls::LocalStore.constructor"]},
-    {"case_id":"CALL-004","p0_capabilities":["P0-G01"],"qualified_name":"calls::branchCall","direction":"out","expected_in":[],"expected_out":["api::fetchUser"]},
-    {"case_id":"CALL-005","p0_capabilities":["P0-G01"],"qualified_name":"calls::loopCall","direction":"out","expected_in":[],"expected_out":["api::parseUser"]},
-    {"case_id":"CALL-006","p0_capabilities":["P0-G01"],"qualified_name":"calls::tryCall","direction":"out","expected_in":[],"expected_out":["api::fetchUser","api::parseUser"]},
-    {"case_id":"CALL-007","p0_capabilities":["P0-G01"],"qualified_name":"hooks::useUser","direction":"both","expected_in":["modules::useModuleImports"],"expected_out":["api::fetchUser"]},
-    {"case_id":"CALL-008","p0_capabilities":["P0-G01"],"qualified_name":"hooks::useAsyncUser","direction":"out","expected_in":[],"expected_out":["api::fetchUserAsync"]},
-    {"case_id":"CALL-009","p0_capabilities":["P0-G01"],"qualified_name":"user-store::UserStore.read","direction":"out","expected_in":[],"expected_out":["base-store::BaseStore.read"]},
-    {"case_id":"CALL-010","p0_capabilities":["P0-G01"],"qualified_name":"calls::arrowCall","direction":"out","expected_in":[],"expected_out":["api::fetchUser"]},
-    {"case_id":"CALL-011","p0_capabilities":["P0-G01"],"qualified_name":"calls::asyncCall","direction":"out","expected_in":[],"expected_out":["calls::fetchUserAsync"]},
-    {"case_id":"CALL-012","p0_capabilities":["P0-G01"],"negative_kind":"dynamic_key","qualified_name":"calls::dynamicKeyCall","direction":"both","expected_in":[],"expected_out":[]},
-    {"case_id":"CALL-013","p0_capabilities":["P0-G01"],"negative_kind":"reflection","qualified_name":"calls::reflectionCall","direction":"both","expected_in":[],"expected_out":[]},
-    {"case_id":"CALL-014","p0_capabilities":["P0-G01"],"negative_kind":"higher_order_argument","qualified_name":"calls::higherOrderCall","direction":"out","expected_in":[],"expected_out":["calls::runTask"]}
+    {
+      "case_id": "CALL-001",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "calls::topLevelCall",
+      "direction": "both",
+      "expected_in": [],
+      "expected_out": [
+        "api::fetchUser"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CALL-002",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "calls::LocalStore.load",
+      "direction": "both",
+      "expected_in": [
+        "calls::instanceMethodCall"
+      ],
+      "expected_out": [
+        "calls::LocalStore.save"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CALL-003",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "calls::constructorCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "calls::LocalStore",
+        "calls::LocalStore.constructor"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CALL-004",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "calls::branchCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "api::fetchUser"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CALL-005",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "calls::loopCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "api::parseUser"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CALL-006",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "calls::tryCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "api::fetchUser",
+        "api::parseUser"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CALL-007",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "hooks::useUser",
+      "direction": "both",
+      "expected_in": [
+        "modules::useModuleImports"
+      ],
+      "expected_out": [
+        "api::fetchUser"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CALL-008",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "hooks::useAsyncUser",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "api::fetchUserAsync"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION",
+        "TS-CALL-ASYNC"
+      ]
+    },
+    {
+      "case_id": "CALL-009",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "user-store::UserStore.read",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "base-store::BaseStore.read"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CALL-010",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "calls::arrowCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "api::fetchUser"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION"
+      ]
+    },
+    {
+      "case_id": "CALL-011",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "qualified_name": "calls::asyncCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "calls::fetchUserAsync"
+      ],
+      "syntax_ids": [
+        "TS-CALL-FUNCTION",
+        "TS-CALL-ASYNC"
+      ]
+    },
+    {
+      "case_id": "CALL-012",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "negative_kind": "dynamic_key",
+      "qualified_name": "calls::dynamicKeyCall",
+      "direction": "both",
+      "expected_in": [],
+      "expected_out": [],
+      "syntax_ids": [
+        "TS-CALL-COMPUTED-DYNAMIC"
+      ]
+    },
+    {
+      "case_id": "CALL-013",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "negative_kind": "reflection",
+      "qualified_name": "calls::reflectionCall",
+      "direction": "both",
+      "expected_in": [],
+      "expected_out": [],
+      "syntax_ids": [
+        "TS-CALL-COMPUTED-DYNAMIC"
+      ]
+    },
+    {
+      "case_id": "CALL-014",
+      "p0_capabilities": [
+        "P0-G01"
+      ],
+      "negative_kind": "higher_order_argument",
+      "qualified_name": "calls::higherOrderCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [
+        "calls::runTask"
+      ],
+      "syntax_ids": [
+        "TS-CALL-CALLBACK"
+      ]
+    },
+    {
+      "case_id": "TS-CALL-OBJECT-METHOD-POS",
+      "p0_capabilities": ["P0-G01"],
+      "qualified_name": "object_methods::objectMethodCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["object_methods::objectHolder.run"],
+      "syntax_ids": ["TS-CALL-OBJECT-METHOD"]
+    },
+    {
+      "case_id": "TS-CALL-INTERFACE-RECEIVER-POS",
+      "p0_capabilities": ["P0-G01"],
+      "qualified_name": "receiver_variants::interfaceReceiver",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["contracts::ReadableStore.read"],
+      "syntax_ids": ["TS-CALL-INTERFACE-RECEIVER"]
+    },
+    {
+      "case_id": "TS-CALL-GENERIC-RECEIVER-POS",
+      "p0_capabilities": ["P0-G01"],
+      "qualified_name": "receiver_variants::genericReceiver",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["receiver_variants::GenericStore.run"],
+      "syntax_ids": ["TS-CALL-GENERIC-RECEIVER"]
+    },
+    {
+      "case_id": "TS-CALL-PRIVATE-POS",
+      "p0_capabilities": ["P0-G01"],
+      "qualified_name": "receiver_variants::PrivateWorker.call",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["receiver_variants::PrivateWorker.#run"],
+      "syntax_ids": ["TS-CALL-PRIVATE"]
+    },
+    {
+      "case_id": "TS-CALL-OBJECT-FUNCTION-POS",
+      "p0_capabilities": ["P0-G01"],
+      "qualified_name": "object_methods::objectFunctionCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["object_methods::objectHolder.fn"],
+      "syntax_ids": ["TS-CALL-OBJECT-FUNCTION"]
+    },
+    {
+      "case_id": "TS-CALL-IIFE-POS",
+      "p0_capabilities": ["P0-G01"],
+      "qualified_name": "object_methods::iifeCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["object_methods::iifeTarget"],
+      "syntax_ids": ["TS-CALL-IIFE"]
+    },
+    {
+      "case_id": "TS-CALL-TAGGED-TEMPLATE-POS",
+      "p0_capabilities": ["P0-G01"],
+      "qualified_name": "tagged_templates::taggedCall",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": ["tagged_templates::tag"],
+      "syntax_ids": ["TS-CALL-TAGGED-TEMPLATE"]
+    },
+    {
+      "case_id": "TS-CALL-TAGGED-TEMPLATE-BOUNDARY",
+      "p0_capabilities": ["P0-G01"],
+      "negative_kind": "unresolved_tagged_template",
+      "qualified_name": "tagged_templates::taggedBoundary",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [],
+      "syntax_ids": ["TS-CALL-TAGGED-TEMPLATE"]
+    },
+    {
+      "case_id": "TS-CALL-UNION-RECEIVER-BOUNDARY",
+      "p0_capabilities": ["P0-G01"],
+      "negative_kind": "union_receiver_candidate",
+      "qualified_name": "receiver_variants::unionReceiver",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [],
+      "syntax_ids": ["TS-CALL-UNION-RECEIVER"]
+    },
+    {
+      "case_id": "TS-CALL-STRUCTURAL-BOUNDARY",
+      "p0_capabilities": ["P0-G01"],
+      "negative_kind": "structural_receiver_candidate",
+      "qualified_name": "receiver_variants::structuralReceiver",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [],
+      "syntax_ids": ["TS-CALL-STRUCTURAL"]
+    },
+    {
+      "case_id": "TS-CALL-GETTER-SETTER-BOUNDARY",
+      "p0_capabilities": ["P0-G01"],
+      "negative_kind": "accessor_dispatch",
+      "qualified_name": "tagged_templates::accessorRead",
+      "direction": "out",
+      "expected_in": [],
+      "expected_out": [],
+      "syntax_ids": ["TS-CALL-GETTER-SETTER"]
+    }
   ]
 }

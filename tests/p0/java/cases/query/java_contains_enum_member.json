@@ -1,0 +1,15 @@
+{
+  "case_id": "JAVA-CONTAINS-ENUM-MEMBER-POS",
+  "language": "java",
+  "p0_capabilities": ["P0-G02"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.calls::Mode",
+  "edge_kind": "contains",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": [
+    "com.acme.p0.calls::Mode.FAST",
+    "com.acme.p0.calls::Mode.SAFE"
+  ],
+  "syntax_ids": ["JAVA-CONTAINS-ENUM-MEMBER"]
+}

@@ -1,0 +1,322 @@
+import os
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import quote_plus
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.common.enums import EnvironmentEnum
+from app.config.path_conf import ENV_DIR
+
+
+class Settings(BaseSettings):
+    """系统配置类"""
+
+    model_config = SettingsConfigDict(
+        env_file=ENV_DIR / f".env.{os.getenv('ENVIRONMENT')}",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=True,  # 区分大小写
+    )
+
+    # ================================================= #
+    # ******************* 项目环境 ****************** #
+    # ================================================= #
+    ENVIRONMENT: EnvironmentEnum = EnvironmentEnum.DEV
+
+    # ================================================= #
+    # ******************* 服务器配置 ****************** #
+    # ================================================= #
+    SERVER_HOST: str = "0.0.0.0"  # 允许访问的IP地址
+    SERVER_PORT: int = 8001  # 服务端口
+
+    # ================================================= #
+    # ******************* API文档配置 ****************** #
+    # ================================================= #
+    DEBUG: bool = True  # 调试模式
+    TITLE: str = "🎉 FastapiAdmin 🎉 "  # 文档标题
+    VERSION: str = "3.0.0"  # 版本号
+    DESCRIPTION: str = "一个基于fastapi、sqlalchemy、redis实现的轻量化框架"  # 文档描述
+    SUMMARY: str = "接口汇总"  # 文档概述
+    DOCS_URL: str = "/docs"  # Swagger UI路径
+    REDOC_URL: str = "/redoc"  # ReDoc路径
+    WEB_URL: str = "/web"  # 前端路径
+    ROOT_PATH: str = "/api/v1"  # API路由前缀
+
+    # ================================================= #
+    # ******************** 日志配置 ******************** #
+    # ================================================= #
+    LOGGER_LEVEL: str = "DEBUG"  # 日志级别
+
+    # ================================================= #
+    # ******************** 跨域配置 ******************** #
+    # ================================================= #
+    # DEV 环境: ALLOW_ORIGINS=["*"] + ALLOW_CREDENTIALS=True
+    #   注意: 根据 W3C 规范，allow_origins=["*"] 时浏览器会忽略 allow_credentials，
+    #   实际表现为 credentials 不生效。但在开发场景下不影响使用。
+    # PROD 环境: 通过 PROD_CORS_ORIGINS 环境变量配置具体域名列表（逗号分隔），allow_credentials=True 正常生效。
+    PROD_CORS_ORIGINS: str = ""  # 生产环境允许的域名列表，逗号分隔，如 "https://admin.example.com,https://www.example.com"
+    ALLOW_METHODS: list[str] = ["*"]  # 允许的HTTP方法
+    ALLOW_HEADERS: list[str] = ["*"]  # 允许的请求头
+    ALLOW_CREDENTIALS: bool = True  # 是否允许携带cookie
+    CORS_EXPOSE_HEADERS: list[str] = ["X-Request-ID"]
+
+    # ================================================= #
+    # ******************* 登录认证配置 ****************** #
+    # ================================================= #
+    SECRET_KEY: str = "fastapiadmin-dev-secret-key-do-not-use-in-production"  # JWT密钥（必须通过环境变量 SECRET_KEY 设置，无默认值）
+    ALGORITHM: str = "HS256"  # JWT算法
+    ACCESS_TOKEN_EXPIRE_SECONDS: int = 60 * 60 * 12  # access_token过期时间(秒)12 小时
+    REFRESH_TOKEN_EXPIRE_SECONDS: int = 60 * 60 * 12  # refresh_token过期时间(秒)12 小时
+    TOKEN_TYPE: str = "Bearer"  # token类型（RFC 6750 标准大小写）
+    TOKEN_SLIDING_EXPIRE: bool = True  # 是否启用滑动过期(用户操作时自动续期)
+
+    # ================================================= #
+    # ******************** 数据库配置 ******************* #
+    # ================================================= #
+    DATABASE_ECHO: bool | Literal["debug"] = False  # 是否显示SQL日志
+    ECHO_POOL: bool | Literal["debug"] = False  # 是否显示连接池日志
+    POOL_SIZE: int = 10  # 连接池大小
+    MAX_OVERFLOW: int = 20  # 最大溢出连接数
+    POOL_TIMEOUT: int = 30  # 连接超时时间(秒)
+    POOL_RECYCLE: int = 1800  # 连接回收时间(秒)
+    POOL_USE_LIFO: bool = True  # 是否使用LIFO连接池
+    POOL_PRE_PING: bool = True  # 是否开启连接预检
+    FUTURE: bool = True  # 是否使用SQLAlchemy 2.0特性
+    AUTOCOMMIT: bool = False  # 是否自动提交（映射 SQLAlchemy sessionmaker(autocommit=...)）
+    AUTOFLUSH: bool = False  # 是否自动刷新（映射 SQLAlchemy sessionmaker(autoflush=...)）
+    AUTOFETCH: bool | None = None  # AUTOFLUSH 别名（优先级高于 AUTOFLUSH，兼容旧环境变量名）
+    EXPIRE_ON_COMMIT: bool = False  # 是否在提交时过期
+
+    # MySQL/PostgreSQL数据库连接
+    DATABASE_TYPE: Literal["mysql", "postgres", "sqlite"] = "mysql"
+    DATABASE_HOST: str = "localhost"
+    DATABASE_PORT: int = 3306
+    DATABASE_USER: str = "root"
+    DATABASE_PASSWORD: str = ""
+    DATABASE_NAME: str = "fastapiadmin"
+
+    # ================================================= #
+    # ******************** Redis配置 ******************* #
+    # ================================================= #
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB_NAME: int = 1
+    REDIS_USER: str = ""
+    REDIS_PASSWORD: str = ""
+    REDIS_HEALTH_CHECK_INTERVAL: int = 20  # Redis 健康检查间隔（秒，对应 async_pool 的 health_check_interval）
+    REDIS_DEFAULT_CACHE_TTL: int = 86400  # RedisCURD.set() 默认 TTL（秒，24 小时）
+
+    # ================================================= #
+    # ******************** 验证码配置 ******************* #
+    # ================================================= #
+    CAPTCHA_ENABLE: bool = True  # 是否启用验证码
+    CAPTCHA_EXPIRE_SECONDS: int = 60 * 1  # 验证码过期时间(秒) 1分钟
+
+    # ================================================= #
+    # ***************** 第三方 OAuth 登录（可选）********* #
+    # ================================================= #
+    # 自动注册用户的默认角色 ID 列表（须与库中角色主键一致）
+    OAUTH_DEFAULT_ROLE_IDS: list[int] = [2]
+    OAUTH_FRONTEND_FALLBACK: str = "http://127.0.0.1:5173/login"
+    OAUTH_GITHUB_CLIENT_ID: str = ""
+    OAUTH_GITHUB_CLIENT_SECRET: str = ""
+    OAUTH_GITEE_CLIENT_ID: str = ""
+    OAUTH_GITEE_CLIENT_SECRET: str = ""
+    OAUTH_WECHAT_OPEN_APP_ID: str = ""
+    OAUTH_WECHAT_OPEN_APP_SECRET: str = ""
+    OAUTH_QQ_APP_ID: str = ""
+    OAUTH_QQ_APP_SECRET: str = ""
+    OAUTH_STATE_TTL: int = 600  # OAuth state 参数过期时间（秒）
+    # OAuth 回调域名白名单（["*"] 表示不限制，生产环境请设置为具体域名列表，如 ["example.com"]）
+    OAUTH_ALLOWED_HOSTS: list[str] = ["*"]
+
+    # ================================================= #
+    # *************** 微信小程序配置（可选）************** #
+    # ================================================= #
+    WX_MINI_APP_ID: str = ""  # 小程序 AppID
+    WX_MINI_APP_SECRET: str = ""  # 小程序 AppSecret
+    WX_MINI_ACCESS_TOKEN_CACHE_TTL: int = 7000  # access_token Redis 缓存秒数（微信上限 7200，留 200s 余量）
+
+    # ================================================= #
+    # ******************* 外部 HTTP（httpx）******************* #
+    # ================================================= #
+    HTTPX_DEFAULT_TIMEOUT: float = 10.0  # 对外 HTTP 请求默认超时（秒）
+    IP_LOCATION_ENABLE: bool = True  # 是否启用 IP 归属地查询（登录时对外发起 HTTP 请求）
+    IP_LOCATION_CACHE_TTL: int = 2592000  # IP 归属地缓存时间（秒，默认 30 天）
+    IP_LOCATION_QUERY_TIMEOUT: float = 3.0  # IP 归属地查询单次 HTTP 超时（秒）
+
+    # ================================================= #
+    # ********************* 日志配置 ******************* #
+    # ================================================= #
+    OPERATION_RECORD_METHOD: list[str] = [
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS",
+    ]  # 需要记录的请求方法
+
+    # ================================================= #
+    # ******************* Gzip压缩配置 ******************* #
+    # ================================================= #
+    GZIP_MIN_SIZE: int = 1000  # 最小压缩大小(字节)
+    GZIP_COMPRESS_LEVEL: int = 9  # 压缩级别(1-9)
+
+    # ================================================= #
+    # ******************* 安全中间件配置 ****************** #
+    # ================================================= #
+    ALLOWED_HOSTS: list[str] = ["service.fastapiadmin.com", "*.fastapiadmin.com"]  # 允许访问的主机名列表
+
+    # 操作日志保留天数（调度器按此天数定期清理过期日志）
+    OPERATION_LOG_RETENTION_DAYS: int = 90
+
+    # 接口白名单（无需认证即可访问的接口路径，支持 * 开头表示前缀匹配）
+    WHITE_API_LIST_PATH: list[str] = [
+        "/api/v1/system/auth/login",
+        "/api/v1/system/auth/token/refresh",
+        "/api/v1/system/auth/captcha/get",
+        "/api/v1/system/auth/captcha/slider/complete",
+        "/api/v1/system/auth/logout",
+        "/api/v1/system/param/info",
+        "/api/v1/system/dict/info",
+        "/api/v1/system/user/current/info",
+        "/api/v1/system/notice/available",
+        "/api/v1/common/health",
+        "/api/v1/common/health/ready",
+        "/api/v1/common/health/live",
+        "/metrics",
+    ]
+
+    # ================================================= #
+    # ***************** 静态文件配置 ***************** #
+    # ================================================= #
+    STATIC_URL: str = "/static"  # 访问路由
+
+    # ================================================= #
+    # ***************** 动态文件配置 ***************** #
+    # ================================================= #
+    UPLOAD_FILE_PATH: Path = Path("static/upload")  # 上传目录
+    UPLOAD_MACHINE: str = "A"  # 上传机器标识
+    ALLOWED_EXTENSIONS: list[str] = [  # 允许的文件类型
+        ".gif",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".ico",
+        ".svg",
+        ".xls",
+        ".xlsx",
+    ]
+    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 最大文件大小(10MB)
+
+    # ================================================= #
+    # ***************** Swagger配置 ***************** #
+    # ================================================= #
+    SWAGGER_CSS_URL: str = "static/swagger/swagger-ui/swagger-ui.css"
+    SWAGGER_JS_URL: str = "static/swagger/swagger-ui/swagger-ui-bundle.js"
+    REDOC_JS_URL: str = "static/swagger/redoc/bundles/redoc.standalone.js"
+    FAVICON_URL: str = "static/image/favicon.ico"
+
+    # ================================================= #
+    # ******************* AI大模型配置 ****************** #
+    # ================================================= #
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = ""
+    OPENAI_BASE_URL: str = ""  # API Base URL，如 https://api.minimax.chat/v1
+
+    # ================================================= #
+    # ******************* 动态配置 ******************* #
+    # ================================================= #
+    @property
+    def ALLOW_ORIGINS(self) -> list[str]:
+        """根据环境动态返回 CORS 允许的域名列表。"""
+        if self.ENVIRONMENT == EnvironmentEnum.PROD and self.PROD_CORS_ORIGINS:
+            return [origin.strip() for origin in self.PROD_CORS_ORIGINS.split(",") if origin.strip()]
+        return ["*"]
+
+    # ================================================= #
+    @property
+    def REDIS_URI(self) -> str:
+        """构建 Redis 连接 URI（供 slowapi / 其他模块复用）。"""
+        auth_part = ""
+        if self.REDIS_USER and self.REDIS_PASSWORD:
+            auth_part = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@"
+        elif self.REDIS_PASSWORD:
+            auth_part = f":{self.REDIS_PASSWORD}@"
+        return f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB_NAME}"
+
+    @property
+    def MIDDLEWARE_LIST(self) -> list[str | None]:
+        # 中间件列表（注册时逆序叠加：下列第一项在列表中最前，最终位于最外层，优先生效）
+        # 中间件执行顺序（从外到内）：
+        #   HTTPSRedirect → TrustedHost → CORS → RequestLog → GZip → CorrelationId → 业务路由
+        # 安全响应头（X-Content-Type-Options / Referrer-Policy / Permissions-Policy / HSTS）
+        # 由前置 Nginx / 反向代理通过 add_header 设置，避免应用层 BaseHTTPMiddleware 开销。
+        MIDDLEWARES: list[str | None] = [
+            "app.core.middlewares.CustomHTTPSRedirectMiddleware" if self.ENVIRONMENT == EnvironmentEnum.PROD else None,
+            "app.core.middlewares.CustomTrustedHostMiddleware" if self.ENVIRONMENT == EnvironmentEnum.PROD else None,
+            "app.core.middlewares.CustomCORSMiddleware",
+            "app.core.middlewares.RequestLogMiddleware",
+            "app.core.middlewares.CustomGZipMiddleware",
+            "app.core.middlewares.CorrelationIdMiddleware",  # 请求上下文
+        ]
+        return MIDDLEWARES
+
+    @property
+    def ASYNC_DB_URI(self) -> str:
+        if self.DATABASE_TYPE not in ("mysql", "postgres", "sqlite"):
+            raise ValueError(f"数据库驱动不支持: {self.DATABASE_TYPE}, 异步数据库请选择 mysql、postgres、sqlite")
+        db_connect: str = ""
+        if self.DATABASE_TYPE == "mysql":
+            db_connect = f"mysql+aiomysql://{self.DATABASE_USER}:{quote_plus(self.DATABASE_PASSWORD)}@{self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}?charset=utf8mb4"
+        elif self.DATABASE_TYPE == "postgres":
+            db_connect = f"postgresql+asyncpg://{self.DATABASE_USER}:{quote_plus(self.DATABASE_PASSWORD)}@{self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}"
+        else:
+            db_connect = f"sqlite+aiosqlite:///{self.DATABASE_NAME}.db"
+        return db_connect
+
+    @property
+    def DB_URI(self) -> str:
+        if self.DATABASE_TYPE not in ("mysql", "postgres", "sqlite"):
+            raise ValueError(f"数据库驱动不支持: {self.DATABASE_TYPE}, 同步数据库请选择 mysql、postgres、sqlite")
+        db_connect: str = ""
+        if self.DATABASE_TYPE == "mysql":
+            db_connect = f"mysql+pymysql://{self.DATABASE_USER}:{quote_plus(self.DATABASE_PASSWORD)}@{self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}?charset=utf8mb4"
+        elif self.DATABASE_TYPE == "postgres":
+            db_connect = f"postgresql+psycopg://{self.DATABASE_USER}:{quote_plus(self.DATABASE_PASSWORD)}@{self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}"
+        else:
+            db_connect = f"sqlite:///{self.DATABASE_NAME}.db"
+        return db_connect
+
+    @property
+    def FASTAPI_CONFIG(self) -> dict[str, Any]:
+        return {
+            "debug": self.DEBUG,
+            "title": self.TITLE,
+            "version": self.VERSION,
+            "description": self.DESCRIPTION,
+            "summary": self.SUMMARY,
+            "docs_url": None,
+            "redoc_url": None,
+            "root_path": self.ROOT_PATH,
+            "responses": {
+                200: {"description": "成功"},
+                400: {"description": "请求参数错误"},
+                401: {"description": "未认证"},
+                403: {"description": "未授权"},
+                404: {"description": "资源不存在"},
+                422: {"description": "请求参数验证错误"},
+                500: {"description": "服务器内部错误"},
+            }
+        }
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

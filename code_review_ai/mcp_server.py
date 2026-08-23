@@ -3,8 +3,10 @@ import os
 import threading
 import urllib.request
 import urllib.error
+from pathlib import Path
 
 from code_review_ai.changes import build_change_summary, detect_changed_symbols
+from code_review_ai.change_context import build_change_context
 from code_review_ai.community import get_community as _get_community
 from code_review_ai.community import list_communities as _list_communities
 from code_review_ai.config import Config
@@ -21,6 +23,39 @@ from code_review_ai.update import sync
 _SEARCH_SYMBOL_LIMIT = 30
 
 
+def _relativize_path(path: str, repo_root: str) -> str:
+    """Rewrite an absolute repo file path to a repo-relative one, so MCP
+    results stay compact. The agent's cwd is the repo root, so a relative path
+    reads identically while costing a fraction of the absolute form (which can
+    embed a long worktree/Windows prefix repeated per node brief). Paths that
+    resolve outside the repo (e.g. other repos, or already-relative values)
+    pass through unchanged."""
+    try:
+        resolved = Path(path).resolve()
+        root = Path(repo_root).resolve()
+        return resolved.relative_to(root).as_posix()
+    except ValueError:
+        return path
+
+
+def _relativize(value: object, repo_root: str) -> object:
+    """Recursively relativize the ``file``/``file_path`` keys of a tool result.
+
+    Every file value in a result is re-sent (as cache-read) on each later tool
+    call, so shrinking it shrinks total run cost multiplicatively, not just the
+    call that produced it."""
+    if isinstance(value, dict):
+        return {
+            key: (_relativize_path(item, repo_root)
+                  if key in {"file", "file_path"} and isinstance(item, str)
+                  else _relativize(item, repo_root))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_relativize(item, repo_root) for item in value]
+    return value
+
+
 def _conn(config: Config):
     conn = connect(config.db_path)
     init_schema(conn)
@@ -32,6 +67,10 @@ def create_server(config: Config):
     mcp = MCPServer("code-review-ai")
     conn = _conn(config)
     lock = threading.Lock()
+
+    def _emit(value: object) -> str:
+        """Serialize a tool result with repo-absolute paths relativized."""
+        return json.dumps(_relativize(value, config.repo_path))
 
     @mcp.tool()
     def rebuild_index() -> str:
@@ -49,18 +88,27 @@ def create_server(config: Config):
 
     @mcp.tool()
     def get_impact(symbols: list[str] | None = None,
-                   files: list[str] | None = None) -> str:
+                   files: list[str] | None = None,
+                   max_nodes_per_direction: int = 20,
+                   include_signatures: bool = False) -> str:
         """Impact analysis for changed symbols: the affected business entry
         points plus upstream callers / downstream callees per flow. Pass
         explicit `symbols` (e.g. ["auth::login"]) or `files`; if both omitted,
-        changed symbols are derived from git diff (diff_base). Each result also
-        carries `uncertainty` (one-hop non-resolved edges around the symbol —
-        dynamic/unresolved/candidate — capped at 20) and `coverage` (adjacent-
-        edge counts per resolution), so resolution gaps are visible instead of
-        silently dropped. Prefer this over grepping when assessing what a code
-        change breaks."""
+        changed symbols are derived from git diff (diff_base). Upstream/
+        downstream are the exact transitive callers/callees (sibling branches
+        that never call the symbol are excluded), capped at
+        `max_nodes_per_direction` per flow. Set `include_signatures=true` to
+        add per-node `sig` fields (default off — signatures are ~26% of the
+        payload). Each result also carries `uncertainty` (one-hop non-resolved
+        edges around the symbol — dynamic/unresolved/candidate — capped at 20)
+        and `coverage` (adjacent-edge counts per resolution), so resolution
+        gaps are visible instead of silently dropped. Prefer this over grepping
+        when assessing what a code change breaks."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
-        return json.dumps(_get_impact(conn, changed))
+        return _emit(_get_impact(
+            conn, changed,
+            max_nodes_per_direction=max_nodes_per_direction,
+            include_signatures=include_signatures))
 
     @mcp.tool()
     def get_test_impact(symbols: list[str] | None = None,
@@ -77,7 +125,7 @@ def create_server(config: Config):
         Prefer this over get_impact when the question is "which tests must I
         run", not "which business code breaks"."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
-        return json.dumps(_get_test_impact(conn, changed))
+        return _emit(_get_test_impact(conn, changed))
 
     @mcp.tool()
     def find_dead_code() -> str:
@@ -86,7 +134,7 @@ def create_server(config: Config):
         plus whole files nothing imports. Returns a JSON candidate list —
         symbols + files — with a note that these are static-analysis
         candidates, not deletion orders."""
-        return json.dumps(_find_dead_code(conn, config))
+        return _emit(_find_dead_code(conn, config))
 
     @mcp.tool()
     def get_change_summary(symbols: list[str] | None = None,
@@ -100,8 +148,33 @@ def create_server(config: Config):
         their one-hop upstream, from tombstones written at update time). Pass
         explicit `symbols` to resolve those qnames from the graph instead of
         the diff. Returns a JSON object."""
-        return json.dumps(build_change_summary(config, conn,
-                                               symbols=symbols, files=files))
+        return _emit(build_change_summary(config, conn,
+                                          symbols=symbols, files=files))
+
+    @mcp.tool()
+    def get_change_context(symbols: list[str] | None = None,
+                           files: list[str] | None = None,
+                           direction: str = "in", max_symbols: int = 4,
+                           max_neighbors: int = 5,
+                           include_signatures: bool = False,
+                           include_tests: bool = False) -> str:
+        """Compact graph expansion for changes the reviewer has already judged
+        non-local. Pass exact qnames in `symbols`, or changed paths in `files`
+        and the server resolves their changed qnames internally; omit both to
+        use the whole git diff. Returns resolved call neighbors only: upstream
+        callers by default, optional downstream callees with direction=out or
+        both. Selection covers distinct changed files before adding more
+        symbols from one file, and favors symbols with production callers.
+        Results omit signatures and test-only callers by default, cap
+        symbols/neighbors, and enforce an 8 KB response budget. Do not call for
+        self-contained changes and do not call search_symbol first."""
+        return _emit(build_change_context(
+            config, conn, symbols=symbols, files=files,
+            direction=direction, max_symbols=max_symbols,
+            max_neighbors=max_neighbors,
+            include_signatures=include_signatures,
+            include_tests=include_tests,
+        ))
 
     @mcp.tool()
     def query_graph(qualified_name: str, edge_kind: str = "call",
@@ -110,9 +183,9 @@ def create_server(config: Config):
         implements|all，默认 call）的 resolved 边，in=用了它的节点，out=它用的
         节点。max_neighbors 限制每个方向的返回条数，默认 20 以控制上下文体积。
         返回 JSON 对象。"""
-        return json.dumps(_query_graph(conn, qualified_name,
-                                       edge_kind=edge_kind, direction=direction,
-                                       max_per_dir=max_neighbors))
+        return _emit(_query_graph(conn, qualified_name,
+                                  edge_kind=edge_kind, direction=direction,
+                                  max_per_dir=max_neighbors))
 
     @mcp.tool()
     def search_symbol(query: str, limit: int = 50) -> str:
@@ -122,7 +195,7 @@ def create_server(config: Config):
         Returns a JSON list of {qname, kind, file, line, end_line, signature,
         score}. Use to find qualified names before get_symbol_detail /
         get_impact."""
-        return json.dumps(fts_search(
+        return _emit(fts_search(
             conn, query, limit=min(limit, _SEARCH_SYMBOL_LIMIT)))
 
     @mcp.tool()
@@ -133,18 +206,18 @@ def create_server(config: Config):
         {"error": "symbol not found"}."""
         r = conn.execute("SELECT * FROM nodes WHERE qualified_name=?", (qualified_name,)).fetchone()
         if r is None:
-            return json.dumps({"error": "symbol not found"})
+            return _emit({"error": "symbol not found"})
         callers = [row["source"] for row in conn.execute(
             "SELECT DISTINCT source FROM edges WHERE target=? AND kind='call' "
             "AND resolution='resolved'", (qualified_name,))]
         callees = [row["target"] for row in conn.execute(
             "SELECT DISTINCT target FROM edges WHERE source=? AND kind='call' "
             "AND resolution='resolved'", (qualified_name,))]
-        return json.dumps({"qname": r["qualified_name"], "kind": r["kind"],
-                           "file": r["file_path"], "line": r["start_line"],
-                           "signature": r["signature"],
-                           "in_degree": r["in_degree"], "out_degree": r["out_degree"],
-                           "callers": callers, "callees": callees})
+        return _emit({"qname": r["qualified_name"], "kind": r["kind"],
+                      "file": r["file_path"], "line": r["start_line"],
+                      "signature": r["signature"],
+                      "in_degree": r["in_degree"], "out_degree": r["out_degree"],
+                      "callers": callers, "callees": callees})
 
     @mcp.tool()
     def list_entry_points() -> str:
@@ -155,8 +228,8 @@ def create_server(config: Config):
             "SELECT DISTINCT f.name, n.qualified_name, n.file_path FROM flows f "
             "JOIN nodes n ON n.id=f.entry_point_id WHERE n.is_test=0"
         ).fetchall()
-        return json.dumps([{"qname": r["qualified_name"], "name": r["name"],
-                            "file": r["file_path"]} for r in rows])
+        return _emit([{"qname": r["qualified_name"], "name": r["name"],
+                       "file": r["file_path"]} for r in rows])
 
     @mcp.tool()
     def get_communities() -> str:
@@ -164,7 +237,7 @@ def create_server(config: Config):
         their members. Returns a JSON list of {id, label, node_count,
         modularity, members: [qnames]}. Horizontal view of which modules
         cluster together."""
-        return json.dumps(_list_communities(conn))
+        return _emit(_list_communities(conn))
 
     @mcp.tool()
     def get_community(qualified_name: str) -> str:
@@ -173,7 +246,7 @@ def create_server(config: Config):
         caller/callee chains) with the horizontal cluster view. Returns a JSON
         object with "found": false and a reason if the symbol is missing or on
         no structural edge."""
-        return json.dumps(_get_community(conn, qualified_name))
+        return _emit(_get_community(conn, qualified_name))
 
     @mcp.tool()
     def call_external_service(body: str) -> str:
@@ -192,6 +265,17 @@ def create_server(config: Config):
             return json.dumps({"error": f"HTTP {e.code}", "body": e.read().decode("utf-8", errors="replace")})
         except urllib.error.URLError as e:
             return json.dumps({"error": str(e.reason)})
+
+    # Eval ablation: restrict which tools the server registers so a headless
+    # model genuinely cannot see the others. --allowedTools only gates native
+    # tools; MCP tools exposed by the server stay visible/callable. Empty env
+    # (normal use) registers everything, unchanged.
+    only_tools = os.environ.get("CRAI_MCP_ONLY_TOOLS", "").strip()
+    if only_tools:
+        wanted = {name.strip() for name in only_tools.split(",") if name.strip()}
+        for name in list(mcp._tool_manager._tools):
+            if name not in wanted:
+                mcp.remove_tool(name)
 
     # attach conn/lock for main() to wire into startup + watcher
     mcp._conn = conn

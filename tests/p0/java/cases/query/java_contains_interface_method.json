@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-CONTAINS-INTERFACE-METHOD-POS",
+  "language": "java",
+  "p0_capabilities": ["P0-G02"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.inheritance::ContractA",
+  "edge_kind": "contains",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": ["com.acme.p0.inheritance::ContractA.contract"],
+  "syntax_ids": ["JAVA-CONTAINS-INTERFACE-METHOD"]
+}

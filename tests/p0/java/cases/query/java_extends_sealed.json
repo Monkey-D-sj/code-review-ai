@@ -1,0 +1,12 @@
+{
+  "case_id": "JAVA-EXTENDS-SEALED-POS",
+  "language": "java",
+  "p0_capabilities": ["P0-G04"],
+  "fixture": "fixture_repo",
+  "qualified_name": "com.acme.p0.inheritance::SealedChild",
+  "edge_kind": "extends",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": ["com.acme.p0.inheritance::SealedBase"],
+  "syntax_ids": ["JAVA-EXTENDS-SEALED"]
+}

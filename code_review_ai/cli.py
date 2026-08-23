@@ -9,7 +9,8 @@ from code_review_ai.agent_eval import (MODES, load_agent_cases,
                                        preflight_agent_eval,
                                        parse_agent_command, run_agent_eval,
                                        select_agent_cases)
-from code_review_ai.full_agent_eval import (FULL_EVAL_MODES,
+from code_review_ai.full_agent_eval import (DEFAULT_FULL_EVAL_MODES,
+                                            FULL_EVAL_MODES,
                                             load_full_agent_cases,
                                             preflight_full_agent_eval,
                                             rescore_full_agent_report,
@@ -26,6 +27,9 @@ from code_review_ai.indexer import rebuild
 from code_review_ai.search import fts_search
 from code_review_ai.installer import DEFAULT_SOURCE, install
 from code_review_ai.update import sync, update_nodes_edges
+from code_review_ai.context_planner import (
+    DEFAULT_MAX_CHARS, plan_context, run_context_plan_eval,
+)
 
 
 def _conn(db_path):
@@ -52,9 +56,22 @@ def _write_json(payload: dict, output_path: str | None) -> None:
     rendered = json.dumps(payload, indent=2, ensure_ascii=False)
     if output_path:
         from pathlib import Path
-        Path(output_path).write_text(rendered + "\n", encoding="utf-8")
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(rendered + "\n", encoding="utf-8")
     else:
         print(rendered)
+
+
+def _write_full_agent_routes(payload: dict, report_path: str,
+                             work_dir: str) -> Path:
+    """Write the automatic compact trace artifact beside an eval report."""
+    from code_review_ai.full_agent_trace import render
+    report = Path(report_path)
+    output = report.with_name(f"{report.stem}-routes.md")
+    output.write_text(
+        render(payload, Path(work_dir) / "transcripts"), encoding="utf-8")
+    return output
 
 
 def _normalize_test_paths(files: list[str]) -> list[str]:
@@ -94,6 +111,11 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(s)
     s.add_argument("--symbols", nargs="*")
     s.add_argument("--files", nargs="*")
+    cp = sub.add_parser("context-plan")
+    _add_common(cp)
+    cp.add_argument("--files", nargs="*")
+    cp.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
+    cp.add_argument("-o", "--out")
     s = sub.add_parser("query-graph")
     _add_common(s)
     s.add_argument("qualified_name")
@@ -175,11 +197,15 @@ def main(argv: list[str] | None = None) -> int:
     fe.add_argument("--cases", required=True)
     fe.add_argument("--case-ids", nargs="+")
     fe.add_argument("--repos-dir", default=".code-review-ai/external-repos")
+    fe.add_argument("--local-repo",
+                    help="single local git repo used as the source for every "
+                         "case (cases must have empty repo_url); built by its "
+                         "build_repo.py if it has no history yet")
     fe.add_argument("--work-dir", default=".code-review-ai/full-agent-eval")
     fe.add_argument("--agent-command")
     fe.add_argument("--dry-run", action="store_true")
     fe.add_argument("--modes", nargs="+", choices=FULL_EVAL_MODES,
-                    default=list(FULL_EVAL_MODES))
+                    default=list(DEFAULT_FULL_EVAL_MODES))
     fe.add_argument("--repetitions", type=int, default=1)
     fe.add_argument("--workers", type=int, default=1)
     fe.add_argument("--timeout", type=int, default=600)
@@ -189,12 +215,28 @@ def main(argv: list[str] | None = None) -> int:
     fr.add_argument("--cases", required=True)
     fr.add_argument("--transcripts", required=True)
     fr.add_argument("-o", "--out")
+    pe = sub.add_parser("context-plan-eval")
+    pe.add_argument("--cases", required=True)
+    pe.add_argument("--case-ids", nargs="+")
+    pe.add_argument("--repos-dir", default=".code-review-ai/external-repos")
+    pe.add_argument("--work-dir", default=".code-review-ai/context-plan-eval")
+    pe.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
+    pe.add_argument("-o", "--out")
     xr = sub.add_parser("extract-review")
     xr.add_argument("debug", help="claude stream-json transcript to read")
     xr.add_argument("out", help="file to write the final answer to")
     tr = sub.add_parser("trace-review")
     tr.add_argument("debug", help="claude stream-json transcript to read")
     tr.add_argument("out", help="file to write the concise tool trace to")
+    ft = sub.add_parser(
+        "summarize-full-agent-trace",
+        aliases=["eval-trace"],
+        help="render compact complete routes from a full-agent-eval report",
+    )
+    ft.add_argument("report", help="full-agent-eval report JSON")
+    ft.add_argument("--transcripts-root",
+                    help="transcripts root used to recover each run cwd")
+    ft.add_argument("-o", "--out", help="Markdown output (stdout if omitted)")
     ip = sub.add_parser("install")
     ip.add_argument("--platform", default="claude-code")
     ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
@@ -221,6 +263,17 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("error: no tool calls found in debug log", file=sys.stderr)
         return 0 if count else 1
+    if args.cmd in {"summarize-full-agent-trace", "eval-trace"}:
+        from code_review_ai.full_agent_trace import summarize_file
+        try:
+            output = summarize_file(
+                args.report, args.transcripts_root, args.out)
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        if not args.out:
+            print(output, end="")
+        return 0
     if args.cmd == "agent-eval-analyze":
         from code_review_ai.agent_eval_analysis import analyze_file
         try:
@@ -237,7 +290,8 @@ def main(argv: list[str] | None = None) -> int:
                 load_full_agent_cases(args.cases), args.case_ids)
             if args.dry_run:
                 payload = preflight_full_agent_eval(
-                    cases, args.repos_dir, args.work_dir)
+                    cases, args.repos_dir, args.work_dir,
+                    local_repo=args.local_repo)
             else:
                 if not args.agent_command:
                     raise ValueError("--agent-command is required unless --dry-run")
@@ -245,17 +299,36 @@ def main(argv: list[str] | None = None) -> int:
                     cases, args.repos_dir, args.work_dir,
                     parse_agent_command(args.agent_command),
                     modes=tuple(args.modes), repetitions=args.repetitions,
-                    timeout_seconds=args.timeout, workers=args.workers)
+                    timeout_seconds=args.timeout, workers=args.workers,
+                    local_repo=args.local_repo)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        _write_json(payload, args.out)
+        try:
+            _write_json(payload, args.out)
+            if args.out and not args.dry_run:
+                route_path = _write_full_agent_routes(
+                    payload, args.out, args.work_dir)
+                print(f"wrote tool routes to {route_path}")
+        except OSError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         return 0
     if args.cmd == "full-agent-eval-rescore":
         try:
             payload = rescore_full_agent_report(
                 args.report, load_full_agent_cases(args.cases), args.transcripts)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_json(payload, args.out)
+        return 0
+    if args.cmd == "context-plan-eval":
+        try:
+            payload = run_context_plan_eval(
+                args.cases, args.repos_dir, args.work_dir,
+                case_ids=args.case_ids, max_chars=args.max_chars)
+        except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         _write_json(payload, args.out)
@@ -325,6 +398,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(payload))
+    elif args.cmd == "context-plan":
+        try:
+            payload = plan_context(
+                cfg, conn, files=args.files, max_chars=args.max_chars)
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_json(payload, args.out)
     elif args.cmd == "query-graph":
         try:
             payload = query_graph(conn, args.qualified_name,

@@ -48,7 +48,8 @@ These MCP tools are registered at user scope and query a tree-sitter + SQLite
 call graph of whatever repo Claude Code is currently in. On first use in a new
 project the server rebuilds that project's index automatically (a few seconds).
 
-- `search_symbol(query)` — 先用它按短名 glob 找到 qname（如 `*login*`），再查细节/影响。
+- `get_change_context(symbols|files)` — 先看 diff/局部代码；只有非自包含改动才调用。传 qname 或受影响文件，服务端自动解析 changed qname，紧凑返回 resolved callers（按需含 callees），无需先调 `search_symbol`。
+- `search_symbol(query)` — 通用符号发现；只有不是从当前 diff/文件扩展上下文时才按短名或 glob 查 qname。
 - `get_impact(symbols|files)` — **评估改动影响的首选**：传 `symbols`（如 `["auth::login"]`）或 `files`；都省略则从 git diff 推导。返回受影响入口 + 上下游调用链。别用 grep 硬猜。
 - `get_symbol_detail(qname)` — 单个符号详情 + 直接 callers/callees。
 - `list_entry_points()` — 看索引到的业务入口有哪些。
@@ -56,7 +57,7 @@ project the server rebuilds that project's index automatically (a few seconds).
 - `rebuild_index()` — 手动刷新索引（正常由 watcher 自动维护，很少需要手动）。
 - `call_external_service(body)` — 提交审查报告到外部服务（供 code-review skill 使用，一般不用直接调）。
 
-约定：做"改了这个会影响什么"的分析时优先 `get_impact`；做"这些模块和谁耦合"的分析时优先社区工具。
+约定：代码评审先由 LLM 判断改动是否自包含；自包含时不用图工具，非自包含时先用一次 `get_change_context`。完整业务影响链才升级 `get_impact`；模块耦合分析用社区工具。
 <!-- CODE_REVIEW_AI_MCP_END -->
 """
 

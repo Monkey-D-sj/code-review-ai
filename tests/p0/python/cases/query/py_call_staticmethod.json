@@ -1,0 +1,12 @@
+{
+  "case_id": "PY-CALL-STATICMETHOD-POS",
+  "language": "python",
+  "p0_capabilities": ["P0-G01"],
+  "fixture": "fixture_repo",
+  "qualified_name": "p0_fixture.conformance_static::static_caller",
+  "edge_kind": "call",
+  "direction": "out",
+  "expected_in": [],
+  "expected_out": ["p0_fixture.conformance_static::StaticDemo.static_target"],
+  "syntax_ids": ["PY-CALL-STATICMETHOD"]
+}
