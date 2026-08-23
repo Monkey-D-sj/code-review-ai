@@ -82,6 +82,7 @@ args = ["--from", "git+https://github.com/Monkey-D-sj/code-review-ai", "code-rev
 
 - `rebuild_index` - build/rebuild the index from the working tree
 - `get_impact` - impact chains for changed symbols (or derived from a git diff)
+- `get_change_context` - compact, on-demand callers/callees for changes the LLM has already judged non-local; accepts qnames or changed files and resolves qnames server-side
 - `search_symbol` - find symbols by name; plain-word queries run FTS token match + bm25 ranking with a substring fallback on 0 hits, while queries containing `*`/`?` keep the short-name glob behavior
 - `get_symbol_detail` - node detail + direct callers/callees
 - `list_entry_points` - designated entry points
@@ -98,6 +99,15 @@ code-review-ai communities [--symbol auth::login]       # list communities / one
 ```
 
 `rebuild`/`query`/`search`/`communities` also accept no `--repo`/`--db` (defaults: `.` and `.code-review-ai/index.db`).
+
+### Deterministic context plan (no LLM)
+
+Route a change to `local` or `graph` and build one bounded evidence package
+using only git diff, tree-sitter and the local SQLite index:
+
+```bash
+code-review-ai context-plan --max-chars 8000 -o .code-review-ai/context-plan.json
+```
 
 ## Agentic Eval
 
@@ -147,38 +157,28 @@ experiments:
 
 ```bash
 code-review-ai agent-eval --repo . \
-  --cases benchmarks/agentic-eval-real-repos.json \
-  --repos-dir .code-review-ai/external-repos \
+  --cases examples/agent-eval-cases.example.json \
   --agent-command "python -m code_review_ai.agent_adapter claude --model sonnet" \
   --repetitions 3 --workers 4 \
-  -o .code-review-ai/agent-eval-real-repos-r3.json
+  -o .code-review-ai/agent-eval-example-r3.json
 ```
 
-`benchmarks/agentic-eval-real-repos.json` is the canonical case set shared by
-`agent-eval` and `full-agent-eval`: twelve reverse mutations from real fixes in
-itsdangerous, p-limit, Gson, FastAPI, and Spring PetClinic. Six cases are
-explicitly context-heavy, covering cross-module alias pipelines, route-state
-propagation, framework lifecycles, ORM/view boundaries, and database-backed
-concurrency invariants. Each runner consumes the same repository URL,
-fix commit, mutation paths, review task, and gold findings. `agent-eval`
-automatically clones/caches each repository, creates an isolated worktree,
-restores the selected production paths to the fix parent, detects changed
-symbols, and builds all four controlled contexts from the same mutations used
-by `full-agent-eval`. The older `benchmarks/agent-eval-real-10.json` remains a
-project-local historical smoke suite, not the cross-evaluator baseline.
+`examples/agent-eval-cases.example.json` is a single offline case (inline diff,
+no clone needed). For repository-backed cases the manifest supplies a
+`repo_url`/`source_commit`/`mutation_paths` triple; `agent-eval` clones/caches
+each repository, creates an isolated worktree, restores the selected production
+paths to the fix parent, detects changed symbols, and builds all four controlled
+contexts from the same mutations used by `full-agent-eval`.
 On Windows, commands with complex quoting can also be supplied as a JSON array.
-The 120-run baseline and its limitations are documented in
-`benchmarks/AGENT_EVAL_BASELINE.md`. Search currently has the best F1 point
-estimate; confidence intervals do not establish that Graph or Hybrid improves
-F1 over Diff Only.
+Search currently has the best F1 point estimate; confidence intervals do not
+establish that Graph or Hybrid improves F1 over Diff Only.
 
 Before spending model budget, preflight the manifest, symbol coverage, context
 sizes, and supplied files:
 
 ```bash
 code-review-ai agent-eval --repo . \
-  --cases benchmarks/agentic-eval-real-repos.json --dry-run \
-  --repos-dir .code-review-ai/external-repos \
+  --cases examples/agent-eval-cases.example.json --dry-run \
   -o .code-review-ai/agent-eval-preflight.json
 ```
 
@@ -212,24 +212,22 @@ blast radius remains uncertain or the change crosses an important boundary.
 
 ```bash
 code-review-ai full-agent-eval \
-  --cases benchmarks/agentic-eval-real-repos.json --dry-run \
+  --cases benchmarks/case-backend-cases.json --dry-run \
   -o .code-review-ai/full-agent-preflight.json
 
 code-review-ai full-agent-eval \
-  --cases benchmarks/agentic-eval-real-repos.json \
+  --cases benchmarks/case-backend-cases.json \
   --agent-command "python -m code_review_ai.agent_adapter claude --model sonnet --max-budget-usd 1.00" \
   --repetitions 3 --workers 4 \
   -o .code-review-ai/full-agent-report.json
 ```
 
-The current online-v2 result completed 36/36 calls. Compared with Native Agent,
-Full Project changed the F1 point estimate from 90.4% to 91.3%, precision from
-85.2% to 88.0%, and recall from 100.0% to 97.2%. The paired F1 interval is -9.8
-to +8.5 points, so the small experiment does not establish a quality gain. With
-index setup excluded from Agent timing, Full Project cost 3.0% more, was 2.3%
-slower, and read 25.3% fewer files. Only 9/18 Full Project runs chose
-`get_impact`; all 18 used project MCP. Methodology, artifacts, and limitations
-are documented in `benchmarks/FULL_AGENT_EVAL_REAL_REPOS.md`.
+`benchmarks/case-backend-cases.json` holds the business-shaped project cases
+(`source_dir`-anchored under `full_agent_eval/case-backend`, no clone or
+network needed), and `benchmarks/fast-cases.json` is the fast single-repo
+regression set against `benchmarks/fast-repo` (`--local-repo`). Both run the
+same `full-agent-eval` harness and share the `examples/agent-eval-cases.example.json`
+offline shape.
 
 ## Historical-change benchmark
 
@@ -259,72 +257,6 @@ distribution, symbol-found rate, per-case query latency, and historical patch
 file Recall@K/Precision@K. `examples/benchmark-cases.example.json` is a starter manifest.
 Patch files are an observable proxy for impact, not a complete ground truth;
 label the metric **historical patch file recall** when reporting results.
-
-### Reproducible SWE-bench suite
-
-`benchmarks/swe-bench-verified-30.json` contains 30 real, fixed-revision cases:
-Flask (1), Requests (8), pytest (11), and Xarray (10). Production patch ranges
-are the change seeds; files from the official `test_patch` are the retrieval
-targets, avoiding the trivial metric of predicting the seed file itself.
-
-```bash
-uv run python scripts/run_swebench_suite.py \
-  --cases benchmarks/swe-bench-verified-30.json \
-  --cache-dir .benchmark-cache --top-k 10 \
-  --out benchmark-results/swe-bench-verified-30.json
-```
-
-The runner clones each repository once, checks out every case's pinned
-`base_commit`, includes tests in indexing, and creates an isolated SQLite index
-per case. Use `--limit 1` for a smoke test. The committed manifest can be
-regenerated from Hugging Face rows JSON with
-`scripts/generate_swebench_manifest.py`; raw dataset files are not vendored.
-
-### FastAPI and Spring Boot historical suites
-
-FastAPI is not part of classic SWE-bench Verified, so its cases are labelled
-separately instead of being presented as Verified samples.
-`benchmarks/fastapi-history-10.json` contains 10 commits from the official
-FastAPI repository that changed both production Python and tests. Cases cover
-routing, applications, SSE, compatibility, encoding, dependencies/OpenAPI,
-headers, and responses.
-
-`benchmarks/spring-petclinic-history-10.json` adds 10 Java commits from the
-official Spring PetClinic repository. They cover Spring MVC controllers,
-repositories, validators, entities, and JUnit tests. The production files are
-under `src/main/java/`; the retrieval targets are the corresponding changed
-files under `src/test/java/`. `benchmarks/historical-suite-50.json` combines
-both history subsets with the 30 Verified cases.
-
-```bash
-uv run python scripts/run_swebench_suite.py \
-  --cases benchmarks/historical-suite-50.json \
-  --dataset-name "SWE-bench Verified + FastAPI + Spring PetClinic Git history" \
-  --cache-dir .benchmark-cache --top-k 10 \
-  --out benchmark-results/historical-suite-50.json
-```
-
-Regenerate the FastAPI subset from an official local clone with:
-
-```bash
-uv run python scripts/generate_git_history_manifest.py \
-  --repo-path ../fastapi --count 10 \
-  --out benchmarks/fastapi-history-10.json
-```
-
-Regenerate the Spring PetClinic subset from an official local clone with:
-
-```bash
-uv run python scripts/generate_git_history_manifest.py \
-  --repo-path ../spring-petclinic \
-  --repo spring-projects/spring-petclinic \
-  --production-prefix src/main/java/ --test-prefix src/test/java/ \
-  --suffix .java --count 10 --scan 3000 --prefer-recent \
-  --max-gold-files 5 --max-production-files 5 \
-  --exclude-subject upgrade --exclude-subject migrate \
-  --exclude-subject copyright --exclude-subject formatting \
-  --out benchmarks/spring-petclinic-history-10.json
-```
 
 For commits changing two or more production files, the same run also performs
 leave-one-production-file-out evaluation. Each fold uses one changed file's
@@ -376,9 +308,10 @@ exists), pipes that JSON into the review LLM, and writes the report to
 `.debug.log` trace — one line per tool/skill/MCP call plus its result — and,
 for claude-code, a `.debug.jsonl` raw `stream-json` transcript for deeper
 dives), so history is kept and `last-review.md` always points at the newest.
-The review prompt steers the LLM to prefer code-review-ai's MCP tools
-(`get_impact` / `get_change_summary` / `search_symbol` / `query_graph`) and the
-`code-review` skills over raw `git diff`/`grep`, and the headless run
+The review prompt first asks the LLM to classify the supplied local change.
+Self-contained changes use no graph context; non-local changes call the compact
+`get_change_context` once with qnames or affected files, then use targeted
+native reads only for missing evidence. The headless run
 pre-authorizes those tools so they don't fail on permission prompts. The LLM
 platform is selectable — `claude-code` (default, runs `claude -p
 --output-format stream-json --verbose`, extracting the answer from the

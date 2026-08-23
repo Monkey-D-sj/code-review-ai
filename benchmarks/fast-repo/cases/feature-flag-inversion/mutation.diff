@@ -1,0 +1,7 @@
+--- a/src/fast_bench/config.py
++++ b/src/fast_bench/config.py
+@@ -9,3 +9,3 @@
+ def is_enabled(feature: str) -> bool:
+     """Whether a feature flag is enabled for this deployment."""
+-    return feature in _FEATURES
++    return feature not in _FEATURES

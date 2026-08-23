@@ -1,0 +1,8 @@
+--- a/src/fast_bench/pricing.py
++++ b/src/fast_bench/pricing.py
+@@ -19,4 +19,4 @@
+ def compute_total(subtotal_cents: int, tax_cents: int,
+                   shipping_cents: int) -> OrderTotal:
+     """Compute the order total as a structured result."""
+-    return OrderTotal(subtotal_cents, tax_cents, shipping_cents)
++    return (subtotal_cents, tax_cents, shipping_cents)

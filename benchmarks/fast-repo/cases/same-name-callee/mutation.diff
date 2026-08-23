@@ -1,0 +1,7 @@
+--- a/src/fast_bench/token.py
++++ b/src/fast_bench/token.py
+@@ -6,3 +6,3 @@
+ def parse(token: str) -> str:
+     """Return the stripped token, or an empty string when the token is blank."""
+-    return token.strip()
++    return token.strip() or None

@@ -1,0 +1,8 @@
+--- a/src/fast_bench/notify.py
++++ b/src/fast_bench/notify.py
+@@ -6,3 +6,3 @@
+-def send(recipient: str, message: str) -> None:
+-    """Deliver a message to one recipient."""
++def send(recipient: str, message: str, channel: str) -> None:
++    """Deliver a message to one recipient on a required channel."""
+     return None

@@ -353,8 +353,7 @@ class EdgeProposal:
 任务：
 
 - 全量运行测试并记录基线；
-- 将 Coverage Matrix ID 转成机器可读清单，例如 `benchmarks/impact-coverage.json`；
-- 状态仅允许 `missing/partial/covered/unsupported`；
+- 将 Coverage Matrix ID 转成机器可读清单（benchmarks 下），状态仅允许 `missing/partial/covered/unsupported`；
 - 为当前已有能力补映射，不改变功能；
 - 固定当前 50-case 结果、配置、commit 和命令。
 

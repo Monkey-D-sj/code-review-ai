@@ -1,0 +1,108 @@
+[
+  {
+    "id": "case-backend-search-to-dict-between",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/utils/common_util.py b/app/utils/common_util.py\nindex 1524fad..2cdc526 100644\n--- a/app/utils/common_util.py\n+++ b/app/utils/common_util.py\n@@ -102,11 +102,6 @@ def search_to_dict(search: Any, default: Any = None) -> dict | None:\n         return default\n     d = search.model_dump(exclude_none=True)\n \n-    # 处理数组格式的时间范围参数 → (\"between\", [start, end])\n-    for key in list(d.keys()):\n-        if isinstance(d[key], list) and len(d[key]) == 2 and key.endswith(\"_time\"):\n-            d[key] = (\"between\", d[key])\n-\n     for field_name, field_info in search.model_fields.items():\n         if field_name not in d:\n             continue\n",
+    "prompt": "Review this proposed change to the shared query-parameter serializer search_to_dict in app/utils/common_util.py. The change removes the time-range merging that converts *_time array parameters into (\"between\", [start, end]) tuples. Identify which list/page APIs would be affected and what concrete runtime regression the removed merge introduces. Trace how *_time query parameters flow from request schemas through search_to_dict into condition building.",
+    "gold_findings": [
+      {
+        "id": "time-range-filter-crashes-list-api",
+        "file": "app/api/v1/module_system/log/service.py",
+        "alternate_files": [
+          "app/core/base_crud.py",
+          "app/utils/common_util.py"
+        ],
+        "keywords": [
+          "between",
+          "created_time",
+          "updated_time",
+          "_time",
+          "range",
+          "filter",
+          "crash",
+          "search_to_dict"
+        ],
+        "min_matches": 2
+      }
+    ],
+    "complexity_tags": [
+      "shared-util",
+      "cross-module",
+      "multi-effect",
+      "runtime-schema-consistency"
+    ],
+    "difficulty": "hard"
+  },
+  {
+    "id": "case-backend-decrypt-password-alias",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/core/encrypt.py b/app/api/v1/module_storage/core/encrypt.py\nindex 5a504d4..31ec48f 100644\n--- a/app/api/v1/module_storage/core/encrypt.py\n+++ b/app/api/v1/module_storage/core/encrypt.py\n@@ -30,6 +30,6 @@ def decrypt_password(cipher: str | None) -> str:\n     if not cipher:\n         return \"\"\n     try:\n-        return _get_fernet().decrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n+        return _get_fernet().encrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n     except (InvalidToken, ValueError):\n         raise CustomException(msg=\"存储源密码解密失败，可能原因：SECRET_KEY 变更或数据损坏\")\n",
+    "prompt": "Review this proposed change to decrypt_password in app/api/v1/module_storage/core/encrypt.py. The change makes the function re-encrypt the input instead of decrypting it. Identify each storage-source caller that builds a storage adapter config from a decrypted password and is now handed a re-encrypted secret, and report the affected caller files explicitly. Trace how stored storage-source passwords flow through the affected callers into StorageAdapterConfig.",
+    "gold_findings": [
+      {
+        "id": "storage-password-re-encrypted-on-decrypt",
+        "file": "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+        "alternate_files": [],
+        "keywords": [
+          "password",
+          "decrypt",
+          "encrypt",
+          "storage",
+          "adapter",
+          "connect",
+          "auth"
+        ],
+        "min_matches": 2
+      }
+    ],
+    "complexity_tags": [
+      "shared-util",
+      "alias-import",
+      "cross-module",
+      "hidden-caller"
+    ],
+    "difficulty": "hard"
+  },
+  {
+    "id": "case-backend-decrypt-password-reexport",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "benchmarks/fixtures/reexport-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/core/encrypt.py b/app/api/v1/module_storage/core/encrypt.py\nindex 5a504d4..0edcd13 100644\n--- a/app/api/v1/module_storage/core/encrypt.py\n+++ b/app/api/v1/module_storage/core/encrypt.py\n@@ -1,35 +1,35 @@\n-import base64\n-import hashlib\n-\n-from cryptography.fernet import Fernet, InvalidToken\n-\n-from app.config.setting import settings\n-from app.core.exceptions import CustomException\n-\n-_fernet: Fernet | None = None\n-\n-\n-def _get_fernet() -> Fernet:\n-    \"\"\"惰性构建 Fernet 实例，密钥由 settings.SECRET_KEY 派生（SHA-256 → url-safe base64）。\"\"\"\n-    global _fernet\n-    if _fernet is None:\n-        digest = hashlib.sha256(settings.SECRET_KEY.encode(\"utf-8\")).digest()\n-        _fernet = Fernet(base64.urlsafe_b64encode(digest))\n-    return _fernet\n-\n-\n-def encrypt_password(plain: str | None) -> str:\n-    \"\"\"明文密码 → Fernet 密文。空值原样返回空串。\"\"\"\n-    if not plain:\n-        return \"\"\n-    return _get_fernet().encrypt(plain.encode(\"utf-8\")).decode(\"utf-8\")\n-\n-\n-def decrypt_password(cipher: str | None) -> str:\n-    \"\"\"Fernet 密文 → 明文密码。空值原样返回空串。\"\"\"\n-    if not cipher:\n-        return \"\"\n-    try:\n-        return _get_fernet().decrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n-    except (InvalidToken, ValueError):\n-        raise CustomException(msg=\"存储源密码解密失败，可能原因：SECRET_KEY 变更或数据损坏\")\n+import base64\n+import hashlib\n+\n+from cryptography.fernet import Fernet, InvalidToken\n+\n+from app.config.setting import settings\n+from app.core.exceptions import CustomException\n+\n+_fernet: Fernet | None = None\n+\n+\n+def _get_fernet() -> Fernet:\n+    \"\"\"惰性构建 Fernet 实例，密钥由 settings.SECRET_KEY 派生（SHA-256 → url-safe base64）。\"\"\"\n+    global _fernet\n+    if _fernet is None:\n+        digest = hashlib.sha256(settings.SECRET_KEY.encode(\"utf-8\")).digest()\n+        _fernet = Fernet(base64.urlsafe_b64encode(digest))\n+    return _fernet\n+\n+\n+def encrypt_password(plain: str | None) -> str:\n+    \"\"\"明文密码 → Fernet 密文。空值原样返回空串。\"\"\"\n+    if not plain:\n+        return \"\"\n+    return _get_fernet().encrypt(plain.encode(\"utf-8\")).decode(\"utf-8\")\n+\n+\n+def decrypt_password(cipher: str | None) -> str:\n+    \"\"\"Fernet 密文 → 明文密码。空值原样返回空串。\"\"\"\n+    if not cipher:\n+        return \"\"\n+    try:\n+        return _get_fernet().encrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n+    except (InvalidToken, ValueError):\n+        raise CustomException(msg=\"存储源密码解密失败，可能原因：SECRET_KEY 变更或数据损坏\")\n",
+    "prompt": "Review this proposed change to decrypt_password in app/api/v1/module_storage/core/encrypt.py. The change makes the function re-encrypt the input instead of decrypting it. Identify every storage-source caller that builds a storage adapter config from a decrypted password and is now handed a re-encrypted secret - including cross-module consumers outside the module_storage package - and report the affected caller files explicitly. Trace how stored storage-source passwords flow through the affected callers into StorageAdapterConfig.",
+    "gold_findings": [
+      {
+        "id": "storage-cleanup-reexport-reencrypted-password",
+        "file": "app/api/v1/module_task/cronjob/node/handlers/storage_cleanup_handler.py",
+        "alternate_files": [
+          "app/api/v1/module_storage/core/encrypt.py"
+        ],
+        "keywords": [
+          "cleanup",
+          "cron",
+          "stale",
+          "scheduler"
+        ],
+        "min_matches": 2
+      }
+    ],
+    "complexity_tags": [
+      "shared-util",
+      "re-export",
+      "alias-import",
+      "cross-module",
+      "hidden-caller"
+    ],
+    "difficulty": "hard"
+  }
+]

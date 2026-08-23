@@ -1,0 +1,156 @@
+[
+  {
+    "id": "caller-return-shape",
+    "repo_name": "fast-repo",
+    "repo_url": "",
+    "source_commit": "fix-caller-return-shape",
+    "mutation_paths": ["src/fast_bench/pricing.py"],
+    "prompt": "Review this proposed change to price calculation for concrete regressions. Inspect callers of compute_total and the return shape they expect.",
+    "gold_findings": [
+      {
+        "id": "caller-return-shape-breaks-total",
+        "file": "src/fast_bench/pricing.py",
+        "keywords": ["tuple", "total_cents", "attributeerror", "return type"],
+        "alternate_files": ["src/fast_bench/checkout.py"]
+      }
+    ],
+    "complexity_tags": ["cross-module"]
+  },
+  {
+    "id": "dropped-default-arg",
+    "repo_name": "fast-repo",
+    "repo_url": "",
+    "source_commit": "fix-dropped-default-arg",
+    "mutation_paths": ["src/fast_bench/inventory.py"],
+    "prompt": "Review this proposed change to inventory reservation for concrete regressions. Inspect call sites of reserve and how the quantity argument flows.",
+    "gold_findings": [
+      {
+        "id": "dropped-qty-arg-breaks-caller",
+        "file": "src/fast_bench/inventory.py",
+        "keywords": ["missing", "typeerror", "qty", "positional"],
+        "alternate_files": ["src/fast_bench/api.py"]
+      }
+    ],
+    "complexity_tags": ["cross-module"]
+  },
+  {
+    "id": "feature-flag-inversion",
+    "repo_name": "fast-repo",
+    "repo_url": "",
+    "source_commit": "fix-feature-flag-inversion",
+    "mutation_paths": ["src/fast_bench/config.py"],
+    "prompt": "Review this proposed change to feature-flag configuration for concrete regressions. Inspect how is_enabled is consumed at application startup.",
+    "gold_findings": [
+      {
+        "id": "inverted-billing-flag",
+        "file": "src/fast_bench/config.py",
+        "keywords": ["billing", "inverted", "enabled", "flag"],
+        "alternate_files": ["src/fast_bench/app.py"]
+      }
+    ],
+    "complexity_tags": ["cross-module"]
+  },
+  {
+    "id": "shipment-init-order",
+    "repo_name": "fast-repo",
+    "repo_url": "",
+    "source_commit": "fix-shipment-init-order",
+    "mutation_paths": ["src/fast_bench/shipping.py"],
+    "prompt": "Review this proposed change to the shipment model for concrete regressions. Inspect how Shipment is constructed and what label() is supposed to contain.",
+    "gold_findings": [
+      {
+        "id": "carrier-dropped-from-label",
+        "file": "src/fast_bench/shipping.py",
+        "keywords": ["carrier", "label", "tracking_code", "initialized"],
+        "alternate_files": ["src/fast_bench/orders.py"]
+      }
+    ],
+    "complexity_tags": ["cross-module"]
+  },
+  {
+    "id": "auth-swallow-exception",
+    "repo_name": "fast-repo",
+    "repo_url": "",
+    "source_commit": "fix-auth-swallow-exception",
+    "mutation_paths": ["src/fast_bench/auth.py"],
+    "prompt": "Review this proposed change to authentication for concrete regressions. Inspect callers of authenticate and what they expect back on failure.",
+    "gold_findings": [
+      {
+        "id": "authenticate-swallows-auth-error",
+        "file": "src/fast_bench/auth.py",
+        "keywords": ["swallow", "none", "autherror", "exception"],
+        "alternate_files": ["src/fast_bench/session.py"]
+      }
+    ],
+    "complexity_tags": ["cross-module"]
+  },
+  {
+    "id": "notify-required-arg",
+    "repo_name": "fast-repo",
+    "repo_url": "",
+    "source_commit": "fix-notify-required-arg",
+    "mutation_paths": ["src/fast_bench/notify.py"],
+    "prompt": "Review this proposed change to customer notifications for concrete regressions. Inspect callers of send and the arguments they pass.",
+    "gold_findings": [
+      {
+        "id": "added-required-channel-arg",
+        "file": "src/fast_bench/notify.py",
+        "keywords": ["missing", "typeerror", "channel", "required"],
+        "alternate_files": ["src/fast_bench/service.py"]
+      }
+    ],
+    "complexity_tags": ["cross-module"]
+  },
+  {
+    "id": "same-name-callee",
+    "repo_name": "fast-repo",
+    "repo_url": "",
+    "source_commit": "fix-same-name-callee",
+    "mutation_paths": ["src/fast_bench/token.py"],
+    "prompt": "Review this proposed change to token parsing for concrete regressions. Inspect callers of the changed parse function and what they expect back on a blank token.",
+    "gold_findings": [
+      {
+        "id": "blank-token-crashes-validation",
+        "file": "src/fast_bench/token.py",
+        "keywords": ["none", "attributeerror", "startswith", "blank", "validate"],
+        "alternate_files": ["src/fast_bench/otp.py"]
+      }
+    ],
+    "complexity_tags": ["cross-module", "same-name"]
+  },
+  {
+    "id": "deep-chain-contract",
+    "repo_name": "fast-repo",
+    "repo_url": "",
+    "source_commit": "fix-deep-chain-contract",
+    "mutation_paths": ["src/fast_bench/storage.py"],
+    "prompt": "Review this proposed change to blob storage for concrete regressions. Inspect how the fetch return value flows through callers and decoders.",
+    "gold_findings": [
+      {
+        "id": "bytes-to-str-breaks-decode",
+        "file": "src/fast_bench/storage.py",
+        "keywords": ["decode", "attributeerror", "bytes", "str", "fetch"],
+        "alternate_files": ["src/fast_bench/cache.py", "src/fast_bench/encoding.py"]
+      }
+    ],
+    "complexity_tags": ["cross-module", "deep-chain"]
+  },
+  {
+    "id": "large-noise",
+    "repo_name": "fast-repo",
+    "repo_url": "",
+    "source_commit": "fix-large-noise",
+    "mutation_paths": ["src/bigapp/config.py"],
+    "prompt": "Review this proposed change to the configuration parser for concrete regressions it could introduce.",
+    "gold_findings": [
+      {
+        "id": "dropped-timeout-default-breaks-wait-computation",
+        "file": "src/bigapp/config.py",
+        "keywords": ["typeerror", "compute_wait", "multiply", "multiplication", "millis"],
+        "min_matches": 2,
+        "alternate_files": ["src/bigapp/dispatch.py", "src/bigapp/queue.py"]
+      }
+    ],
+    "complexity_tags": ["cross-module", "large-noise"]
+  }
+]

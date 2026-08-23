@@ -1,0 +1,11 @@
+--- a/src/fast_bench/storage.py
++++ b/src/fast_bench/storage.py
+@@ -6,7 +6,7 @@
+ def fetch(key: str) -> bytes:
+     """Read a blob's raw bytes from storage."""
+-    return _blob_for(key)
++    return f"blob:{key}"
+
+
+ def _blob_for(key: str) -> bytes:
+     return f"blob:{key}".encode("utf-8")

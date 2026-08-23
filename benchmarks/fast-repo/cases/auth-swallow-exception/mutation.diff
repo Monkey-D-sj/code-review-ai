@@ -1,0 +1,13 @@
+--- a/src/fast_bench/auth.py
++++ b/src/fast_bench/auth.py
+@@ -13,4 +13,7 @@
+ def authenticate(user: str, password: str) -> dict:
+-    if _KNOWN.get(user) != password:
+-        raise AuthError(f"bad credentials for {user}")
+-    return {"user": user}
++    try:
++        if _KNOWN.get(user) != password:
++            raise AuthError(f"bad credentials for {user}")
++        return {"user": user}
++    except Exception:
++        return None

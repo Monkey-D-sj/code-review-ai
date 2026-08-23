@@ -1,0 +1,7 @@
+--- a/src/bigapp/config.py
++++ b/src/bigapp/config.py
+@@ -289,3 +289,3 @@
+         dsn=_validate_dsn(_to_str(payload, "dsn"), "dsn"),
+-        timeout=_to_int(payload, "timeout", default=30),
++        timeout=_to_int(payload, "timeout"),
+         max_retries=_to_int(payload, "max_retries", DEFAULT_MAX_RETRIES),
