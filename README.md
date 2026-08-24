@@ -229,6 +229,16 @@ regression set against `benchmarks/fast-repo` (`--local-repo`). Both run the
 same `full-agent-eval` harness and share the `examples/agent-eval-cases.example.json`
 offline shape.
 
+Cases are graded **blind**: the prompt states the deliverable (what broke, which
+callers / entry points / tests are affected) and shows the diff, but never names a
+symbol. Per-case prose lives in each case's `hint` field and reaches the model only
+under `--hinted`, which exists as an ablation arm — such prose is symmetric input to
+both arms but asymmetric benefit, since naming the affected callers hands the native
+arm the traversal the graph tools exist to do. Gold keywords are therefore restricted
+to identifiers only traversal surfaces (a keyword visible in the diff or the hint can
+be paraphrased instead of traced), and each answer is capped at 3 findings so f1 does
+not turn into a verbosity measure.
+
 ## Historical-change benchmark
 
 Measure whether impact queries recover the files touched by known historical

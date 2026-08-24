@@ -61,6 +61,22 @@ rg/grep），以及明确开放的只读 MCP 工具检查仓库内容。完整�
 禁止使用 git log、git show 或任何 git diff 命令读取提交历史，因为评测仓库的历史提交包含正确修复答案。"""
 
 
+# The task block is deliberately case-independent: it states the deliverable
+# (what broke, which callers / entry points / tests are affected) without naming
+# a single symbol.  Per-case prose lives in ``FullAgentCase.hint`` and reaches
+# the model only under ``hinted=True``, because naming the affected callers
+# removes exactly the work the graph tools exist to do: the same text is
+# symmetric input to both arms but asymmetric benefit — it hands the native arm
+# the one hop it would otherwise have to traverse for.
+_BLIND_TASK = """评审下方差异引入的回归。自行判断该变更破坏了什么，并沿调用链确定其影响范围：
+哪些调用方会因此行为异常、哪些对外入口（HTTP 接口 / CLI / 定时任务）受影响、以及应当运行哪些测试。
+差异之外的受影响文件必须显式报告。"""
+
+# Gold sets carry one finding per case, so precision is 1/N of whatever the
+# agent volunteers.  Uncapped, a blind task turns f1 into a verbosity measure.
+_MAX_FINDINGS = 3
+
+
 @dataclass(frozen=True)
 class FullAgentCase:
     case_id: str
@@ -68,7 +84,7 @@ class FullAgentCase:
     repo_url: str
     source_commit: str
     mutation_paths: tuple[str, ...]
-    prompt: str
+    hint: str
     gold_findings: tuple[GoldFinding, ...]
     complexity_tags: tuple[str, ...] = ()
     difficulty: str = DEFAULT_DIFFICULTY
@@ -98,7 +114,9 @@ def _parse_case(record: object, position: int) -> FullAgentCase:
     repo_url = record.get("repo_url")
     commit = record.get("source_commit")
     paths = record.get("mutation_paths")
-    prompt = record.get("prompt")
+    # Case-specific prose. Optional, and not injected unless the run is hinted.
+    # Legacy manifests spell this key ``prompt``.
+    hint = record.get("hint", record.get("prompt", ""))
     golds = record.get("gold_findings")
     complexity_tags = record.get("complexity_tags", [])
     difficulty = record.get("difficulty", DEFAULT_DIFFICULTY)
@@ -113,8 +131,8 @@ def _parse_case(record: object, position: int) -> FullAgentCase:
         raise ValueError(
             f"case {case_id} requires an HTTPS repo_url "
             "(or empty to use a local repo)")
-    if not isinstance(prompt, str) or not prompt:
-        raise ValueError(f"case {case_id} requires prompt")
+    if not isinstance(hint, str):
+        raise ValueError(f"case {case_id} has a non-string hint")
     if patch is None:
         # git reverse-mutation mode: needs a real fix commit + mutation paths
         if not isinstance(commit, str) or not commit:
@@ -146,7 +164,7 @@ def _parse_case(record: object, position: int) -> FullAgentCase:
             f"{', '.join(DIFFICULTIES)}")
     findings = tuple(_parse_gold(gold, case_id) for gold in golds)
     return FullAgentCase(case_id, repo_name, repo_url, commit, tuple(paths),
-                         prompt, findings, tuple(complexity_tags), difficulty,
+                         hint, findings, tuple(complexity_tags), difficulty,
                          patch, source_dir)
 
 
@@ -295,7 +313,8 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
                         repetitions: int = 1, timeout_seconds: int = 600,
                         workers: int = 1,
                         executor: AgentExecutor | None = None,
-                        local_repo: str | None = None) -> dict:
+                        local_repo: str | None = None,
+                        hinted: bool = False) -> dict:
     _validate(cases, command, modes, repetitions, timeout_seconds, workers)
     prepared = prepare_full_agent_cases(cases, repos_dir, work_dir,
                                         local_repo=local_repo)
@@ -311,7 +330,8 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
         item, mode, repetition = job
         return _run_once(item, mode, repetition, command, work_dir,
                          timeout_seconds, execute_agent,
-                         index_setups[item.case.case_id]["db_path"])
+                         index_setups[item.case.case_id]["db_path"],
+                         hinted=hinted)
 
     if workers == 1:
         runs = [execute(job) for job in jobs]
@@ -323,6 +343,7 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
             "evaluation": "full_project_online_tool_use",
             "baseline_mode": "native_agent",
             "modes": list(modes), "repetitions": repetitions,
+            "hint_mode": "hinted" if hinted else "blind",
             "workers": workers, "aggregate": aggregates, "runs": runs,
             "difficulty_counts": _difficulty_counts(cases),
             "index_setup": list(index_setups.values()),
@@ -420,8 +441,9 @@ def _difficulty_counts(cases: list[FullAgentCase]) -> dict[str, int]:
 
 def _run_once(item: PreparedCase, mode: str, repetition: int,
               command: list[str], output_dir: str, timeout_seconds: int,
-              executor: AgentExecutor, db_path: str) -> dict:
-    prompt = _prompt(item, mode)
+              executor: AgentExecutor, db_path: str,
+              hinted: bool = False) -> dict:
+    prompt = _prompt(item, mode, hinted)
     profile = "native" if mode == "native_agent" else "full_project"
     environment = {
         "CRAI_EVAL_MODE": mode, "CRAI_EVAL_CASE": item.case.case_id,
@@ -443,6 +465,7 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
         "complexity_tags": list(item.case.complexity_tags),
         "difficulty": item.case.difficulty,
         "index_prebuilt": True,
+        "hint_mode": "hinted" if hinted else "blind",
         "success": run.returncode == 0 and parse_error is None,
         "returncode": run.returncode, "elapsed_ms": round(run.elapsed_ms, 3),
         "parse_error": parse_error,
@@ -462,7 +485,17 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
     return result
 
 
-def _prompt(item: PreparedCase, mode: str) -> str:
+def _hint_block(hint: str, hinted: bool) -> str:
+    """Case-specific prose, appended only for the ``hinted`` ablation arm."""
+    if not (hinted and hint):
+        return ""
+    return """
+
+补充说明
+""" + hint
+
+
+def _prompt(item: PreparedCase, mode: str, hinted: bool = False) -> str:
     contract = {
         "findings": [{"file": "path", "line": 1, "title": "...",
                       "description": "..."}],
@@ -509,11 +542,12 @@ Read 文件必须基于行号精读：优先利用图工具返回的 line / call
 根据需要检查仓库，但不要修改仓库。
 只报告由所提供差异引入的具体回归问题。将同一缺陷的多个表现合并为一个发现；只有独立根因才单独报告。
 按独立修复单元组织发现：同一错误代码位置、同一必要修复产生的多个表现应合并；如果修复一个生产代码位置后另一个回归仍然存在，则必须分别报告。不要按请求类型、调用方或测试用例拆分，也不要用一个宽泛总括项吞并多个可独立修复的缺陷。输出前删除同一修复的重复表现，并确认每条发现都有独立的生产代码修复位置。
+最多报告 {_MAX_FINDINGS} 条发现，按严重度降序排列；宁缺毋滥，不要为凑数报告推测性问题。
 严格返回一个符合以下结构的 JSON 对象：
 {json.dumps(contract)}
 
 任务
-{item.case.prompt}
+{_BLIND_TASK}{_hint_block(item.case.hint, hinted)}
 
 差异
 {item.diff}"""

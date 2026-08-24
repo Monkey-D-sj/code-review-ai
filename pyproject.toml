@@ -33,3 +33,6 @@ exclude = ["*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "asse
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: full-repo rebuild / eval runs that take seconds (skip with -m 'not slow')",
+]

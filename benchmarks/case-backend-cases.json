@@ -7,7 +7,7 @@
     "mutation_paths": [],
     "source_dir": "full_agent_eval/case-backend",
     "patch": "diff --git a/app/utils/common_util.py b/app/utils/common_util.py\nindex 1524fad..2cdc526 100644\n--- a/app/utils/common_util.py\n+++ b/app/utils/common_util.py\n@@ -102,11 +102,6 @@ def search_to_dict(search: Any, default: Any = None) -> dict | None:\n         return default\n     d = search.model_dump(exclude_none=True)\n \n-    # 处理数组格式的时间范围参数 → (\"between\", [start, end])\n-    for key in list(d.keys()):\n-        if isinstance(d[key], list) and len(d[key]) == 2 and key.endswith(\"_time\"):\n-            d[key] = (\"between\", d[key])\n-\n     for field_name, field_info in search.model_fields.items():\n         if field_name not in d:\n             continue\n",
-    "prompt": "Review this proposed change to the shared query-parameter serializer search_to_dict in app/utils/common_util.py. The change removes the time-range merging that converts *_time array parameters into (\"between\", [start, end]) tuples. Identify which list/page APIs would be affected and what concrete runtime regression the removed merge introduces. Trace how *_time query parameters flow from request schemas through search_to_dict into condition building.",
+    "hint": "共享的查询参数序列化函数原先会把成对的时间范围参数合并成区间条件，本次改动删除了这段归并逻辑。",
     "gold_findings": [
       {
         "id": "time-range-filter-crashes-list-api",
@@ -17,14 +17,10 @@
           "app/utils/common_util.py"
         ],
         "keywords": [
-          "between",
-          "created_time",
-          "updated_time",
-          "_time",
-          "range",
-          "filter",
-          "crash",
-          "search_to_dict"
+          "BaseQueryParam",
+          "LoginLogService",
+          "OperationLogService",
+          "base_schema"
         ],
         "min_matches": 2
       }
@@ -35,7 +31,14 @@
       "multi-effect",
       "runtime-schema-consistency"
     ],
-    "difficulty": "hard"
+    "difficulty": "hard",
+    "changed_symbols": [
+      "app.utils.common_util::search_to_dict"
+    ],
+    "gold_files": [
+      "app/api/v1/module_system/log/service.py",
+      "app/utils/common_util.py"
+    ]
   },
   {
     "id": "case-backend-decrypt-password-alias",
@@ -45,20 +48,22 @@
     "mutation_paths": [],
     "source_dir": "full_agent_eval/case-backend",
     "patch": "diff --git a/app/api/v1/module_storage/core/encrypt.py b/app/api/v1/module_storage/core/encrypt.py\nindex 5a504d4..31ec48f 100644\n--- a/app/api/v1/module_storage/core/encrypt.py\n+++ b/app/api/v1/module_storage/core/encrypt.py\n@@ -30,6 +30,6 @@ def decrypt_password(cipher: str | None) -> str:\n     if not cipher:\n         return \"\"\n     try:\n-        return _get_fernet().decrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n+        return _get_fernet().encrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n     except (InvalidToken, ValueError):\n         raise CustomException(msg=\"存储源密码解密失败，可能原因：SECRET_KEY 变更或数据损坏\")\n",
-    "prompt": "Review this proposed change to decrypt_password in app/api/v1/module_storage/core/encrypt.py. The change makes the function re-encrypt the input instead of decrypting it. Identify each storage-source caller that builds a storage adapter config from a decrypted password and is now handed a re-encrypted secret, and report the affected caller files explicitly. Trace how stored storage-source passwords flow through the affected callers into StorageAdapterConfig.",
+    "hint": "密码解密函数被改成了再次加密：调用方拿到的不再是明文，而是一段新的密文。",
     "gold_findings": [
       {
         "id": "storage-password-re-encrypted-on-decrypt",
         "file": "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
-        "alternate_files": [],
+        "alternate_files": [
+          "app/api/v1/module_storage/core/encrypt.py",
+          "app/api/v1/module_storage/source/service.py",
+          "app/api/v1/module_storage/file/service.py",
+          "app/api/v1/module_storage/transfer/engine.py"
+        ],
         "keywords": [
-          "password",
-          "decrypt",
-          "encrypt",
-          "storage",
-          "adapter",
-          "connect",
-          "auth"
+          "_resolve_storage_config",
+          "decrypt_storage_password",
+          "builtin_nodes",
+          "module_task"
         ],
         "min_matches": 2
       }
@@ -66,43 +71,268 @@
     "complexity_tags": [
       "shared-util",
       "alias-import",
+      "cross-module",
+      "hidden-caller"
+    ],
+    "difficulty": "hard",
+    "changed_symbols": [
+      "app.api.v1.module_storage.core.encrypt::decrypt_password"
+    ],
+    "gold_files": [
+      "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+      "app/api/v1/module_storage/core/encrypt.py"
+    ]
+  },
+  {
+    "id": "case3-execute-transfer-step-fail",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/transfer/engine.py b/app/api/v1/module_storage/transfer/engine.py\nindex b23ddd5..d69d7cf 100644\n--- a/app/api/v1/module_storage/transfer/engine.py\n+++ b/app/api/v1/module_storage/transfer/engine.py\n@@ -237,7 +237,7 @@ async def execute_transfer_task(task_id: int) -> None:\n             if await _run_step(db, task, step):\n                 completed += 1\n             else:\n-                break\n+                continue\n \n         if canceled:\n             task.status = \"canceled\"\n",
+    "changed_symbols": [
+      "app.api.v1.module_storage.transfer.engine::execute_transfer_task"
+    ],
+    "gold_files": [
+      "app/api/v1/module_storage/transfer/engine.py",
+      "app/api/v1/module_storage/transfer/service.py"
+    ],
+    "hint": "单个步骤失败后，循环由中止改为继续执行下一个步骤，失败状态因此不再向上传播。",
+    "gold_findings": [
+      {
+        "id": "failed-transfer-step-never-aborts-task",
+        "file": "app/api/v1/module_storage/transfer/engine.py",
+        "alternate_files": [
+          "app/api/v1/module_storage/transfer/service.py"
+        ],
+        "keywords": [
+          "StorageTransferService",
+          "_launch",
+          "create_task",
+          "asyncio"
+        ],
+        "min_matches": 2
+      }
+    ],
+    "complexity_tags": [
+      "error-handling",
+      "state-machine",
+      "deep-chain",
+      "cross-module"
+    ],
+    "difficulty": "hard"
+  },
+  {
+    "id": "cb-recall-search-to-dict-fan-in",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/utils/common_util.py b/app/utils/common_util.py\nindex 1524fad..a91f12e 100644\n--- a/app/utils/common_util.py\n+++ b/app/utils/common_util.py\n@@ -100,7 +100,7 @@ def search_to_dict(search: Any, default: Any = None) -> dict | None:\n     \"\"\"\n     if not search:\n         return default\n-    d = search.model_dump(exclude_none=True)\n+    d = search.model_dump(exclude_none=False)\n \n     # 处理数组格式的时间范围参数 → (\"between\", [start, end])\n     for key in list(d.keys()):\n",
+    "changed_symbols": [
+      "app.utils.common_util::search_to_dict"
+    ],
+    "gold_files": [
+      "app/api/v1/module_storage/source/service.py",
+      "app/api/v1/module_system/dict/service.py",
+      "app/api/v1/module_system/role/service.py",
+      "app/api/v1/module_storage/transfer/service.py",
+      "app/utils/common_util.py"
+    ],
+    "hint": "序列化时不再丢弃空值字段，因此值为空的查询参数也会进入最终的条件字典。",
+    "gold_findings": [
+      {
+        "id": "none-fields-leak-into-query-conditions",
+        "file": "app/api/v1/module_storage/source/service.py",
+        "alternate_files": [
+          "app/api/v1/module_system/dict/service.py",
+          "app/api/v1/module_system/role/service.py",
+          "app/api/v1/module_storage/transfer/service.py",
+          "app/utils/common_util.py"
+        ],
+        "keywords": [
+          "StorageSourceService",
+          "DictTypeService",
+          "DictDataService",
+          "RoleService",
+          "StorageTransferService"
+        ],
+        "min_matches": 2
+      }
+    ],
+    "complexity_tags": [
+      "shared-util",
+      "fan-in",
+      "cross-module",
+      "null-handling"
+    ],
+    "difficulty": "hard"
+  },
+  {
+    "id": "cb-recall-decrypt-password-exception",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/core/encrypt.py b/app/api/v1/module_storage/core/encrypt.py\nindex 5a504d4..ae6237a 100644\n--- a/app/api/v1/module_storage/core/encrypt.py\n+++ b/app/api/v1/module_storage/core/encrypt.py\n@@ -32,4 +32,4 @@ def decrypt_password(cipher: str | None) -> str:\n     try:\n         return _get_fernet().decrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n     except (InvalidToken, ValueError):\n-        raise CustomException(msg=\"存储源密码解密失败，可能原因：SECRET_KEY 变更或数据损坏\")\n+        return \"\"\n",
+    "changed_symbols": [
+      "app.api.v1.module_storage.core.encrypt::decrypt_password"
+    ],
+    "gold_files": [
+      "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+      "app/api/v1/module_storage/source/service.py",
+      "app/api/v1/module_storage/file/service.py",
+      "app/api/v1/module_storage/transfer/engine.py",
+      "app/api/v1/module_storage/core/encrypt.py"
+    ],
+    "hint": "解密失败的分支由抛出异常改为返回空字符串，失败因此变得静默。",
+    "gold_findings": [
+      {
+        "id": "decrypt-failure-silently-returns-empty",
+        "file": "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+        "alternate_files": [
+          "app/api/v1/module_storage/source/service.py",
+          "app/api/v1/module_storage/file/service.py",
+          "app/api/v1/module_storage/transfer/engine.py",
+          "app/api/v1/module_storage/core/encrypt.py"
+        ],
+        "keywords": [
+          "_resolve_storage_config",
+          "decrypt_storage_password",
+          "StorageSourceService",
+          "StorageFileService",
+          "_build_config",
+          "test_config"
+        ],
+        "min_matches": 2
+      }
+    ],
+    "complexity_tags": [
+      "shared-util",
+      "silent-failure",
       "cross-module",
       "hidden-caller"
     ],
     "difficulty": "hard"
   },
   {
-    "id": "case-backend-decrypt-password-reexport",
+    "id": "cb-recall-encrypt-password",
     "repo_name": "case-backend",
     "repo_url": "",
     "source_commit": "",
     "mutation_paths": [],
-    "source_dir": "benchmarks/fixtures/reexport-backend",
-    "patch": "diff --git a/app/api/v1/module_storage/core/encrypt.py b/app/api/v1/module_storage/core/encrypt.py\nindex 5a504d4..0edcd13 100644\n--- a/app/api/v1/module_storage/core/encrypt.py\n+++ b/app/api/v1/module_storage/core/encrypt.py\n@@ -1,35 +1,35 @@\n-import base64\n-import hashlib\n-\n-from cryptography.fernet import Fernet, InvalidToken\n-\n-from app.config.setting import settings\n-from app.core.exceptions import CustomException\n-\n-_fernet: Fernet | None = None\n-\n-\n-def _get_fernet() -> Fernet:\n-    \"\"\"惰性构建 Fernet 实例，密钥由 settings.SECRET_KEY 派生（SHA-256 → url-safe base64）。\"\"\"\n-    global _fernet\n-    if _fernet is None:\n-        digest = hashlib.sha256(settings.SECRET_KEY.encode(\"utf-8\")).digest()\n-        _fernet = Fernet(base64.urlsafe_b64encode(digest))\n-    return _fernet\n-\n-\n-def encrypt_password(plain: str | None) -> str:\n-    \"\"\"明文密码 → Fernet 密文。空值原样返回空串。\"\"\"\n-    if not plain:\n-        return \"\"\n-    return _get_fernet().encrypt(plain.encode(\"utf-8\")).decode(\"utf-8\")\n-\n-\n-def decrypt_password(cipher: str | None) -> str:\n-    \"\"\"Fernet 密文 → 明文密码。空值原样返回空串。\"\"\"\n-    if not cipher:\n-        return \"\"\n-    try:\n-        return _get_fernet().decrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n-    except (InvalidToken, ValueError):\n-        raise CustomException(msg=\"存储源密码解密失败，可能原因：SECRET_KEY 变更或数据损坏\")\n+import base64\n+import hashlib\n+\n+from cryptography.fernet import Fernet, InvalidToken\n+\n+from app.config.setting import settings\n+from app.core.exceptions import CustomException\n+\n+_fernet: Fernet | None = None\n+\n+\n+def _get_fernet() -> Fernet:\n+    \"\"\"惰性构建 Fernet 实例，密钥由 settings.SECRET_KEY 派生（SHA-256 → url-safe base64）。\"\"\"\n+    global _fernet\n+    if _fernet is None:\n+        digest = hashlib.sha256(settings.SECRET_KEY.encode(\"utf-8\")).digest()\n+        _fernet = Fernet(base64.urlsafe_b64encode(digest))\n+    return _fernet\n+\n+\n+def encrypt_password(plain: str | None) -> str:\n+    \"\"\"明文密码 → Fernet 密文。空值原样返回空串。\"\"\"\n+    if not plain:\n+        return \"\"\n+    return _get_fernet().encrypt(plain.encode(\"utf-8\")).decode(\"utf-8\")\n+\n+\n+def decrypt_password(cipher: str | None) -> str:\n+    \"\"\"Fernet 密文 → 明文密码。空值原样返回空串。\"\"\"\n+    if not cipher:\n+        return \"\"\n+    try:\n+        return _get_fernet().encrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n+    except (InvalidToken, ValueError):\n+        raise CustomException(msg=\"存储源密码解密失败，可能原因：SECRET_KEY 变更或数据损坏\")\n",
-    "prompt": "Review this proposed change to decrypt_password in app/api/v1/module_storage/core/encrypt.py. The change makes the function re-encrypt the input instead of decrypting it. Identify every storage-source caller that builds a storage adapter config from a decrypted password and is now handed a re-encrypted secret - including cross-module consumers outside the module_storage package - and report the affected caller files explicitly. Trace how stored storage-source passwords flow through the affected callers into StorageAdapterConfig.",
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/core/encrypt.py b/app/api/v1/module_storage/core/encrypt.py\nindex 5a504d4..ad86ae9 100644\n--- a/app/api/v1/module_storage/core/encrypt.py\n+++ b/app/api/v1/module_storage/core/encrypt.py\n@@ -22,7 +22,7 @@ def encrypt_password(plain: str | None) -> str:\n     \"\"\"明文密码 → Fernet 密文。空值原样返回空串。\"\"\"\n     if not plain:\n         return \"\"\n-    return _get_fernet().encrypt(plain.encode(\"utf-8\")).decode(\"utf-8\")\n+    return _get_fernet().decrypt(plain.encode(\"utf-8\")).decode(\"utf-8\")\n \n \n def decrypt_password(cipher: str | None) -> str:\n",
+    "changed_symbols": [
+      "app.api.v1.module_storage.core.encrypt::encrypt_password"
+    ],
+    "gold_files": [
+      "app/api/v1/module_storage/source/service.py",
+      "app/api/v1/module_storage/core/encrypt.py"
+    ],
+    "hint": "加密函数被改成了解密：传入明文时会直接抛出异常。",
     "gold_findings": [
       {
-        "id": "storage-cleanup-reexport-reencrypted-password",
-        "file": "app/api/v1/module_task/cronjob/node/handlers/storage_cleanup_handler.py",
+        "id": "password-encrypt-now-decrypts",
+        "file": "app/api/v1/module_storage/source/service.py",
         "alternate_files": [
           "app/api/v1/module_storage/core/encrypt.py"
         ],
         "keywords": [
-          "cleanup",
-          "cron",
-          "stale",
-          "scheduler"
+          "StorageSourceService",
+          "StorageSourceCRUD",
+          "create",
+          "update"
         ],
         "min_matches": 2
       }
     ],
     "complexity_tags": [
       "shared-util",
-      "re-export",
-      "alias-import",
+      "hidden-caller",
+      "loud-failure"
+    ],
+    "difficulty": "medium"
+  },
+  {
+    "id": "cb-recall-transfer-build-config",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/transfer/engine.py b/app/api/v1/module_storage/transfer/engine.py\nindex b23ddd5..5b209aa 100644\n--- a/app/api/v1/module_storage/transfer/engine.py\n+++ b/app/api/v1/module_storage/transfer/engine.py\n@@ -90,7 +90,7 @@ async def _build_config(db: AsyncSession, source_id: int) -> StorageAdapterConfi\n         host=source.host,\n         port=source.port,\n         username=source.username,\n-        password=decrypt_password(source.password),\n+        password=source.password,\n         bucket=source.bucket,\n         endpoint=source.endpoint,\n         region=source.region,\n",
+    "changed_symbols": [
+      "app.api.v1.module_storage.transfer.engine::_build_config"
+    ],
+    "gold_files": [
+      "app/api/v1/module_storage/transfer/engine.py",
+      "app/api/v1/module_storage/transfer/service.py"
+    ],
+    "hint": "构造适配器配置时不再对密码解密，配置里携带的是数据库中存储的密文。",
+    "gold_findings": [
+      {
+        "id": "transfer-config-passes-encrypted-password",
+        "file": "app/api/v1/module_storage/transfer/engine.py",
+        "alternate_files": [
+          "app/api/v1/module_storage/transfer/service.py"
+        ],
+        "keywords": [
+          "_run_step",
+          "execute_transfer_task",
+          "StorageTransferService",
+          "_launch"
+        ],
+        "min_matches": 2
+      }
+    ],
+    "complexity_tags": [
+      "deep-chain",
+      "cross-module",
+      "encryption-boundary"
+    ],
+    "difficulty": "hard"
+  },
+  {
+    "id": "cb-recall-file-get-source-default",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/file/service.py b/app/api/v1/module_storage/file/service.py\nindex e82ad7b..c88c991 100644\n--- a/app/api/v1/module_storage/file/service.py\n+++ b/app/api/v1/module_storage/file/service.py\n@@ -37,7 +37,7 @@ class StorageFileService:\n \n     async def _get_source(self, source_id: int | None) -> StorageAdapterConfig:\n         \"\"\"获取存储源并构造适配器配置（密码已解密）。\"\"\"\n-        source = await StorageSourceService(self.auth, self.db).get_active_source(source_id)\n+        source = await StorageSourceService(self.auth, self.db).get_active_source(None)\n         return StorageAdapterConfig(\n             protocol=StorageProtocol(source.protocol),\n             host=source.host,\n",
+    "changed_symbols": [
+      "app.api.v1.module_storage.file.service::StorageFileService._get_source"
+    ],
+    "gold_files": [
+      "app/api/v1/module_storage/file/service.py",
+      "app/api/v1/module_storage/source/service.py"
+    ],
+    "hint": "查询可用存储源时传入的标识由解析出的值改成了空值，因此走的是兜底分支而不是指定的存储源。",
+    "gold_findings": [
+      {
+        "id": "file-ops-lookup-source-with-none-id",
+        "file": "app/api/v1/module_storage/file/service.py",
+        "alternate_files": [
+          "app/api/v1/module_storage/source/service.py"
+        ],
+        "keywords": [
+          "copy_or_move",
+          "get_url",
+          "is_default",
+          "target_id"
+        ],
+        "min_matches": 2
+      }
+    ],
+    "complexity_tags": [
+      "null-argument",
       "cross-module",
       "hidden-caller"
     ],
-    "difficulty": "hard"
+    "difficulty": "medium"
   }
 ]

@@ -206,6 +206,11 @@ def main(argv: list[str] | None = None) -> int:
     fe.add_argument("--dry-run", action="store_true")
     fe.add_argument("--modes", nargs="+", choices=FULL_EVAL_MODES,
                     default=list(DEFAULT_FULL_EVAL_MODES))
+    fe.add_argument("--hinted", action="store_true",
+                    help="inject each case's hint prose into the prompt "
+                         "(ablation arm); blind by default, because a hint "
+                         "that names the affected callers removes the "
+                         "traversal the graph tools exist to do")
     fe.add_argument("--repetitions", type=int, default=1)
     fe.add_argument("--workers", type=int, default=1)
     fe.add_argument("--timeout", type=int, default=600)
@@ -300,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                     parse_agent_command(args.agent_command),
                     modes=tuple(args.modes), repetitions=args.repetitions,
                     timeout_seconds=args.timeout, workers=args.workers,
-                    local_repo=args.local_repo)
+                    local_repo=args.local_repo, hinted=args.hinted)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1

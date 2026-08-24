@@ -20,5 +20,8 @@ benchmark-results/
 *.html
 *.debug.log
 
+# Codex CLI working dir (cloned benchmark repos)
+.codex/
+
 hmg-ai-agent-platform-frontend
 hmg-ai-agent-platform-backend

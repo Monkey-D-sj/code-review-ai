@@ -428,6 +428,13 @@ native 在 hard 档失败不预先标成`unsolvable`,而按实际运行结果记
 无需 clone）承载分层业务项目的全 agent eval 用例，`benchmarks/fast-cases.json`
 是 fast-repo 上的快速回归集（--local-repo）。开源框架仓库的历史评测线已移除。
 
+用例默认**盲评**：prompt 只给出交付物（改动破坏了什么、哪些调用方/对外入口/测试
+受影响）与 diff，不点名任何符号；每个用例的 `hint` 只在 `--hinted` 消融臂下注入。
+点名受影响调用者的文字对两臂是对称输入、非对称收益——它正好替 native 臂完成了图
+工具存在的意义，所以 gold keywords 只取"必须沿调用链反查才能拿到"的标识符（出现在
+diff 或 hint 里的关键词可以靠改写命中，而不是靠追溯），并且单次回答上限 3 条发现，
+避免 f1 退化成篇幅指标。
+
 ### 7.4 推荐运行方式
 
 ```powershell

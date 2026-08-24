@@ -111,7 +111,11 @@ def _parse_case(record: object, position: int) -> AgentEvalCase:
     if not isinstance(record, dict):
         raise ValueError(f"case {position} must be an object")
     case_id = record.get("id")
-    prompt = record.get("prompt")
+    # ``hint`` is the current manifest spelling (see ``full_agent_eval``, which
+    # keeps it out of the prompt unless the run is hinted). This harness still
+    # injects the prose unconditionally — the alias only keeps a hint-only
+    # manifest loadable here.
+    prompt = record.get("prompt", record.get("hint"))
     diff = record.get("diff", "")
     symbols = record.get("changed_symbols", [])
     golds = record.get("gold_findings")
