@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -344,6 +345,7 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
             "baseline_mode": "native_agent",
             "modes": list(modes), "repetitions": repetitions,
             "hint_mode": "hinted" if hinted else "blind",
+            "guidance_mode": "stripped" if _guidance_stripped() else "full",
             "workers": workers, "aggregate": aggregates, "runs": runs,
             "difficulty_counts": _difficulty_counts(cases),
             "index_setup": list(index_setups.values()),
@@ -466,6 +468,7 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
         "difficulty": item.case.difficulty,
         "index_prebuilt": True,
         "hint_mode": "hinted" if hinted else "blind",
+        "guidance_mode": "stripped" if _guidance_stripped() else "full",
         "success": run.returncode == 0 and parse_error is None,
         "returncode": run.returncode, "elapsed_ms": round(run.elapsed_ms, 3),
         "parse_error": parse_error,
@@ -493,6 +496,14 @@ def _hint_block(hint: str, hinted: bool) -> str:
 
 补充说明
 """ + hint
+
+
+def _guidance_stripped() -> bool:
+    """Ablation arm: strip the prompt-side tool-usage / review-methodology
+    guidance so the model must derive tool selection and call-graph traversal
+    from the MCP tool descriptions alone (``CRAI_EVAL_NO_GUIDANCE=1``)."""
+    return os.environ.get("CRAI_EVAL_NO_GUIDANCE", "").strip().lower() in {
+        "1", "true", "yes"}
 
 
 def _prompt(item: PreparedCase, mode: str, hinted: bool = False) -> str:
@@ -534,8 +545,16 @@ get_communities、get_community、call_external_service、find_dead_code 和 lis
     else:
         tool_note = """你可以使用原生只读检查工具。使用这些工具获取评审策略所需的仓库证据；对于涉及签名、返回类型、异常或
 跨模块调用的任何变更，使用 Grep 或 rg 搜索整个代码树，定位并读取所有调用方和被调用方。"""
+    if _guidance_stripped():
+        # Ablation arm: drop the prompt-side tool-usage / review-methodology
+        # guidance so the model must derive tool selection and traversal from
+        # the MCP tool descriptions alone.
+        tool_note = ""
+        policy = ""
+    else:
+        policy = SHARED_REVIEW_POLICY
     return f"""你正在对 {item.case.repo_name} 中的真实补丁执行受控评审。
-{SHARED_REVIEW_POLICY}
+{policy}
 {_READ_ONLY_REVIEW_POLICY}
 {tool_note}
 Read 文件必须基于行号精读：优先利用图工具返回的 line / call_site.line（或 rg 输出的行号），用 offset/limit 只读取目标段落；禁止无 offset/limit 地读取整个文件。唯一的例外：仅当目标文件是本次 diff 中的变更文件本身（需要查看变更函数自身的完整上下文）时才允许全文读取；调用方、被调用方、依赖文件一律精读。
@@ -543,7 +562,7 @@ Read 文件必须基于行号精读：优先利用图工具返回的 line / call
 只报告由所提供差异引入的具体回归问题。将同一缺陷的多个表现合并为一个发现；只有独立根因才单独报告。
 按独立修复单元组织发现：同一错误代码位置、同一必要修复产生的多个表现应合并；如果修复一个生产代码位置后另一个回归仍然存在，则必须分别报告。不要按请求类型、调用方或测试用例拆分，也不要用一个宽泛总括项吞并多个可独立修复的缺陷。输出前删除同一修复的重复表现，并确认每条发现都有独立的生产代码修复位置。
 最多报告 {_MAX_FINDINGS} 条发现，按严重度降序排列；宁缺毋滥，不要为凑数报告推测性问题。
-严格返回一个符合以下结构的 JSON 对象：
+必须严格返回一个符合以下结构的 JSON 对象：
 {json.dumps(contract)}
 
 任务

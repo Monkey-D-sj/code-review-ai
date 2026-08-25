@@ -121,6 +121,24 @@ def test_core_mode_exposes_review_tools_except_explicit_exclusions(tmp_path):
     assert SHARED_REVIEW_POLICY in core
 
 
+def test_core_mode_prompt_strips_guidance_when_env_set(tmp_path, monkeypatch):
+    prepared = PreparedCase(
+        _case(), str(tmp_path), "diff --git a/src/app.py b/src/app.py")
+    stripped = _prompt(prepared, "full_project_core")
+    assert SHARED_REVIEW_POLICY in stripped
+    assert "评审主通道是 get_impact" in stripped
+
+    monkeypatch.setenv("CRAI_EVAL_NO_GUIDANCE", "1")
+    stripped = _prompt(prepared, "full_project_core")
+    assert SHARED_REVIEW_POLICY not in stripped
+    assert "评审主通道是 get_impact" not in stripped
+    # The task contract, read-only guard and output schema stay intact.
+    assert "你正在对" in stripped
+    assert "本评估强制以只读方式执行" in stripped
+    assert "任务" in stripped
+    assert "差异" in stripped
+
+
 def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
     case = _case()
     prepared = PreparedCase(case, str(tmp_path),
