@@ -3,6 +3,14 @@ import json
 
 import sqlite3
 
+from code_review_ai.change_context import (
+    _MAX_ARG_CHARS,
+    _MAX_ARGS,
+    _MAX_SNIPPET_CHARS,
+    _call_site_code,
+    _clip,
+)
+
 _SIGNATURE_LIMIT = 160
 _UNCERTAINTY_LIMIT = 20
 
@@ -228,10 +236,50 @@ def _affected_entries(conn: sqlite3.Connection, symbol_node_id: int,
     return entries
 
 
+def _direct_call_site(conn: sqlite3.Connection, caller_qname: str,
+                      callee_qname: str) -> dict | None:
+    """First resolved call edge caller→callee as {call_form, line, args, code},
+    mirroring get_change_context's call_site shape so a contract change
+    (params/return/exception) is visible at the exact call point without
+    opening the caller file. None when the edge is missing or the snippet is
+    unreadable — the neighbor then simply omits call_site."""
+    row = conn.execute(
+        "SELECT evidence_json, file_path FROM edges "
+        "WHERE kind='call' AND resolution='resolved' AND source=? AND target=? "
+        "LIMIT 1",
+        (caller_qname, callee_qname),
+    ).fetchone()
+    if row is None:
+        return None
+    evidence: dict = {}
+    if row["evidence_json"]:
+        try:
+            evidence = json.loads(row["evidence_json"])
+        except ValueError:
+            evidence = {}
+    call_site: dict = {}
+    call_form = evidence.get("call_form")
+    if call_form:
+        call_site["call_form"] = call_form
+    line = evidence.get("call_line")
+    if line:
+        call_site["line"] = line
+    args = evidence.get("args")
+    if isinstance(args, list):
+        call_site["args"] = [_clip(str(arg), _MAX_ARG_CHARS)
+                             for arg in args[:_MAX_ARGS]]
+    if line:
+        snippet = _call_site_code(row["file_path"], line)
+        if snippet:
+            call_site["code"] = _clip(snippet, _MAX_SNIPPET_CHARS)
+    return call_site or None
+
+
 def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
                max_nodes_per_direction: int = 20,
                tests: str = "exclude",
-               include_signatures: bool = True) -> list[dict]:
+               include_signatures: bool = True,
+               include_call_sites: bool = True) -> list[dict]:
     """Impact analysis for changed symbols. `tests` selects which nodes the
     upstream/downstream/affected_entries contain: 'exclude' (default, business
     impact) drops test nodes, 'only' keeps only test nodes (for test-impact
@@ -245,6 +293,12 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
     correctness is unchanged — a sibling branch that never calls the symbol is
     never reported. `include_signatures=False` drops the `sig` field
     (signatures are ~26% of payload) for compact tool responses.
+    `include_call_sites=True` attaches a `call_site` (call_form/line/args/code,
+    read from the calling file) to DIRECT upstream/downstream neighbors — the
+    call points where a contract change (params/return/exception) actually
+    breaks a caller. Transitive hops stay qname-only: a blast-radius map needs
+    no code, only the direct call points do. Mirrors get_change_context's
+    call_site shape so the two tools agree.
 
     Every result carries `uncertainty` (one-hop non-resolved edges around the
     symbol, capped at 20) and `coverage` (adjacent-edge counts per resolution).
@@ -254,6 +308,7 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
         raise ValueError(f"tests must be one of {list(_TEST_FILTER)}, got {tests!r}")
     test_filter = _TEST_FILTER[tests]
     adjacency = _resolved_call_adjacency(conn)
+    forward, reverse, _ = adjacency
     results: list[dict] = []
     for qname in changed_symbols:
         uncertainty = _uncertainty(conn, qname)
@@ -270,8 +325,21 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
                                  max_nodes_per_direction)
         down_ids = _true_chain_ids(conn, nid, test_filter, adjacency, "down",
                                    max_nodes_per_direction)
+        direct_up = set(reverse.get(nid, ()))
+        direct_down = set(forward.get(nid, ()))
         up_all = [_node_brief(conn, nid_, include_signatures) for nid_ in up_ids]
         down_all = [_node_brief(conn, nid_, include_signatures) for nid_ in down_ids]
+        if include_call_sites:
+            for brief, nid_ in zip(up_all, up_ids):
+                if nid_ in direct_up:
+                    site = _direct_call_site(conn, brief["qname"], qname)
+                    if site:
+                        brief["call_site"] = site
+            for brief, nid_ in zip(down_all, down_ids):
+                if nid_ in direct_down:
+                    site = _direct_call_site(conn, qname, brief["qname"])
+                    if site:
+                        brief["call_site"] = site
         entries = _affected_entries(conn, nid, test_filter)
         results.append({
             "symbol": qname, "found": True,

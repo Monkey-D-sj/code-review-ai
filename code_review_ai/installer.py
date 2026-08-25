@@ -50,9 +50,8 @@ project the server rebuilds that project's index automatically (a few seconds).
 
 - `get_change_context(symbols|files)` — 先看 diff/局部代码；只有非自包含改动才调用。传 qname 或受影响文件，服务端自动解析 changed qname，紧凑返回 resolved callers（按需含 callees），无需先调 `search_symbol`。
 - `search_symbol(query)` — 通用符号发现；只有不是从当前 diff/文件扩展上下文时才按短名或 glob 查 qname。
-- `get_impact(symbols|files)` — **评估改动影响的首选**：传 `symbols`（如 `["auth::login"]`）或 `files`；都省略则从 git diff 推导。返回受影响入口 + 上下游调用链。别用 grep 硬猜。
+- `get_impact(symbols|files)` — **评估改动影响的首选**：传 `symbols`（如 `["auth::login"]`）或 `files`；都省略则从 git diff 推导。返回受影响入口 + 上下游调用链（直接邻居带调用点代码 `call_site`）。别用 grep 硬猜。
 - `get_symbol_detail(qname)` — 单个符号详情 + 直接 callers/callees。
-- `list_entry_points()` — 看索引到的业务入口有哪些。
 - `get_community(qname)` / `get_communities()` — 横向爆炸半径：符号所属社区及同社区成员，配合 `get_impact` 的纵向调用链互补。
 - `rebuild_index()` — 手动刷新索引（正常由 watcher 自动维护，很少需要手动）。
 - `call_external_service(body)` — 提交审查报告到外部服务（供 code-review skill 使用，一般不用直接调）。

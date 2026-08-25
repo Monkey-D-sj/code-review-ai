@@ -90,7 +90,8 @@ def create_server(config: Config):
     def get_impact(symbols: list[str] | None = None,
                    files: list[str] | None = None,
                    max_nodes_per_direction: int = 20,
-                   include_signatures: bool = False) -> str:
+                   include_signatures: bool = False,
+                   include_call_sites: bool = True) -> str:
         """Impact analysis for changed symbols: the affected business entry
         points plus upstream callers / downstream callees per flow. Pass
         explicit `symbols` (e.g. ["auth::login"]) or `files`; if both omitted,
@@ -99,16 +100,21 @@ def create_server(config: Config):
         that never call the symbol are excluded), capped at
         `max_nodes_per_direction` per flow. Set `include_signatures=true` to
         add per-node `sig` fields (default off — signatures are ~26% of the
-        payload). Each result also carries `uncertainty` (one-hop non-resolved
-        edges around the symbol — dynamic/unresolved/candidate — capped at 20)
-        and `coverage` (adjacent-edge counts per resolution), so resolution
-        gaps are visible instead of silently dropped. Prefer this over grepping
-        when assessing what a code change breaks."""
+        payload). Direct upstream/downstream neighbors carry a `call_site`
+        (call_form/line/args/code snippet) by default so a contract change is
+        visible at the exact call points without opening the caller file; pass
+        `include_call_sites=false` to omit, and transitive hops always stay
+        qname-only. Each result also carries `uncertainty` (one-hop
+        non-resolved edges around the symbol — dynamic/unresolved/candidate —
+        capped at 20) and `coverage` (adjacent-edge counts per resolution), so
+        resolution gaps are visible instead of silently dropped. Prefer this
+        over grepping when assessing what a code change breaks."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
         return _emit(_get_impact(
             conn, changed,
             max_nodes_per_direction=max_nodes_per_direction,
-            include_signatures=include_signatures))
+            include_signatures=include_signatures,
+            include_call_sites=include_call_sites))
 
     @mcp.tool()
     def get_test_impact(symbols: list[str] | None = None,
@@ -219,18 +225,6 @@ def create_server(config: Config):
                       "signature": r["signature"],
                       "in_degree": r["in_degree"], "out_degree": r["out_degree"],
                       "callers": callers, "callees": callees})
-
-    @mcp.tool()
-    def list_entry_points() -> str:
-        """List the designated business entry points (matched by entry_names)
-        that have reachable flows. Returns a JSON list of {qname, name, file}.
-        Useful to see the top-level business flows the index has built."""
-        rows = conn.execute(
-            "SELECT DISTINCT f.name, n.qualified_name, n.file_path FROM flows f "
-            "JOIN nodes n ON n.id=f.entry_point_id WHERE n.is_test=0"
-        ).fetchall()
-        return _emit([{"qname": r["qualified_name"], "name": r["name"],
-                       "file": r["file_path"]} for r in rows])
 
     @mcp.tool()
     def get_communities() -> str:

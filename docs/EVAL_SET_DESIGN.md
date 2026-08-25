@@ -385,7 +385,7 @@ hard 档的成本来自推理过程:读 import 后发现别名、识别包装层
 网络命令、文件写命令和会改变仓库的 Git 命令也显式 deny。
 Claude 会把`&&`、`;`、管道和换行拆为子命令逐一校验,不能在允许的`rg`后拼接
 安装或写入命令。Core 的 MCP 白名单排除`rebuild_index`、`get_communities`、
-`get_community`、`call_external_service`、`find_dead_code`和`list_entry_points`;只在 prompt 中写
+`get_community`、`call_external_service`、`find_dead_code`;只在 prompt 中写
 “不要修改”不视为有效隔离。
 
 `full_project_querygraph`保留为压力/消融模式,不再作为默认产品 A/B。该模式最多

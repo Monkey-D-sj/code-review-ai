@@ -81,11 +81,10 @@ args = ["--from", "git+https://github.com/Monkey-D-sj/code-review-ai", "code-rev
 ## MCP tools
 
 - `rebuild_index` - build/rebuild the index from the working tree
-- `get_impact` - impact chains for changed symbols (or derived from a git diff)
+- `get_impact` - impact chains for changed symbols (or derived from a git diff); direct callers/callees carry `call_site` code snippets (opt-out via `include_call_sites=false`)
 - `get_change_context` - compact, on-demand callers/callees for changes the LLM has already judged non-local; accepts qnames or changed files and resolves qnames server-side
 - `search_symbol` - find symbols by name; plain-word queries run FTS token match + bm25 ranking with a substring fallback on 0 hits, while queries containing `*`/`?` keep the short-name glob behavior
 - `get_symbol_detail` - node detail + direct callers/callees
-- `list_entry_points` - designated entry points
 - `get_communities` / `get_community` - Leiden communities (opt-in via `community_detection`)
 
 ## CLI (manual use)

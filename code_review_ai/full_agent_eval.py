@@ -42,7 +42,7 @@ DEFAULT_FULL_EVAL_MODES = ("native_agent", "full_project_core")
 # registration filter). None = the full online tool set.
 _CORE_EXCLUDED_MCP_TOOLS = {
     "rebuild_index", "get_communities", "get_community", "call_external_service",
-    "find_dead_code", "list_entry_points", "query_graph",
+    "find_dead_code", "query_graph",
 }
 _CORE_MCP_TOOLS = tuple(
     name for name in MCP_TOOL_NAMES if name not in _CORE_EXCLUDED_MCP_TOOLS)
@@ -534,7 +534,7 @@ def _prompt(item: PreparedCase, mode: str, hinted: bool = False) -> str:
     elif mode == "full_project_core":
         tool_note = """你可以使用原生只读检查工具以及这些 code-review-ai MCP 工具：get_impact、get_test_impact、
 get_change_summary、get_change_context、search_symbol 和 get_symbol_detail。未开放 rebuild_index、query_graph、
-get_communities、get_community、call_external_service、find_dead_code 和 list_entry_points。评审主通道是 get_impact：
+get_communities、get_community、call_external_service、find_dead_code。评审主通道是 get_impact：
 先用 get_change_summary 获取结构化变更符号，然后对每个关键变更符号调用一次 get_impact，一次性获取其传递调用链
 （upstream/downstream，整图 BFS 精确闭包）与受影响业务入口（affected_entries）——这是本模式区别于 grep 的核心价值；
 其 uncertainty 已列出解析缺口、coverage 已给出解析覆盖率。不要在 get_impact 已覆盖的符号上重复调用 get_change_context。

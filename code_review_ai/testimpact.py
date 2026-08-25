@@ -33,7 +33,7 @@ def get_test_impact(conn: sqlite3.Connection, changed_symbols: list[str],
     only these tests" (or "run none") could be wrong.
     """
     impacts = get_impact(conn, changed_symbols, max_nodes_per_direction,
-                         tests="only")
+                         tests="only", include_call_sites=False)
     # test qname -> set of changed symbols it reaches
     covers: dict[str, set[str]] = {}
     not_found: list[str] = []

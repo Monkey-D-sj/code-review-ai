@@ -68,6 +68,21 @@ def test_impact_puts_direct_callers_first(tmp_path):
     assert qnames.index("b::helper") < qnames.index("a::entry")
 
 
+def test_impact_call_sites_on_direct_neighbors(tmp_path):
+    conn = _tmp_idx(tmp_path)
+    res = get_impact(conn, ["c::target"])[0]
+    by_qname = {node["qname"]: node for node in res["upstream"]}
+    # direct callers carry call_site with the call-line code snippet
+    assert "call_site" in by_qname["b::helper"]
+    assert "call_site" in by_qname["d::direct"]
+    assert "target()" in by_qname["d::direct"]["call_site"]["code"]
+    # the purely-transitive hop (a::entry -> b::helper -> target) stays qname-only
+    assert "call_site" not in by_qname["a::entry"]
+    # opt-out drops the field entirely
+    res_off = get_impact(conn, ["c::target"], include_call_sites=False)[0]
+    assert all("call_site" not in node for node in res_off["upstream"])
+
+
 def _diamond_idx(tmp_path):
     """BFS-order noise fixture: main calls both helper (-> target) and sibling
     (never calls target). BFS discovers sibling before target, so a position

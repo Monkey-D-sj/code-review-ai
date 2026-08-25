@@ -104,8 +104,7 @@ def test_core_mode_exposes_review_tools_except_explicit_exclusions(tmp_path):
     )
     assert _CORE_EXCLUDED_MCP_TOOLS == {
         "rebuild_index", "get_communities", "get_community",
-        "call_external_service", "find_dead_code", "list_entry_points",
-        "query_graph",
+        "call_external_service", "find_dead_code", "query_graph",
     }
     for tool in (*_CORE_MCP_TOOLS, *_CORE_EXCLUDED_MCP_TOOLS):
         assert tool in core

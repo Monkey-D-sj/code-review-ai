@@ -105,13 +105,6 @@ def test_search_symbol_tool_caps_broad_globs(tmp_path):
     assert data[0]["qname"] == "bulk::sym00"
 
 
-def test_list_entry_points_tool(tmp_path):
-    server, conn, cfg = _server(tmp_path)
-    out = server._tool_manager._tools["list_entry_points"].fn()
-    data = json.loads(out)
-    assert any(e["qname"] == Q("app","main") for e in data)
-
-
 def test_get_communities_tool(tmp_path):
     pytest.importorskip("leidenalg")
     server, conn, cfg = _server(tmp_path, community=True)
