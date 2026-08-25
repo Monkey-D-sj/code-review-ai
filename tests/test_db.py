@@ -140,3 +140,40 @@ def test_init_schema_creates_fts_nodes(tmp_path):
     ).fetchone()
     assert row is not None
     conn.close()
+
+
+def test_init_schema_enables_auto_vacuum_full(tmp_path):
+    """A freshly initialized index gets auto_vacuum=FULL so repeated rebuilds
+    reclaim free pages instead of bloating the file (the freelist can grow to
+    80% of file size after many delete-all rebuilds)."""
+    conn = connect(str(tmp_path / "av.db"))
+    init_schema(conn)
+    assert conn.execute("PRAGMA auto_vacuum").fetchone()[0] == 1  # 1 = FULL
+    init_schema(conn)  # idempotent: no re-VACUUM, mode stays FULL
+    assert conn.execute("PRAGMA auto_vacuum").fetchone()[0] == 1
+    conn.close()
+
+
+def test_init_schema_converts_bloated_db_and_reclaims_free_pages(tmp_path):
+    """An index created before auto_vacuum (freelist full of deleted pages) is
+    converted on init_schema: mode flips to FULL and free pages are truncated
+    back to the OS."""
+    db = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("CREATE TABLE t(x TEXT);")
+    with conn:
+        conn.executemany(
+            "INSERT INTO t VALUES (?)", [(str(i) * 50,) for i in range(8000)])
+    conn.execute("DELETE FROM t")
+    conn.commit()
+    freelist_before = conn.execute("PRAGMA freelist_count").fetchone()[0]
+    conn.close()
+    assert freelist_before > 0
+
+    conn = connect(str(db))
+    init_schema(conn)
+    mode = conn.execute("PRAGMA auto_vacuum").fetchone()[0]
+    freelist_after = conn.execute("PRAGMA freelist_count").fetchone()[0]
+    conn.close()
+    assert mode == 1
+    assert freelist_after < freelist_before

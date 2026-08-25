@@ -1,4 +1,5 @@
 
+import logging
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -127,6 +128,29 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _migrate_nodes(conn)
     _migrate_edges(conn)
+    _enable_auto_vacuum(conn)
+
+
+def _enable_auto_vacuum(conn: sqlite3.Connection) -> None:
+    """Convert the index to auto_vacuum=FULL so repeated delete-all rebuilds
+    reclaim free pages instead of bloating the file (a rebuild deletes every
+    table then re-inserts; without autovacuum the deleted pages sit in the
+    freelist and the file can balloon — the live index was 80% free pages).
+    Idempotent: once the header is FULL, this is a no-op. A fresh DB takes the
+    mode immediately; an existing DB needs a VACUUM to rewrite, which also
+    truncates the accumulated freelist. If the VACUUM is blocked (another
+    process holds the DB), log and continue — the header change applies on a
+    later successful VACUUM."""
+    mode = conn.execute("PRAGMA auto_vacuum").fetchone()[0]
+    if mode == 1:  # 0=none, 1=full, 2=incremental
+        return
+    conn.execute("PRAGMA auto_vacuum = FULL")
+    try:
+        conn.execute("VACUUM")
+    except sqlite3.OperationalError:
+        logging.getLogger(__name__).warning(
+            "auto_vacuum=FULL deferred (VACUUM blocked by another process); "
+            "will apply on a later startup")
 
 
 def _migrate_nodes(conn: sqlite3.Connection) -> None:
