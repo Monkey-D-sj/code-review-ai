@@ -39,7 +39,7 @@
 
 ---
 
-## 3. `resolution` —— 信任信号(6 个标签)
+## 3. `resolution` —— 信任信号(5 个标签)
 
 ### `resolved` — ✅ 唯一可靠
 **`target` 是图中真实存在的 qname**。产出来源:
@@ -68,31 +68,31 @@
 
 典型场景:barrel re-export 歧义、star import 同名、`super().x()` 多父命中、声明类型 union(`A | B`)、star-import 接收者多命中、Java DI 通配。
 
-### `semantic` — 保留(框架规则边)
-设计上留给**框架规则产生的、经过审核的**边。`traversal.py` 里 `is_traversable` 只有在 rule_id 被 `register_semantic_rule` 登记进 allow-list 时才会放行。**当前没有任何生成器产出该标签**(taxonomy 和遍历策略已就位,Phase 6 语义适配器预留)。
+### `semantic` — 已并入 `resolved`(历史保留)
+曾经的"框架规则审核边"标签,已决定并入 `resolved`:框架推断边一律按 `resolved` 产出(确定性推断是静态事实),用 `origin`/`rule_id` 作 provenance 标注来源;歧义推断在产出时降级 `candidate`。`traversal.is_traversable` 的 allow-list 注册表已删除——遍历只看 `resolution == "resolved"`,rule_id 不再参与门禁(见 commit history)。索引中不再出现该标签。
 
 ### `external` — 保留(显式外部依赖)
 设计上用于显式标记外部依赖 target。`impact.py` 的 `_uncertainty` 排序/`_REASON_BY_RESOLUTION` 已包含它,但**当前无生成器产出**。
 
-> ⚠️ 现实:**索引里实际只出现 `resolved` / `unresolved` / `dynamic` / `candidate` 四种**。`semantic`/`external` 是 taxonomy 中的预留位,处理代码都在,但还没被写入。
+> ⚠️ 现实:**索引里实际只出现 `resolved` / `unresolved` / `dynamic` / `candidate` 四种**。`semantic` 已并入 resolved;`external` 是 taxonomy 中唯一预留位(处理代码在,但还没被写入)。
 
 ---
 
 ## 4. 行为差异 —— 一张表看懂
 
-| 特性 | `resolved` | `unresolved` | `dynamic` | `candidate` | `semantic` | `external` |
-|---|---|---|---|---|---|---|
-| target 可信度 | ✅ 图中真实存在 | ❌ 不在图 | ⚠️ 静态不可知 | ⚠️ 多个候选 | 规则审核后 | 外部依赖 |
-| 进 flow/BFS 遍历 | ✅ **总是** | ❌ | ❌ | ❌ | 仅 allow-list | ❌ |
-| `repair_resolutions` 重判 | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| 被 `impact.uncertainty` 列出 | 否 | 是(优先级 2) | 是(优先级 0) | 是(优先级 1) | — | 是(优先级 3) |
-| TIA 建议全量跑测试 | 否 | 否 | ✅ | ✅ | — | 否 |
-| 进社区检测(结构边) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| 特性 | `resolved` | `unresolved` | `dynamic` | `candidate` | `external` |
+|---|---|---|---|---|---|
+| target 可信度 | ✅ 图中真实存在 | ❌ 不在图 | ⚠️ 静态不可知 | ⚠️ 多个候选 | 外部依赖 |
+| 进 flow/BFS 遍历 | ✅ **总是** | ❌ | ❌ | ❌ | ❌ |
+| `repair_resolutions` 重判 | ✅ | ✅ | ❌ | ❌ | ❌ |
+| 被 `impact.uncertainty` 列出 | 否 | 是(优先级 2) | 是(优先级 0) | 是(优先级 1) | 是(优先级 3) |
+| TIA 建议全量跑测试 | 否 | 否 | ✅ | ✅ | 否 |
+| 进社区检测(结构边) | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 **逐条解释:**
 
-- **遍历**(`traversal.is_traversable`):`resolved` 无条件可遍历(含结构边);`semantic` 需 allow-list;`candidate`/`dynamic`/`unresolved`/`external` 一律不遍历——**flow 绝不建立在猜测上**。
-- **增量修复**(`update.py repair_resolutions`):只重判 `resolved`↔`unresolved`(依据当前 node 集),跳过 `call` 边 target 无 `::` 的行;`dynamic`/`candidate`/`semantic`/`external` 永不重判——它们编码的是推导过程,节点存在与否不该翻转。
+- **遍历**(`traversal.is_traversable`):只有 `resolved` 可遍历(含结构边);`candidate`/`dynamic`/`unresolved`/`external` 一律不遍历——**flow 绝不建立在猜测上**。框架推断边以 `resolved` 身份参与(带 `origin`/`rule_id` provenance),歧义时产出端降级 `candidate`。
+- **增量修复**(`update.py repair_resolutions`):只重判 `resolved`↔`unresolved`(依据当前 node 集),跳过 `call` 边 target 无 `::` 的行;`dynamic`/`candidate`/`external` 永不重判——它们编码的是推导过程,节点存在与否不该翻转。
 - **不确定性清单**(`impact._uncertainty`):把变更符号一跳内的非 resolved 边按 `dynamic(0) > candidate(1) > unresolved(2) > external(3)` 排序列出,让 reviewer 看到解析缺口。
 - **测试影响断点**(`testimpact._BREAKPOINT_RESOLUTIONS = {"dynamic", "candidate"}`):路径上出现这两种边时,TIA 建议回退全量跑,因为 target 不确定,只跑命中测试可能漏。
 
@@ -101,9 +101,7 @@
 ## 5. 信任层级
 
 ```
-resolved  ──── 最可靠:target 就是那个符号
-  ↑
-semantic  ──── 框架规则边,登记审核后才可遍历
+resolved  ──── 最可靠:target 就是那个符号(含框架推断,带 rule_id)
   ↑
 candidate ──── 候选集可枚举(≤20),reviewer 逐一核对
   ↑
@@ -114,7 +112,7 @@ external  ──── 显式外部依赖
 dynamic   ──── 最不可靠:receiver 运行时才知道,resolver 不猜
 ```
 
-> 注意层级不是严格的:比如 `unresolved`(推导出真实 qname 但没索引)比 `dynamic`(完全不可知)"更确定",但两者都不参与遍历。真正影响使用的只有两件事:**能否遍历**(resolved / allow-listed semantic)和**是否被不确定性清单/测试断点标记**(后四种)。
+> 注意层级不是严格的:比如 `unresolved`(推导出真实 qname 但没索引)比 `dynamic`(完全不可知)"更确定",但两者都不参与遍历。真正影响使用的只有两件事:**能否遍历**(仅 resolved)和**是否被不确定性清单/测试断点标记**(后四种)。
 
 ---
 

@@ -179,10 +179,11 @@ def create_server(config: Config):
     @mcp.tool()
     def query_graph(qualified_name: str, edge_kind: str = "call",
                     direction: str = "both", max_neighbors: int = 20) -> str:
-        """图邻域查询：某符号通过指定边类型（call|contains|import|extends|
-        implements|all，默认 call）的 resolved 边，in=用了它的节点，out=它用的
-        节点。max_neighbors 限制每个方向的返回条数，默认 20 以控制上下文体积。
-        返回 JSON 对象。"""
+        """Graph neighborhood query: a symbol's resolved edges of a given
+        kind (call|contains|import|extends|implements|all, default call);
+        in=users of it, out=what it uses. max_neighbors caps the results
+        per direction (default 20) to bound context size. Returns a JSON
+        object."""
         return _emit(_query_graph(conn, qualified_name,
                                   edge_kind=edge_kind, direction=direction,
                                   max_per_dir=max_neighbors))

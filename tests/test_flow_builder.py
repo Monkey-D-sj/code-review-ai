@@ -146,28 +146,18 @@ def test_candidate_edges_never_traverse():
     assert 2 not in flow_a.path  # c unreachable through the candidate edge
 
 
-def test_unregistered_semantic_edges_never_traverse():
-    """Phase 2 gate: a semantic edge whose rule is not in the allow-list never
-    reaches flow_builder — an unvetted framework rule must not build flows."""
+@pytest.mark.parametrize("resolution",
+                         ["candidate", "dynamic", "unresolved", "external",
+                          "semantic"])
+def test_non_resolved_resolutions_never_traverse(resolution):
+    """A flow is never built on a guess: every non-resolved resolution —
+    candidate/dynamic/unresolved/external, and the former reserved 'semantic'
+    label — is excluded from traversal. Framework inference is trusted only by
+    being emitted as ``resolved`` (carrying rule_id provenance), never via a
+    separate traversable resolution or allow-list gate."""
     edges = [EdgeRow(Q("m", "a"), Q("m", "b"), "resolved"),
-             EdgeRow(Q("m", "b"), Q("m", "c"), "semantic", rule_id="JAVA-F99")]
+             EdgeRow(Q("m", "b"), Q("m", "c"), resolution)]
     flows = build_flows(_nodes(), edges, ["a"])
     assert {f.entry_point_id for f in flows} == {0, 2, 3}
     flow_a = next(f for f in flows if f.entry_point_id == 0)
-    assert flow_a.path == [0, 1]
-
-
-def test_registered_semantic_rule_traverses():
-    """Phase 2: registering a semantic rule as traversable lets its edges build
-    flows (the vetting gate of guide §3.3 — an allow-listed rule is trusted)."""
-    from code_review_ai.traversal import register_semantic_rule
-    register_semantic_rule("JAVA-F99", traversable=True)
-    try:
-        edges = [EdgeRow(Q("m", "a"), Q("m", "b"), "resolved"),
-                 EdgeRow(Q("m", "b"), Q("m", "c"), "semantic", rule_id="JAVA-F99")]
-        flows = build_flows(_nodes(), edges, ["a"])
-        assert {f.entry_point_id for f in flows} == {0, 3}  # c no longer a root
-        flow_a = next(f for f in flows if f.entry_point_id == 0)
-        assert flow_a.path == [0, 1, 2]
-    finally:
-        register_semantic_rule("JAVA-F99", traversable=False)
+    assert flow_a.path == [0, 1]  # c unreachable through the non-resolved edge

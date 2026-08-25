@@ -62,7 +62,7 @@ def test_get_impact_tool(tmp_path):
     # Phase 2: uncertainty + coverage flow through the MCP JSON output
     assert data[0]["uncertainty"] == []
     assert set(data[0]["coverage"]) == {
-        "resolved_edges", "semantic_edges", "candidate_edges",
+        "resolved_edges", "candidate_edges",
         "dynamic_edges", "unresolved_edges", "truncated"}
     assert data[0]["coverage"]["resolved_edges"] == 1  # app::main -> login
     assert data[0]["coverage"]["truncated"] is False

@@ -565,7 +565,15 @@ def _java_params(node, scope) -> None:
 
 
 def _java_locals(node, scope) -> None:
-    """Collect local_variable_declaration names in a method body (recursive)."""
+    """Collect local_variable_declaration names in a method body (recursive),
+    plus enhanced-for loop variables (`for (SysUser user : users)`).
+
+    The loop variable carries a declared type (tree-sitter exposes it as the
+    ``type`` field, the variable as ``name``), so recording it lets receiver
+    binding resolve ``user.getUserName()`` inside the loop instead of falling
+    to dynamic. Generic types reduce to their base name via _type_base_name
+    (``Map.Entry<K,V>`` -> ``Map.Entry``), matching every other Java type
+    channel."""
     for child in node.children:
         if child.type == "local_variable_declaration":
             type_name = _type_base_name(child.child_by_field_name("type"))
@@ -576,6 +584,11 @@ def _java_locals(node, scope) -> None:
                         inferred = type_name or _java_initializer_type(decl)
                         if inferred is not None:
                             scope[name_node.text.decode("utf-8")] = inferred
+        elif child.type == "enhanced_for_statement":
+            type_name = _type_base_name(child.child_by_field_name("type"))
+            name_node = child.child_by_field_name("name")
+            if type_name is not None and name_node is not None:
+                scope[name_node.text.decode("utf-8")] = type_name
         _java_locals(child, scope)
 
 

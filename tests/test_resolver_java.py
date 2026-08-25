@@ -427,3 +427,137 @@ def test_instantiation_to_constructor_internal_call_end_to_end(tmp_path):
     reachable = {all_nodes[i].qualified_name for i in flow.path}
     assert "com.example::Service.Service" in reachable
     assert "com.example::Service.helper" in reachable
+
+
+def test_enhanced_for_loop_var_receiver_binds(tmp_path):
+    """`for (SysUser user : users)` must record the loop variable's declared
+    type so `user.getUserName()` inside the loop resolves instead of falling
+    to dynamic (the classic RuoYi/BaseController-style domain iteration)."""
+    (tmp_path / "SysUser.java").write_text(
+        "package com.foo;\n"
+        "public class SysUser {\n"
+        "    public String getUserName() { return null; }\n"
+        "}\n", encoding="utf-8")
+    (tmp_path / "App.java").write_text(
+        "package com.foo;\n"
+        "import java.util.List;\n"
+        "public class App {\n"
+        "    void run(List<SysUser> users) {\n"
+        "        for (SysUser user : users) {\n"
+        "            user.getUserName();\n"
+        "        }\n"
+        "    }\n"
+        "}\n", encoding="utf-8")
+    files = [parse_file(str(tmp_path / "SysUser.java"), str(tmp_path)),
+             parse_file(str(tmp_path / "App.java"), str(tmp_path))]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert ("com.foo::App.run", "com.foo::SysUser.getUserName", "resolved") in by
+    # without the loop-var type, this receiver would be unbound -> dynamic
+    assert ("com.foo::App.run", "user.getUserName", "dynamic") not in by
+
+
+def test_bare_inherited_call_walks_extends_chain(tmp_path):
+    """A bare `toAjax()` in a subclass must resolve to the parent's declaration
+    (the RuoYi controller case): Java resolves inherited methods on plain calls,
+    only `super.m()` needs the explicit form. Previously this fell to unresolved
+    because only the enclosing class itself was checked."""
+    (tmp_path / "Base.java").write_text(
+        "package com.foo;\n"
+        "public class Base {\n"
+        "    public String m() { return null; }\n"
+        "}\n", encoding="utf-8")
+    (tmp_path / "Sub.java").write_text(
+        "package com.foo;\n"
+        "public class Sub extends Base {\n"
+        "    void run() {\n"
+        "        m();\n"
+        "    }\n"
+        "}\n", encoding="utf-8")
+    files = [parse_file(str(tmp_path / "Base.java"), str(tmp_path)),
+             parse_file(str(tmp_path / "Sub.java"), str(tmp_path))]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert ("com.foo::Sub.run", "com.foo::Base.m", "resolved") in by
+
+
+def test_bare_inherited_call_multilevel_chain(tmp_path):
+    """The extends walk must be transitive: A extends B extends Base, a bare call
+    in A resolves to the method declared on Base (nearest ancestor wins)."""
+    (tmp_path / "Base.java").write_text(
+        "package com.foo;\n"
+        "public class Base {\n"
+        "    public String m() { return null; }\n"
+        "}\n", encoding="utf-8")
+    (tmp_path / "Mid.java").write_text(
+        "package com.foo;\n"
+        "public class Mid extends Base {\n"
+        "}\n", encoding="utf-8")
+    (tmp_path / "Leaf.java").write_text(
+        "package com.foo;\n"
+        "public class Leaf extends Mid {\n"
+        "    void run() {\n"
+        "        m();\n"
+        "    }\n"
+        "}\n", encoding="utf-8")
+    files = [parse_file(str(tmp_path / f), str(tmp_path))
+             for f in ("Base.java", "Mid.java", "Leaf.java")]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert ("com.foo::Leaf.run", "com.foo::Base.m", "resolved") in by
+
+
+def test_receiver_bound_inherited_setter_resolves(tmp_path):
+    """`dict.setCreateBy(...)` where `dict` is a SysDictData param but the setter
+    lives on BaseEntity: after binding the receiver type to the subclass, the
+    inheritance walk must find the setter on the parent (the RuoYi addSave
+    pattern). Previously this stayed dynamic."""
+    (tmp_path / "Base.java").write_text(
+        "package com.foo;\n"
+        "public class Base {\n"
+        "    public void setCreateBy(String v) {}\n"
+        "}\n", encoding="utf-8")
+    (tmp_path / "Dom.java").write_text(
+        "package com.foo;\n"
+        "public class Dom extends Base {\n"
+        "}\n", encoding="utf-8")
+    (tmp_path / "Svc.java").write_text(
+        "package com.foo;\n"
+        "public class Svc {\n"
+        "    void save(Dom dict) {\n"
+        "        dict.setCreateBy(\"x\");\n"
+        "    }\n"
+        "}\n", encoding="utf-8")
+    files = [parse_file(str(tmp_path / f), str(tmp_path))
+             for f in ("Base.java", "Dom.java", "Svc.java")]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert ("com.foo::Svc.save", "com.foo::Base.setCreateBy", "resolved") in by
+    assert ("com.foo::Svc.save", "dict.setCreateBy", "dynamic") not in by
+
+
+def test_this_inherited_call_resolves(tmp_path):
+    """`this.m()` where m is inherited from the parent must resolve too — the
+    explicit-this form is just a spelled-out bare call, not a field receiver."""
+    (tmp_path / "Base.java").write_text(
+        "package com.foo;\n"
+        "public class Base {\n"
+        "    public String m() { return null; }\n"
+        "}\n", encoding="utf-8")
+    (tmp_path / "Sub.java").write_text(
+        "package com.foo;\n"
+        "public class Sub extends Base {\n"
+        "    void run() {\n"
+        "        this.m();\n"
+        "    }\n"
+        "}\n", encoding="utf-8")
+    files = [parse_file(str(tmp_path / "Base.java"), str(tmp_path)),
+             parse_file(str(tmp_path / "Sub.java"), str(tmp_path))]
+    qnames = {n.qualified_name for f in files for n in f.nodes}
+    edges = resolve_edges(files, qnames)
+    by = {(e.source, e.target, e.resolution) for e in edges}
+    assert ("com.foo::Sub.run", "com.foo::Base.m", "resolved") in by

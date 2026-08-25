@@ -70,7 +70,7 @@ def flow_input_hash(conn) -> str:
     parts += [f"e:{row['source']}->{row['target']}|{row['resolution']}"
               f"|{row['rule_id']}"
               for row in edges
-              if is_traversable("call", row["resolution"], row["rule_id"])]
+              if is_traversable("call", row["resolution"])]
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
@@ -81,7 +81,7 @@ def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
     id_to_file = {n.id: n.file_path for n in nodes}
     adj: dict[int, list[int]] = defaultdict(list)  # adjacency list: target → [source]
     for e in edges:
-        if not is_traversable(e.kind, e.resolution, e.rule_id):
+        if not is_traversable(e.kind, e.resolution):
             continue
         s = qname_to_id.get(e.source)
         t = qname_to_id.get(e.target)
@@ -90,7 +90,7 @@ def build_flows(nodes: list[NodeRow], edges: list[EdgeRow],
 
     flows: list[FlowRecord] = []
     has_incoming = {qname_to_id.get(e.target) for e in edges
-                    if is_traversable(e.kind, e.resolution, e.rule_id)}
+                    if is_traversable(e.kind, e.resolution)}
     has_incoming.discard(None)
 
     for n in nodes:

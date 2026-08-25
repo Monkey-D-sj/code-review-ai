@@ -300,9 +300,15 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                   inheritance_edges: list[Edge] | None = None) -> list[Edge]:
     mod_syms = _module_symbols(parsed_files)
     scope_syms = _scope_symbols(parsed_files)
-    all_import_maps = {pf.module_qname: _import_map(pf, path_aliases,
-                                                    existing_qnames, base_url)
-                       for pf in parsed_files}
+    # Per-file import maps, built once per file. ``all_import_maps`` keys by
+    # module and keeps the last file's map per package (Java: several files
+    # share a package) — that module-level view feeds re-export traversal; the
+    # resolve loop below consumes the per-file list directly, so each file
+    # resolves against its own imports.
+    per_file_imports = [_import_map(pf, path_aliases, existing_qnames, base_url)
+                        for pf in parsed_files]
+    all_import_maps = {pf.module_qname: imap
+                       for pf, imap in zip(parsed_files, per_file_imports)}
     # Star imports (`from m import *` / `export * from m`) — a separate list per
     # module because multiple stars would collapse on `_import_map`'s "*" key.
     star_map = {pf.module_qname: [_import_module(imp.module, path_aliases, base_url,
@@ -328,16 +334,25 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
             inheritance_map.setdefault(edge.source, []).append(edge.target)
     edges: list[Edge] = []
     seen: set[tuple[str, str, str]] = set()
-    for pf in parsed_files:
+    # Per-build caches — they must live for exactly one resolve_edges call,
+    # because existing_qnames/class_qnames change between builds (a module-level
+    # cache would go stale). All three memoize pure lookups over build-fixed
+    # tables, so results are identical to the uncached path.
+    lex_cache: dict[str, dict] = {}              # source_qname -> lexical scope dict
+    enclosing_cache: dict[str, str | None] = {}  # qname -> enclosing class
+    reexport_memo: dict[tuple[str, str], list[str]] = {}
+    for pf, imports in zip(parsed_files, per_file_imports):
         module_local = mod_syms.get(pf.module_qname, {})
-        imports = _import_map(pf, path_aliases, existing_qnames, base_url)
         # Star imports are per-file (Java packages hold several files whose
         # wildcard imports must not cross-contaminate), so thread the file's
         # own list down instead of the module-aggregated star_map.
         star_modules = [imp.module for imp in pf.imports if imp.is_star]
         for c in pf.raw_calls:
-            local = _lexical_symbols(c.source_qname, pf.module_qname,
-                                     scope_syms, module_local)
+            local = lex_cache.get(c.source_qname)
+            if local is None:
+                local = _lexical_symbols(c.source_qname, pf.module_qname,
+                                         scope_syms, module_local)
+                lex_cache[c.source_qname] = local
             for edge in _resolve_one(c, local, imports, existing_qnames, all_import_maps,
                                      mod_syms=mod_syms, source_module=pf.module_qname,
                                      var_types=var_types, path_aliases=path_aliases,
@@ -346,7 +361,9 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                                      default_exports=default_exports,
                                      star_modules=star_modules,
                                      inheritance_map=inheritance_map,
-                                     return_types=return_types):
+                                     return_types=return_types,
+                                     reexport_memo=reexport_memo,
+                                     enclosing_cache=enclosing_cache):
                 _attach_call_site(c, edge)
                 _dedup_append(edges, seen, edge)
                 if edge.resolution == "resolved" and edge.target in class_qnames:
@@ -363,7 +380,8 @@ def resolve_calls(parsed_files: list[ParsedFile], existing_qnames: set[str],
                                                var_types=var_types,
                                                path_aliases=path_aliases,
                                                star_map=star_map,
-                                               module_alls=module_alls):
+                                               module_alls=module_alls,
+                                               reexport_memo=reexport_memo):
                     _dedup_append(edges, seen, Edge(
                         source=c.source_qname, target=dep_qn, kind="call",
                         file_path=c.file_path, resolution="resolved"))
@@ -399,7 +417,8 @@ def _resolve_di_args(c: RawCall, local: dict, imports: dict,
                      var_types: dict | None = None,
                      path_aliases: dict[str, str] | None = None,
                      star_map: dict | None = None,
-                     module_alls: dict | None = None) -> list[str]:
+                     module_alls: dict | None = None,
+                     reexport_memo: dict | None = None) -> list[str]:
     """Resolve the callable arguments of a DI-marker call (``Depends(get_db)``)
     to qnames by reusing _resolve_one on a fabricated RawCall — the same
     local/import/reexport machinery as any normal call.
@@ -419,7 +438,8 @@ def _resolve_di_args(c: RawCall, local: dict, imports: dict,
         for edge in _resolve_one(fake, local, imports, existing, all_import_maps,
                                  mod_syms=mod_syms, source_module=source_module,
                                  var_types=var_types, path_aliases=path_aliases,
-                                 star_map=star_map, module_alls=module_alls):
+                                 star_map=star_map, module_alls=module_alls,
+                                 reexport_memo=reexport_memo):
             if edge.resolution == "resolved":
                 resolved.append(edge.target)
     return resolved
@@ -458,7 +478,9 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                  default_exports: dict | None = None,
                  star_modules: list | None = None,
                  inheritance_map: dict[str, list[str]] | None = None,
-                 return_types: dict[str, str] | None = None) -> list[Edge]:
+                 return_types: dict[str, str] | None = None,
+                 reexport_memo: dict | None = None,
+                 enclosing_cache: dict | None = None) -> list[Edge]:
     base = Edge(source=c.source_qname, target=c.target_expr, kind="call",
                 file_path=c.file_path, resolution="unresolved")
     if c.language == "java":
@@ -468,7 +490,8 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                              module_alls=module_alls, default_exports=default_exports,
                              star_modules=star_modules,
                              inheritance_map=inheritance_map,
-                             return_types=return_types)
+                             return_types=return_types,
+                             enclosing_cache=enclosing_cache)
     if star_modules is None:
         star_modules = (star_map or {}).get(source_module, []) if source_module else []
     if c.call_form == CALL_CONSTRUCT:
@@ -498,7 +521,8 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                 tgt = qname.join(mod, imp_name)
                 if tgt not in existing:
                     hits = _resolve_reexport(mod, imp_name, all_import_maps,
-                                             existing, star_map=star_map)
+                                             existing, star_map=star_map,
+                                             memo=reexport_memo)
                     if len(hits) == 1:
                         tgt = hits[0]
                     elif len(hits) > 1:  # barrel re-exports it from several modules
@@ -519,20 +543,28 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
         # Keep the original expression in evidence, but normalize only these
         # constant-property forms before applying normal receiver binding.
         target_expr = c.target_expr
-        if c.language in ("typescript", "javascript"):
+        if c.language in ("typescript", "javascript") and (
+                "?" in target_expr or "[" in target_expr):
+            # parser._call_target already normalises `?.` and `["x"]` on the
+            # path from source, so this regex is a no-op for parser-produced
+            # calls. The gate (only exprs actually carrying `?`/`[`) keeps the
+            # fallback for directly-constructed RawCalls while skipping the
+            # regex on the overwhelmingly common plain-dotted expression.
             target_expr = target_expr.replace("?.", ".")
             match = re.fullmatch(r"(.+)\[['\"]([A-Za-z_$][A-Za-z0-9_$]*)['\"]\]",
                                  target_expr)
             if match:
                 target_expr = f"{match.group(1)}.{match.group(2)}"
         if c.language in ("typescript", "javascript"):
-            class_qn = _enclosing_class_qname(c.source_qname, class_qnames)
+            class_qn = _enclosing_class_qname_cached(c.source_qname, class_qnames,
+                                                     enclosing_cache)
             if class_qn and target_expr.startswith("this."):
                 target = _join_target(class_qn, target_expr[len("this."):])
                 if target in existing:
                     return [_resolved(base, target, existing)]
         elif c.language == "python" and c.target_expr.startswith("super()."):
-            class_qn = _enclosing_class_qname(c.source_qname, class_qnames)
+            class_qn = _enclosing_class_qname_cached(c.source_qname, class_qnames,
+                                                     enclosing_cache)
         else:
             class_qn = None
         super_prefix = "super()." if c.language == "python" else "super."
@@ -573,7 +605,8 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                 tgt = qname.join(target_mod, member) if member else target_mod
                 if tgt not in existing and member:
                     hits = _resolve_reexport(target_mod, member, all_import_maps,
-                                             existing, star_map=star_map)
+                                             existing, star_map=star_map,
+                                             memo=reexport_memo)
                     if len(hits) == 1:
                         tgt = hits[0]
                     elif len(hits) > 1:
@@ -602,7 +635,7 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                 hits = _resolve_py_type(
                     receiver_type, local, imports, existing, all_import_maps,
                     mod_syms, source_module, star_modules, star_map,
-                    module_alls, default_exports)
+                    module_alls, default_exports, reexport_memo=reexport_memo)
                 receiver_member = target_expr[len(receiver_expr) + 1:]
                 if len(hits) == 1:
                     tgt = _join_target(hits[0], receiver_member)
@@ -614,7 +647,8 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
         if c.language == "python" and head in ("self", "cls"):
             # method receiver -> enclosing class, mirroring Java's this./type
             # binding; bare `g()` stays module-scope (Python LEGB), not A.g
-            enclosing = _enclosing_class(c.source_qname, class_qnames)
+            enclosing = _enclosing_class_cached(c.source_qname, class_qnames,
+                                                enclosing_cache)
             if enclosing:
                 tgt = _join_target(enclosing, rest)
                 if tgt in existing:
@@ -632,7 +666,8 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
 
 def _resolve_reexport(current: str, name: str, all_import_maps: dict,
                       existing: set[str], seen: set[str] | None = None,
-                      star_map: dict | None = None) -> list[str]:
+                      star_map: dict | None = None,
+                      memo: dict | None = None) -> list[str]:
     """All qnames `name` is re-exported to from `current`.
 
     binding is (module, imported_name, is_star); imported_name is the EXPORTED
@@ -642,29 +677,45 @@ def _resolve_reexport(current: str, name: str, all_import_maps: dict,
     star re-exports (`export * from` / `from m import *`) are all probed — a
     barrel can re-export many modules at once, and the caller decides resolved
     (1) vs candidate (many) vs unresolved (0).
+
+    ``memo`` is a per-build cache: the result is a pure function of
+    (current, name) over the fixed re-export graph — the ``seen`` cycle guard
+    only prunes infinite recursion and cannot change the reachable set — so
+    keying by (current, name) is safe. Returns a copy so callers never mutate
+    the cached list.
     """
+    if memo is not None and (current, name) in memo:
+        return list(memo[(current, name)])
     tgt = qname.join(current, name)
     if tgt in existing:
-        return [tgt]
-    if current in (seen or set()):
-        return []  # import cycle
-    binding = (all_import_maps.get(current) or {}).get(name)
-    if binding and binding[1]:
-        next_module = binding[0]
-        # CJS `exports.wrap = helper.run`: "helper" is a local require alias,
-        # not a module qname — resolve it through the current module's import
-        # map (helper -> util) before recursing, or the chain dead-ends.
-        if next_module not in all_import_maps:
-            alias = (all_import_maps.get(current) or {}).get(next_module)
-            if alias:
-                next_module = alias[0]
-        return _resolve_reexport(next_module, binding[1], all_import_maps,
-                                 existing, (seen or set()) | {current}, star_map)
-    hits: list[str] = []
-    for module in (star_map or {}).get(current, []):
-        hits.extend(_resolve_reexport(module, name, all_import_maps, existing,
-                                      (seen or set()) | {current}, star_map))
-    return hits
+        result = [tgt]
+    elif current in (seen or set()):
+        result = []  # import cycle
+    else:
+        binding = (all_import_maps.get(current) or {}).get(name)
+        if binding and binding[1]:
+            next_module = binding[0]
+            # CJS `exports.wrap = helper.run`: "helper" is a local require
+            # alias, not a module qname — resolve it through the current
+            # module's import map (helper -> util) before recursing, or the
+            # chain dead-ends.
+            if next_module not in all_import_maps:
+                alias = (all_import_maps.get(current) or {}).get(next_module)
+                if alias:
+                    next_module = alias[0]
+            result = _resolve_reexport(next_module, binding[1], all_import_maps,
+                                       existing, (seen or set()) | {current},
+                                       star_map, memo)
+        else:
+            result = []
+            for module in (star_map or {}).get(current, []):
+                result.extend(_resolve_reexport(module, name, all_import_maps,
+                                                existing,
+                                                (seen or set()) | {current},
+                                                star_map, memo))
+    if memo is not None:
+        memo[(current, name)] = result
+    return result
 
 
 def _enclosing_class_qname(source_qname: str,
@@ -680,7 +731,8 @@ def _resolve_py_type(type_name: str, local: dict, imports: dict,
                      mod_syms: dict, source_module: str | None,
                      star_modules: list, star_map: dict | None,
                      module_alls: dict | None,
-                     default_exports: dict | None) -> list[str]:
+                     default_exports: dict | None,
+                     reexport_memo: dict | None = None) -> list[str]:
     """All class qnames a Python/TS declared type resolves to: same-module
     symbol, then import (following barrel re-exports), then star imports.
 
@@ -702,7 +754,8 @@ def _resolve_py_type(type_name: str, local: dict, imports: dict,
                 hits.append(candidate)
             else:
                 for hit in _resolve_reexport(mod, imported, all_import_maps,
-                                             existing, star_map=star_map):
+                                             existing, star_map=star_map,
+                                             memo=reexport_memo):
                     if hit not in hits:
                         hits.append(hit)
     if not hits and star_modules:
@@ -773,6 +826,27 @@ def _enclosing_class(qualified_name: str,
     return qname.join(mod, first_scope)
 
 
+def _enclosing_class_qname_cached(source_qname: str,
+                                  class_qnames: set[str] | None,
+                                  cache: dict[str, str | None] | None) -> str | None:
+    """_enclosing_class_qname memoized per build (class_qnames is build-fixed)."""
+    if cache is None:
+        return _enclosing_class_qname(source_qname, class_qnames)
+    if source_qname not in cache:
+        cache[source_qname] = _enclosing_class_qname(source_qname, class_qnames)
+    return cache[source_qname]
+
+
+def _enclosing_class_cached(qualified_name: str, class_qnames: set[str] | None,
+                            cache: dict[str, str | None] | None) -> str | None:
+    """_enclosing_class memoized per build (class_qnames is build-fixed)."""
+    if cache is None:
+        return _enclosing_class(qualified_name, class_qnames)
+    if qualified_name not in cache:
+        cache[qualified_name] = _enclosing_class(qualified_name, class_qnames)
+    return cache[qualified_name]
+
+
 def _resolve_java_dotted(expr: str, mod_syms: dict, existing: set[str]) -> str | None:
     """Resolve a dotted call by longest module prefix (FQCN / same-package).
 
@@ -834,6 +908,31 @@ def _resolve_java_type(type_name: str, source_module: str | None,
     return hits
 
 
+def _inherited_member(class_qn: str, member: str, existing: set[str],
+                      inheritance_map: dict[str, list[str]] | None) -> str | None:
+    """Nearest ancestor declaring `member`, via the extends chain.
+
+    Mirrors Java method resolution for an inherited call: walk the direct
+    parents of `class_qn` (BFS, most-derived first) and return the first class
+    that declares `member` in `existing`. The chain is linear for classes (one
+    superclass each), so first-hit is the Java-correct answer; the super.-branch
+    keeps its own collect-all BFS for the multi-parent interface case. None when
+    no ancestor declares it.
+    """
+    pending = list((inheritance_map or {}).get(class_qn, []))
+    seen: set[str] = {class_qn}
+    while pending:
+        parent = pending.pop(0)
+        if parent in seen:
+            continue
+        seen.add(parent)
+        target = _join_target(parent, member)
+        if target in existing:
+            return target
+        pending.extend((inheritance_map or {}).get(parent, []))
+    return None
+
+
 def _resolve_java(c, local: dict, imports: dict, existing: set[str],
                   mod_syms: dict | None, source_module: str | None,
                   base: Edge, var_types: dict | None = None,
@@ -843,7 +942,8 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
                   default_exports: dict | None = None,
                   star_modules: list | None = None,
                   inheritance_map: dict[str, list[str]] | None = None,
-                  return_types: dict[str, str] | None = None) -> list[Edge]:
+                  return_types: dict[str, str] | None = None,
+                  enclosing_cache: dict | None = None) -> list[Edge]:
     """Java-aware call resolution: simple / attribute / construct forms.
 
     star_modules is the *per-file* wildcard-import list (Java packages hold
@@ -865,11 +965,16 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
             same_pkg = mod_syms.get(source_module, {})
             if name in same_pkg:
                 return [_resolved(base, same_pkg[name], existing)]
-        enclosing = _enclosing_class(c.source_qname, class_qnames)
+        enclosing = _enclosing_class_cached(c.source_qname, class_qnames,
+                                            enclosing_cache)
         if enclosing:
             target = _join_target(enclosing, name)
             if target in existing:
                 return [_resolved(base, target, existing)]
+            inherited = _inherited_member(enclosing, name, existing,
+                                          inheritance_map)
+            if inherited:
+                return [_resolved(base, inherited, existing)]
         if star_modules:  # import a.b.* -> unique / candidate / unresolved
             hits = _star_lookup(name, star_modules, mod_syms, module_alls)
             if len(hits) == 1:
@@ -914,6 +1019,7 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
                     star_modules=star_modules,
                     inheritance_map=inheritance_map,
                     return_types=return_types,
+                    enclosing_cache=enclosing_cache,
                 )
                 targets: list[str] = []
                 for inner_edge in inner_edges:
@@ -934,7 +1040,8 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
                 if len(set(targets)) > 1:
                     return _candidates(base, sorted(set(targets)))
         if expr.startswith("super."):
-            class_qn = _enclosing_class(c.source_qname, class_qnames)
+            class_qn = _enclosing_class_cached(c.source_qname, class_qnames,
+                                               enclosing_cache)
             member = expr[len("super."):]
             pending = list((inheritance_map or {}).get(class_qn, []))
             targets: list[str] = []
@@ -960,11 +1067,16 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
             # below, but resolve the direct method form through the enclosing
             # class just like a bare `m()` call.
             if "." not in expr:
-                enclosing = _enclosing_class(c.source_qname, class_qnames)
+                enclosing = _enclosing_class_cached(c.source_qname, class_qnames,
+                                                enclosing_cache)
                 if enclosing:
                     target = _join_target(enclosing, expr)
                     if target in existing:
                         return [_resolved(base, target, existing)]
+                    inherited = _inherited_member(enclosing, expr, existing,
+                                                  inheritance_map)
+                    if inherited:
+                        return [_resolved(base, inherited, existing)]
         head, sep, rest = expr.partition(".")
         if not sep:
             return [_mark_dynamic(base, c.call_form, c.target_expr)]
@@ -983,6 +1095,10 @@ def _resolve_java(c, local: dict, imports: dict, existing: set[str],
                     target = _join_target(hits[0], rest)
                     if target in existing:
                         return [_resolved(base, target, existing)]
+                    inherited = _inherited_member(hits[0], rest, existing,
+                                                  inheritance_map)
+                    if inherited:
+                        return [_resolved(base, inherited, existing)]
                 elif len(hits) > 1:
                     return _candidates(base, [_join_target(h, rest)
                                               for h in hits])

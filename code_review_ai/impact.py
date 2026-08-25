@@ -178,7 +178,7 @@ def _uncertainty(conn: sqlite3.Connection, qname: str) -> list[dict]:
     return items[:_UNCERTAINTY_LIMIT]
 
 
-_COVERAGE_KEYS = ("resolved_edges", "semantic_edges", "candidate_edges",
+_COVERAGE_KEYS = ("resolved_edges", "candidate_edges",
                   "dynamic_edges", "unresolved_edges")
 
 
@@ -196,7 +196,6 @@ def _coverage(conn: sqlite3.Connection, qname: str,
         counts[r["resolution"]] = r["cnt"]
     return {
         "resolved_edges": counts.get("resolved", 0),
-        "semantic_edges": counts.get("semantic", 0),
         "candidate_edges": counts.get("candidate", 0),
         "dynamic_edges": counts.get("dynamic", 0),
         "unresolved_edges": counts.get("unresolved", 0),
