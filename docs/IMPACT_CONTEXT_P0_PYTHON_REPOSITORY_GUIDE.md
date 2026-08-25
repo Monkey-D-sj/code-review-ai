@@ -22,7 +22,6 @@
 | `import` | 是 | `import`、`from ... import ...`、alias、relative import、package re-export、唯一可解析 wildcard import |
 | `extends` | 是 | `class Child(Base)`，同模块和跨模块继承 |
 | `implements` | N/A | Python 没有该公开语法边；不创建 Python case，不计入分母 |
-| `all` | 是 | 同一 qname 至少拥有两种以上 resolved 边时的去重聚合 |
 
 ## 3. Python Query P0 case 清单
 
@@ -38,7 +37,6 @@
 | `py_contains_edges` | `contains` | package module、顶层 function/class、class method、nested function | module/class 的 `out` 成员和成员的 `in` 所属节点正确 |
 | `py_import_edges` | `import` | 普通/alias/relative import、package re-export、带 `__all__` 的唯一 wildcard import | 模块节点的 `import` out 邻居指向真实仓库模块 |
 | `py_extends_edges` | `extends` | 同模块和跨模块 `class Child(Base)`；多层继承 | Child 的 `extends` out 邻居和 Base 的 `in` 邻居正确 |
-| `py_all_edges` | `all` | 同一节点同时拥有 call/contains/import/extends 中至少两类边 | `all` 等于各具体 resolved edge kind 查询结果的去重并集 |
 | `py_query_contract` | 公开查询契约 | 已存在节点、不存在节点、多个邻居 | `in/out/both`、`max_per_dir`、not found、非法 edge kind/direction 的结果或错误正确 |
 | `py_nonresolved_call_edges` | `call` 负例 | `getattr(obj, name)()`、`importlib.import_module(path)`、函数作为参数传入但未直接调用 | 仅返回场景内其余正常 resolved 邻居；不能凭动态成员、运行时 import 或参数传递虚构 target |
 
@@ -103,7 +101,7 @@ gold 必须比较完整集合，额外邻居即失败。`py_nonresolved_call_edg
 
 ## 6. 覆盖清单和 CI 门禁
 
-创建 `tests/p0/python/p0-python-coverage.json`，逐项登记 P0-G01、P0-G02、P0-G03、P0-G04、P0-G06、P0-G07；P0-G05 标记为 `not_applicable` 并注明 Python 无 `implements` 语法边。
+创建 `tests/p0/python/p0-python-coverage.json`，逐项登记 P0-G01、P0-G02、P0-G03、P0-G04、P0-G07；P0-G05 标记为 `not_applicable` 并注明 Python 无 `implements` 语法边。
 
 ```json
 {
@@ -130,14 +128,13 @@ CI 必须失败于任一情形：
 2. case 未被 E2E 测试加载；
 3. 适用能力存在 `missing` 或 `partial`；
 4. case 指向的 qname 不在公共 fixture 仓库中；
-5. `all` case 不等于具体 edge kind 的去重并集；
-6. 负向 call case 返回了未声明的 resolved 邻居。
+5. 负向 call case 返回了未声明的 resolved 邻居。
 
 ## 7. AI 执行顺序
 
 1. 阅读现有 `query_graph` 公开 API 和 Python 索引配置，确认实际 qname、响应 schema 与 fixture 的 `src` layout；不要修改产品 API。
 2. 建立 `tests/p0/python/` 目录、公共 `fixture_repo` 和覆盖清单；先登记第 3 节全部 case，初始状态设为 `missing`。
-3. 在公共 fixture 中添加模块和类，先完成 `call`、`contains`、`import`、`extends`，再补 `all`、查询契约和负向 case。
+3. 在公共 fixture 中添加模块和类，先完成 `call`、`contains`、`import`、`extends`，再补查询契约和负向 case。
 4. 实现 suite-scoped E2E harness：只建库/索引一次，循环加载 JSON 并调用公开 `query_graph`。
 5. case 通过 E2E 后才将清单项标为 `covered`；计算并报告 Resolved Edge Recall、Resolved Edge Precision、Negative Edge Correctness 与 Case Coverage。
 6. 只有所有适用 Python P0 项均通过，才能交付 Python P0 Query 测试基座。

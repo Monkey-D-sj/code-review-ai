@@ -22,7 +22,6 @@
 | `import` | 是 | 普通 import、alias 不存在的 Java import、唯一可解析 wildcard import；static import 只作为 call 解析场景 |
 | `extends` | 是 | class extends class、interface extends interface、跨 package 继承 |
 | `implements` | 是 | class implements 一个或多个 interface、跨 package 实现 |
-| `all` | 是 | 同一 qname 至少拥有两种以上 resolved 边时的去重聚合 |
 
 ## 3. Java Query P0 case 清单
 
@@ -39,7 +38,6 @@
 | `java_import_edges` | `import` | 普通 import、跨 package import、唯一命中 wildcard import | 源模块/package 的 `import` out 邻居指向真实仓库内目标 |
 | `java_extends_edges` | `extends` | class extends class、interface extends interface、跨 package base type | Child 的 `extends` out 邻居和 Base 的 `in` 邻居正确 |
 | `java_implements_edges` | `implements` | class implements 一个/多个 interface、跨 package interface | 实现类的 `implements` out 邻居及 interface 的 `in` 邻居正确 |
-| `java_all_edges` | `all` | 同一节点同时拥有 call/contains/import/extends/implements 中至少两类边 | `all` 等于具体 resolved edge kind 查询结果的去重并集 |
 | `java_query_contract` | 公开查询契约 | 已存在节点、不存在节点、多个邻居 | `in/out/both`、`max_per_dir`、not found、非法 edge kind/direction 的结果或错误正确 |
 | `java_nonresolved_call_edges` | `call` 负例 | `Class.forName(name)`、`getMethod(name).invoke(obj)`、`Proxy`/动态代理、函数式接口参数但未直接调用 | 仅返回场景内其余正常 resolved 邻居；不能凭反射、代理或参数传递虚构 target |
 
@@ -128,14 +126,13 @@ CI 必须失败于任一情形：
 2. case 未被 E2E 测试加载；
 3. 任一适用能力存在 `missing` 或 `partial`；
 4. case 指向的 qname 不在公共 fixture 仓库中；
-5. `all` case 不等于具体 edge kind 的去重并集；
-6. 负向 call case 返回了未声明的 resolved 邻居。
+5. 负向 call case 返回了未声明的 resolved 邻居。
 
 ## 7. AI 执行顺序
 
 1. 阅读现有 `query_graph` 公开 API 和 Java 索引配置，先建立一个最小 Java 文件并确认实际 qname 和响应 schema；不要修改产品 API。
 2. 建立 `tests/p0/java/` 目录、公共 `fixture_repo` 和覆盖清单；先登记第 3 节全部 case，初始状态设为 `missing`。
-3. 在公共 fixture 中添加 package、class 和 interface，先完成 `call`、`contains`、`import`、`extends`、`implements`，再补 `all`、查询契约和负向 case。
+3. 在公共 fixture 中添加 package、class 和 interface，先完成 `call`、`contains`、`import`、`extends`、`implements`，再补查询契约和负向 case。
 4. 实现 suite-scoped E2E harness：只建库/索引一次，循环加载 JSON 并调用公开 `query_graph`。
 5. case 通过 E2E 后才将清单项标为 `covered`；计算并报告 Resolved Edge Recall、Resolved Edge Precision、Negative Edge Correctness 与 Case Coverage。
 6. 只有所有适用 Java P0 项均通过，才能交付 Java P0 Query 测试基座。

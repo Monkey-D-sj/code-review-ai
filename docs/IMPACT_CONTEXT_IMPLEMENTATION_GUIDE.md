@@ -6,6 +6,8 @@
 >
 > 目标：逐步实现 Python、TypeScript/JavaScript、Java 的节点上下文召回，同时保证不确定关系不会污染确定调用图。
 
+> ⚠️ **与代码的分歧**：本指南描述的 Phase 6「semantic 边 + `register_semantic_rule` allow-list 门禁」已决定并入 `resolved`。确定性框架推断（DI、路由、单实现派发）一律按 `resolved` 产出并用 `origin`/`rule_id` 标注 provenance；歧义推断在产出端降级 `candidate`。`traversal.is_traversable` 只认 `resolution == "resolved"`，rule_id 不再参与遍历门禁。见 `EDGE_RESOLUTIONS.md` §3。下文中所有 semantic 描述按此处理。
+
 ## 1. 实施原则
 
 ### 1.1 不做一次性重写

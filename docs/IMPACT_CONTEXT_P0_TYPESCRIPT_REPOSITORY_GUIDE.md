@@ -17,7 +17,7 @@
 
 | 验证方式 | 本轮内容 |
 |---|---|
-| 完整服务 E2E | `call`、`contains`、`import`、`extends`、`implements`、`all`，以及方向和输入校验 |
+| 完整服务 E2E | `call`、`contains`、`import`、`extends`、`implements`，以及方向和输入校验 |
 
 case 直接给出待查询 qname 和 `edge_kind`。
 
@@ -32,7 +32,6 @@ case 直接给出待查询 qname 和 `edge_kind`。
 | `ts_import_edges` | `import` | ESM named/default/namespace/alias/side-effect import、相对路径、`index`、barrel、CJS `require()`、`module.exports`、`import = require()` | 模块节点的 `import` out 邻居指向真实仓库模块 |
 | `ts_extends_edges` | `extends` | `class Child extends Base`，以及多层 extends | Child 的 `extends` out 邻居及 Base 的 in 邻居正确 |
 | `ts_implements_edges` | `implements` | `class Worker implements Runnable`，一个 class 可 implements 多 interface | 实现类的 `implements` out 邻居及 interface 的 in 邻居正确 |
-| `ts_all_edges` | `all` | 同一节点同时拥有 call/contains/import/extends/implements 中至少两类边 | `all` 等于具体 resolved 边查询结果的去重并集 |
 | `ts_query_contract` | 公开查询契约 | 已存在节点和不存在节点；多个邻居 | `in/out/both`、`max_per_dir`、not found、非法 edge kind/direction 的结果或错误正确 |
 | `ts_nonresolved_call_edges` | `call` 负例 | `obj[name]()`、`Reflect.get(obj, name)()`、将函数作为参数传入但未直接调用 | 不返回伪造的 resolved `call` 邻居；case 标明无法唯一确定的原因 |
 
@@ -123,8 +122,7 @@ gold 必须比较完整集合，而不仅是“包含一个正确结果”。额
 3. coverage 清单包含 `missing` 或 `partial`；
 4. 清单存在没有公共仓库中 changed symbol 或 E2E 测试函数的 Query P0 条目；
 5. 测试检查内部组件而没有通过 `query_graph`；
-6. `all` case 的邻居不等于具体 edge kind 查询结果的去重并集。
-7. 任一负向 call case 返回了未声明的 resolved 邻居。
+6. 任一负向 call case 返回了未声明的 resolved 邻居。
 
 ## 7. AI 执行顺序
 
