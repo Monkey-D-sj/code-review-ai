@@ -1,12 +1,3 @@
 {
-  "mcpServers": {
-    "code-review-ai": {
-      "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/Monkey-D-sj/code-review-ai",
-        "code-review-ai-mcp"
-      ]
-    }
-  }
+  "mcpServers": {}
 }
