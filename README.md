@@ -261,6 +261,10 @@ Each case has one structured `gold` object shared by two independent score layer
 the agent. Empty gold dimensions are not applicable rather than zero. Legacy
 `gold_findings`/`gold_files` manifests remain loadable for old reports.
 
+See [docs/EVALUATION_AUTHORING_GUIDE.md](docs/EVALUATION_AUTHORING_GUIDE.md) for
+the case-backend authoring workflow, Gold annotation rules, validation commands,
+and report interpretation.
+
 ### Visualization (`graph`)
 
 Export interactive HTML graphs of the call structure:
