@@ -48,25 +48,6 @@ def test_cli_query_graph(tmp_path, capsys):
     assert [n["qname"] for n in data["in"]] == [Q("app", "main")]
 
 
-def test_cli_benchmark_writes_report(tmp_path):
-    cases = tmp_path / "cases.json"
-    cases.write_text(json.dumps([{
-        "id": "login-change",
-        "changed_symbols": [Q("auth", "login")],
-        "gold_files": ["auth.py", "app.py"],
-    }]), encoding="utf-8")
-    output = tmp_path / "report.json"
-
-    code = main(["benchmark", "--repo", FIX,
-                 "--db", str(tmp_path / "benchmark.db"),
-                 "--cases", str(cases), "--top-k", "5",
-                 "--out", str(output)])
-
-    assert code == 0
-    report = json.loads(output.read_text(encoding="utf-8"))
-    assert report["aggregate"]["macro_patch_file_recall_at_k"] == 1.0
-
-
 def test_cli_agent_eval_dispatches_and_writes_report(tmp_path, monkeypatch):
     cases = tmp_path / "agent-cases.json"
     cases.write_text(json.dumps([{

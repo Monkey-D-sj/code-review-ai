@@ -1,7 +1,0 @@
-[
-  {
-    "id": "replace-with-pr-or-swe-bench-instance-id",
-    "changed_symbols": ["auth::login"],
-    "gold_files": ["auth.py", "app.py"]
-  }
-]

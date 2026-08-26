@@ -238,47 +238,6 @@ to identifiers only traversal surfaces (a keyword visible in the diff or the hin
 be paraphrased instead of traced), and each answer is capped at 3 findings so f1 does
 not turn into a verbosity measure.
 
-## Historical-change benchmark
-
-Measure whether impact queries recover the files touched by known historical
-fixes. A manifest is a JSON array; each case identifies the symbols changed by
-the fix and the production/test files from the real patch:
-
-```json
-[
-  {
-    "id": "pallets__flask-5014",
-    "changed_symbols": ["flask.app::Flask.make_response"],
-    "gold_files": ["src/flask/app.py", "tests/test_basic.py"]
-  }
-]
-```
-
-Check out the repository at the historical base commit, then run:
-
-```bash
-code-review-ai benchmark --repo ../flask --cases cases/flask.json \
-  --db .code-review-ai/flask.db --top-k 10 -o results/flask.json
-```
-
-The report includes indexing time and database size, call-edge resolution
-distribution, symbol-found rate, per-case query latency, and historical patch
-file Recall@K/Precision@K. `examples/benchmark-cases.example.json` is a starter manifest.
-Patch files are an observable proxy for impact, not a complete ground truth;
-label the metric **historical patch file recall** when reporting results.
-
-For commits changing two or more production files, the same run also performs
-leave-one-production-file-out evaluation. Each fold uses one changed file's
-symbols as the only seed, removes that seed file from candidates, and treats
-the commit's other changed production files as hidden targets. Reports expose
-`production_file_eligible_cases`, `production_file_folds`, and macro related-
-production-file Recall@K/Precision@K. Both test and production evaluations also
-report Recall@All, Precision@All, and full candidate counts. Recall@All measures
-graph coverage using a benchmark query limit equal to the full indexed node
-count; Top-K measures whether ordering and context budgets surface the answer
-early. Single-production-file commits are not included in production metric
-denominators.
-
 ### Visualization (`graph`)
 
 Export interactive HTML graphs of the call structure:

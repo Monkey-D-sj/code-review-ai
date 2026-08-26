@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 from code_review_ai.changes import build_change_summary, detect_changed_symbols
-from code_review_ai.benchmark import load_cases, run_benchmark
 from code_review_ai.agent_eval import (MODES, load_agent_cases,
                                        preflight_agent_eval,
                                        parse_agent_command, run_agent_eval,
@@ -160,11 +159,6 @@ def main(argv: list[str] | None = None) -> int:
     gp.add_argument("-n", "--max-nodes", type=int, default=200)
     gp.add_argument("-m", "--mode", default="communities",
                     choices=["communities", "graph", "flow"])
-    bp = sub.add_parser("benchmark")
-    _add_common(bp)
-    bp.add_argument("--cases", required=True)
-    bp.add_argument("--top-k", type=int, default=10)
-    bp.add_argument("-o", "--out")
     ae = sub.add_parser("agent-eval")
     _add_common(ae)
     ae.add_argument("--cases", required=True)
@@ -445,13 +439,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"installed {path}")
     elif args.cmd == "graph":
         export_graph(args.db, args.out, args.max_nodes, args.mode)
-    elif args.cmd == "benchmark":
-        try:
-            payload = run_benchmark(cfg, conn, load_cases(args.cases), args.top_k)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        _write_json(payload, args.out)
     elif args.cmd == "agent-eval":
         try:
             cases = select_agent_cases(load_agent_cases(args.cases), args.case_ids)
