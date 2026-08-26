@@ -18,7 +18,7 @@ from pathlib import Path
 from code_review_ai.agent_eval import (
     AgentExecutor, AgentRun, DEFAULT_DIFFICULTY, DIFFICULTIES, GoldFinding,
     _execute_agent, _mode_metrics,
-    _parse_agent_output, _parse_gold, _score, _string_values, _usage,
+    _parse_agent_output, _score, _string_values, _usage,
     SHARED_REVIEW_POLICY,
 )
 from code_review_ai.agent_adapter import MCP_TOOL_NAMES
@@ -28,6 +28,14 @@ from code_review_ai.changes import (
 )
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
+from code_review_ai.eval_gold import (
+    EvaluationGold,
+    GoldContext,
+    evaluation_gold_to_dict,
+    parse_evaluation_gold,
+    score_agent_review,
+    score_context,
+)
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
 
@@ -91,6 +99,11 @@ class FullAgentCase:
     difficulty: str = DEFAULT_DIFFICULTY
     patch: str | None = None
     source_dir: str | None = None
+    gold_context: GoldContext = GoldContext()
+
+    @property
+    def gold(self) -> EvaluationGold:
+        return EvaluationGold(self.gold_findings, self.gold_context)
 
 
 @dataclass(frozen=True)
@@ -118,7 +131,7 @@ def _parse_case(record: object, position: int) -> FullAgentCase:
     # Case-specific prose. Optional, and not injected unless the run is hinted.
     # Legacy manifests spell this key ``prompt``.
     hint = record.get("hint", record.get("prompt", ""))
-    golds = record.get("gold_findings")
+    evaluation_gold = parse_evaluation_gold(record, str(case_id))
     complexity_tags = record.get("complexity_tags", [])
     difficulty = record.get("difficulty", DEFAULT_DIFFICULTY)
     patch = record.get("patch")
@@ -154,8 +167,6 @@ def _parse_case(record: object, position: int) -> FullAgentCase:
             commit = ""
         if not isinstance(paths, list):
             paths = []
-    if not isinstance(golds, list) or not golds:
-        raise ValueError(f"case {case_id} requires gold_findings")
     if not isinstance(complexity_tags, list) or not all(
             isinstance(tag, str) and tag for tag in complexity_tags):
         raise ValueError(f"case {case_id} has invalid complexity_tags")
@@ -163,10 +174,10 @@ def _parse_case(record: object, position: int) -> FullAgentCase:
         raise ValueError(
             f"case {case_id} has invalid difficulty; expected one of "
             f"{', '.join(DIFFICULTIES)}")
-    findings = tuple(_parse_gold(gold, case_id) for gold in golds)
     return FullAgentCase(case_id, repo_name, repo_url, commit, tuple(paths),
-                         hint, findings, tuple(complexity_tags), difficulty,
-                         patch, source_dir)
+                         hint, evaluation_gold.root_causes,
+                         tuple(complexity_tags), difficulty, patch, source_dir,
+                         evaluation_gold.context)
 
 
 def select_full_agent_cases(cases: list[FullAgentCase],
@@ -267,6 +278,110 @@ def _prepare_case_index(item: PreparedCase, work_dir: str,
     }
 
 
+def _changed_symbols(item: PreparedCase, config) -> list[str]:
+    if item.case.patch is not None:
+        return detect_changed_symbols_from_patch(config, item.diff)
+    return detect_changed_symbols(config)
+
+
+def _graph_retrieval_result(item: PreparedCase, setup: dict) -> dict:
+    config = _case_config(item, setup["db_path"])
+    conn = connect(setup["db_path"])
+    try:
+        symbols = _changed_symbols(item, config)
+        business = get_impact(
+            conn, symbols, tests="exclude", include_signatures=False,
+            include_call_sites=False)
+        tests = get_impact(
+            conn, symbols, tests="only", include_signatures=False,
+            include_call_sites=False)
+        evidence = _graph_evidence(conn, config.repo_path, business, tests)
+    finally:
+        conn.close()
+    found = [impact["symbol"] for impact in business if impact["found"]]
+    return {
+        "case_id": item.case.case_id,
+        "changed_symbols": symbols,
+        "found_symbols": found,
+        "evidence": evidence,
+        "score": score_context(evidence, item.case.gold_context),
+    }
+
+
+def _graph_evidence(conn, repo_path: str, business: list[dict],
+                    tests: list[dict]) -> dict[str, list[str]]:
+    symbols: list[str] = []
+    files: list[str] = []
+    entries: list[str] = []
+    test_targets: list[str] = []
+    for impact in business:
+        symbols.append(impact["symbol"])
+        files.extend(_symbol_files(conn, repo_path, [impact["symbol"]]))
+        entries.extend(impact["affected_entries"])
+        for direction in ("upstream", "downstream"):
+            symbols.extend(node["qname"] for node in impact[direction])
+            files.extend(_relative_path(repo_path, node["file"])
+                         for node in impact[direction] if node["file"])
+    for impact in tests:
+        for direction in ("upstream", "downstream"):
+            test_targets.extend(node["qname"] for node in impact[direction])
+            test_targets.extend(_relative_path(repo_path, node["file"])
+                                for node in impact[direction] if node["file"])
+        test_targets.extend(impact["affected_entries"])
+    return {"symbols": _unique(symbols), "files": _unique(files),
+            "entries": _unique(entries), "tests": _unique(test_targets)}
+
+
+def _symbol_files(conn, repo_path: str, symbols: list[str]) -> list[str]:
+    files = []
+    for symbol in symbols:
+        row = conn.execute(
+            "SELECT file_path FROM nodes WHERE qualified_name=?", (symbol,)
+        ).fetchone()
+        if row and row["file_path"]:
+            files.append(_relative_path(repo_path, row["file_path"]))
+    return files
+
+
+def _relative_path(repo_path: str, file_path: str) -> str:
+    path = Path(file_path)
+    try:
+        return path.resolve().relative_to(Path(repo_path).resolve()).as_posix()
+    except ValueError:
+        return str(path).replace("\\", "/").removeprefix("./")
+
+
+def _unique(values) -> list[str]:
+    return list(dict.fromkeys(value for value in values if value))
+
+
+def _graph_retrieval_aggregate(results: list[dict]) -> dict:
+    dimensions = {}
+    for name in ("symbols", "files", "entries", "tests"):
+        applicable = [result["score"][name] for result in results
+                      if result["score"][name]["applicable"]]
+        dimensions[name] = {
+            "applicable_cases": len(applicable),
+            "macro_precision": _nullable_mean(applicable, "precision"),
+            "macro_recall": _nullable_mean(applicable, "recall"),
+            "macro_f1": _nullable_mean(applicable, "f1"),
+        }
+    negatives = [result["score"]["hard_negatives"] for result in results
+                 if result["score"]["hard_negatives"]["applicable"]]
+    changed = sum(len(result["changed_symbols"]) for result in results)
+    found = sum(len(result["found_symbols"]) for result in results)
+    return {"case_count": len(results), "symbol_found_rate":
+            round(found / changed, 4) if changed else 0.0,
+            "dimensions": dimensions,
+            "hard_negative_correctness": _nullable_mean(
+                negatives, "correctness")}
+
+
+def _nullable_mean(records: list[dict], key: str) -> float | None:
+    values = [record[key] for record in records if record.get(key) is not None]
+    return round(sum(values) / len(values), 4) if values else None
+
+
 def preflight_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
                               work_dir: str,
                               local_repo: str | None = None) -> dict:
@@ -275,37 +390,31 @@ def preflight_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
     results = []
     for item in prepared:
         setup = _prepare_case_index(item, work_dir, "preflight")
-        config = _case_config(item, setup["db_path"])
-        conn = connect(setup["db_path"])
-        if item.case.patch is not None:
-            # Patch-mode scratch repo has no git history to diff against;
-            # attribute the inline diff's hunks to symbols instead.
-            symbols = detect_changed_symbols_from_patch(config, item.diff)
-        else:
-            symbols = detect_changed_symbols(config)
-        impacts = get_impact(conn, symbols, tests="include")
+        retrieval = _graph_retrieval_result(item, setup)
         results.append({
             "case_id": item.case.case_id, "repo_name": item.case.repo_name,
             "source_commit": item.case.source_commit,
             "complexity_tags": list(item.case.complexity_tags),
             "difficulty": item.case.difficulty,
+            "gold": evaluation_gold_to_dict(item.case.gold),
             "repo_path": item.repo_path, "diff_characters": len(item.diff),
-            "changed_symbols": symbols,
-            "found_symbols": [impact["symbol"] for impact in impacts
-                              if impact["found"]],
+            "changed_symbols": retrieval["changed_symbols"],
+            "found_symbols": retrieval["found_symbols"],
+            "graph_retrieval": retrieval,
             "index": {key: setup[key] for key in (
                 "nodes", "edges", "flows", "elapsed_ms")},
         })
-        conn.close()
-    total_symbols = sum(len(result["changed_symbols"]) for result in results)
-    found = sum(len(result["found_symbols"]) for result in results)
-    return {"schema_version": 2, "dry_run": True,
+    retrievals = [result["graph_retrieval"] for result in results]
+    retrieval_aggregate = _graph_retrieval_aggregate(retrievals)
+    return {"schema_version": 2, "gold_schema_version": 1, "dry_run": True,
             "evaluation": "full_project_online_tool_use", "cases": results,
             "aggregate": {"case_count": len(results),
                           "difficulty_counts": _difficulty_counts(cases),
-                          "changed_symbols": total_symbols,
-                          "symbol_found_rate": round(found / total_symbols, 4)
-                          if total_symbols else 0.0}}
+                          "changed_symbols": sum(len(result["changed_symbols"])
+                                                 for result in results),
+                          "symbol_found_rate": retrieval_aggregate[
+                              "symbol_found_rate"],
+                          "graph_retrieval": retrieval_aggregate}}
 
 
 def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
@@ -321,6 +430,11 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
                                         local_repo=local_repo)
     index_setups = {
         item.case.case_id: _prepare_case_index(item, work_dir, "online")
+        for item in prepared
+    }
+    retrievals = {
+        item.case.case_id: _graph_retrieval_result(
+            item, index_setups[item.case.case_id])
         for item in prepared
     }
     execute_agent = executor or _execute_agent
@@ -340,7 +454,7 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
         with ThreadPoolExecutor(max_workers=workers) as pool:
             runs = list(pool.map(execute, jobs))
     aggregates = _full_aggregates(runs, modes)
-    return {"schema_version": 2,
+    return {"schema_version": 2, "gold_schema_version": 1,
             "evaluation": "full_project_online_tool_use",
             "baseline_mode": "native_agent",
             "modes": list(modes), "repetitions": repetitions,
@@ -348,6 +462,11 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
             "guidance_mode": "stripped" if _guidance_stripped() else "full",
             "workers": workers, "aggregate": aggregates, "runs": runs,
             "difficulty_counts": _difficulty_counts(cases),
+            "graph_retrieval": {
+                "aggregate": _graph_retrieval_aggregate(
+                    list(retrievals.values())),
+                "cases": list(retrievals.values()),
+            },
             "index_setup": list(index_setups.values()),
             "cases": [{"id": item.case.case_id,
                        "repo_name": item.case.repo_name,
@@ -355,6 +474,7 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
                        "source_commit": item.case.source_commit,
                        "difficulty": item.case.difficulty,
                        "complexity_tags": list(item.case.complexity_tags),
+                       "gold": evaluation_gold_to_dict(item.case.gold),
                        "repo_path": item.repo_path} for item in prepared]}
 
 
@@ -378,7 +498,9 @@ def rescore_full_agent_report(report_path: str, cases: list[FullAgentCase],
         transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
         payload = transcript.get("parsed_output")
         predictions = payload.get("findings", []) if isinstance(payload, dict) else []
+        payload = payload if isinstance(payload, dict) else {}
         run.update(_score(predictions, by_id[case_id].gold_findings))
+        run["agent_review"] = score_agent_review(payload, by_id[case_id].gold)
         run["difficulty"] = by_id[case_id].difficulty
         run["complexity_tags"] = list(by_id[case_id].complexity_tags)
         calls = [call for call in run.get("tool_calls", [])
@@ -431,7 +553,20 @@ def _full_aggregates(runs: list[dict], modes: tuple[str, ...]) -> dict:
                 "get_symbol_detail",
             )
         }
+        aggregate["agent_review"] = _agent_review_aggregate(selected)
     return aggregates
+
+
+def _agent_review_aggregate(runs: list[dict]) -> dict:
+    contexts = [run.get("agent_review", {}).get("affected_context", {})
+                for run in runs]
+    applicable = [context.get("macro_recall") for context in contexts
+                  if context.get("macro_recall") is not None]
+    return {
+        "macro_root_cause_f1": _mean([run["f1"] for run in runs]),
+        "macro_affected_context_recall": round(
+            sum(applicable) / len(applicable), 4) if applicable else None,
+    }
 
 
 def _difficulty_counts(cases: list[FullAgentCase]) -> dict[str, int]:
@@ -460,6 +595,7 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
     run = executor(command, prompt, item.repo_path, environment, timeout_seconds)
     payload, parse_error = _parse_agent_output(run.stdout)
     score = _score(payload.get("findings", []), item.case.gold_findings)
+    agent_review = score_agent_review(payload, item.case.gold)
     result = {
         "case_id": item.case.case_id, "repo_name": item.case.repo_name,
         "mode": mode, "repetition": repetition,
@@ -475,6 +611,7 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
         "failure_reason": payload.get("failure_reason")
         if isinstance(payload, dict) else None,
         **score,
+        "agent_review": agent_review,
         "files_read": _string_values(payload.get("files_read")),
         "unique_files_touched": _string_values(
             payload.get("unique_files_touched") or payload.get("files_read")),
@@ -531,6 +668,8 @@ def _prompt(item: PreparedCase, mode: str, hinted: bool = False) -> str:
     contract = {
         "findings": [{"file": "path", "line": 1, "title": "...",
                       "description": "..."}],
+        "affected_symbols": [], "affected_files": [],
+        "affected_entries": [], "tests": [],
         "files_read": [], "tool_calls": [],
     }
     if mode == "full_project_agent":

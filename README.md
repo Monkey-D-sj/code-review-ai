@@ -238,6 +238,29 @@ to identifiers only traversal surfaces (a keyword visible in the diff or the hin
 be paraphrased instead of traced), and each answer is capped at 3 findings so f1 does
 not turn into a verbosity measure.
 
+Each case has one structured `gold` object shared by two independent score layers:
+
+```json
+{
+  "gold": {
+    "root_causes": [{
+      "id": "bug-id", "fix_file": "app/service.py",
+      "mechanism_terms": ["Caller", "failure"], "min_matches": 2
+    }],
+    "context": {
+      "symbols": [], "files": ["app/service.py"],
+      "entries": [], "tests": [],
+      "hard_negatives": {"symbols": [], "files": []}
+    }
+  }
+}
+```
+
+`graph_retrieval` scores symbols/files/entries/tests and explicit hard negatives.
+`agent_review` scores root causes plus the structured affected context returned by
+the agent. Empty gold dimensions are not applicable rather than zero. Legacy
+`gold_findings`/`gold_files` manifests remain loadable for old reports.
+
 ### Visualization (`graph`)
 
 Export interactive HTML graphs of the call structure:

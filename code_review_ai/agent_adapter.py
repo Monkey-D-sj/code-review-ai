@@ -29,10 +29,15 @@ FINDING_SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "affected_symbols": {"type": "array", "items": {"type": "string"}},
+        "affected_files": {"type": "array", "items": {"type": "string"}},
+        "affected_entries": {"type": "array", "items": {"type": "string"}},
+        "tests": {"type": "array", "items": {"type": "string"}},
         "files_read": {"type": "array", "items": {"type": "string"}},
         "tool_calls": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["findings", "files_read", "tool_calls"],
+    "required": ["findings", "affected_symbols", "affected_files",
+                 "affected_entries", "tests", "files_read", "tool_calls"],
     "additionalProperties": False,
 }
 

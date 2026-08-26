@@ -138,12 +138,17 @@ def evaluate_prepared_plans(
         record = manifest_by_id[item.case.case_id]
         evidence_files = set(plan["metrics"]["evidence_files"])
         mutation_files = set(record.get("mutation_paths", []))
-        gold_files = set(record.get("gold_files", []))
-        gold_symbols = set(record.get("gold_symbols", []))
+        gold_context = record.get("gold", {}).get("context", {}) \
+            if isinstance(record.get("gold"), dict) else {}
+        gold_files = set(gold_context.get(
+            "files", record.get("gold_files", [])))
+        gold_symbols = set(gold_context.get(
+            "symbols", record.get("gold_symbols", [])))
         evidence_symbols = {
             entry.get("qname") for entry in plan["evidence"]
             if entry.get("qname")
         }
+        gold_context_file_recall = _recall(evidence_files, gold_files)
         result = {
             "case_id": item.case.case_id,
             "route": plan["route"],
@@ -152,7 +157,9 @@ def evaluate_prepared_plans(
             "truncated": plan["metrics"]["truncated"],
             "evidence_files": sorted(evidence_files),
             "mutation_file_recall": _recall(evidence_files, mutation_files),
-            "gold_test_file_recall": _recall(evidence_files, gold_files),
+            "gold_context_file_recall": gold_context_file_recall,
+            # Compatibility alias for reports produced before unified Gold.
+            "gold_test_file_recall": gold_context_file_recall,
             "gold_symbol_recall": (_recall(evidence_symbols, gold_symbols)
                                    if gold_symbols else None),
             "duplicate_file_entries": plan["metrics"]["duplicate_file_entries"],
@@ -185,9 +192,13 @@ def evaluate_prepared_plans(
                 (item["serialized_chars"] for item in results), default=0),
             "macro_mutation_file_recall": _mean(
                 [item["mutation_file_recall"] for item in results]),
+            "macro_gold_context_file_recall": _mean(
+                [item["gold_context_file_recall"] for item in results
+                 if item["gold_context_file_recall"] is not None]),
+            # Compatibility alias for reports produced before unified Gold.
             "macro_gold_test_file_recall": _mean(
-                [item["gold_test_file_recall"] for item in results
-                 if item["gold_test_file_recall"] is not None]),
+                [item["gold_context_file_recall"] for item in results
+                 if item["gold_context_file_recall"] is not None]),
             "route_accuracy": (_mean(
                 [float(item["route_correct"]) for item in route_labels])
                 if route_labels else None),

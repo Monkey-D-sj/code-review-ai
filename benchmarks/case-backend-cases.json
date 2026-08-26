@@ -8,23 +8,33 @@
     "source_dir": "full_agent_eval/case-backend",
     "patch": "diff --git a/app/utils/common_util.py b/app/utils/common_util.py\nindex 1524fad..2cdc526 100644\n--- a/app/utils/common_util.py\n+++ b/app/utils/common_util.py\n@@ -102,11 +102,6 @@ def search_to_dict(search: Any, default: Any = None) -> dict | None:\n         return default\n     d = search.model_dump(exclude_none=True)\n \n-    # 处理数组格式的时间范围参数 → (\"between\", [start, end])\n-    for key in list(d.keys()):\n-        if isinstance(d[key], list) and len(d[key]) == 2 and key.endswith(\"_time\"):\n-            d[key] = (\"between\", d[key])\n-\n     for field_name, field_info in search.model_fields.items():\n         if field_name not in d:\n             continue\n",
     "hint": "共享的查询参数序列化函数原先会把成对的时间范围参数合并成区间条件，本次改动删除了这段归并逻辑。",
-    "gold_findings": [
-      {
+    "gold": {
+      "root_causes": [{
         "id": "time-range-filter-crashes-list-api",
-        "file": "app/api/v1/module_system/log/service.py",
+        "fix_file": "app/utils/common_util.py",
         "alternate_files": [
-          "app/core/base_crud.py",
-          "app/utils/common_util.py"
+          "app/api/v1/module_system/log/service.py",
+          "app/core/base_crud.py"
         ],
-        "keywords": [
+        "mechanism_terms": [
           "BaseQueryParam",
           "LoginLogService",
           "OperationLogService",
           "base_schema"
         ],
         "min_matches": 2
+      }],
+      "context": {
+        "symbols": [],
+        "files": [
+          "app/api/v1/module_system/log/service.py",
+          "app/utils/common_util.py"
+        ],
+        "entries": [],
+        "tests": [],
+        "hard_negatives": {"symbols": [], "files": []}
       }
-    ],
+    },
     "complexity_tags": [
       "shared-util",
       "cross-module",
@@ -34,10 +44,6 @@
     "difficulty": "hard",
     "changed_symbols": [
       "app.utils.common_util::search_to_dict"
-    ],
-    "gold_files": [
-      "app/api/v1/module_system/log/service.py",
-      "app/utils/common_util.py"
     ]
   },
   {
@@ -49,25 +55,35 @@
     "source_dir": "full_agent_eval/case-backend",
     "patch": "diff --git a/app/api/v1/module_storage/core/encrypt.py b/app/api/v1/module_storage/core/encrypt.py\nindex 5a504d4..31ec48f 100644\n--- a/app/api/v1/module_storage/core/encrypt.py\n+++ b/app/api/v1/module_storage/core/encrypt.py\n@@ -30,6 +30,6 @@ def decrypt_password(cipher: str | None) -> str:\n     if not cipher:\n         return \"\"\n     try:\n-        return _get_fernet().decrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n+        return _get_fernet().encrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n     except (InvalidToken, ValueError):\n         raise CustomException(msg=\"存储源密码解密失败，可能原因：SECRET_KEY 变更或数据损坏\")\n",
     "hint": "密码解密函数被改成了再次加密：调用方拿到的不再是明文，而是一段新的密文。",
-    "gold_findings": [
-      {
+    "gold": {
+      "root_causes": [{
         "id": "storage-password-re-encrypted-on-decrypt",
-        "file": "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+        "fix_file": "app/api/v1/module_storage/core/encrypt.py",
         "alternate_files": [
-          "app/api/v1/module_storage/core/encrypt.py",
+          "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
           "app/api/v1/module_storage/source/service.py",
           "app/api/v1/module_storage/file/service.py",
           "app/api/v1/module_storage/transfer/engine.py"
         ],
-        "keywords": [
+        "mechanism_terms": [
           "_resolve_storage_config",
           "decrypt_storage_password",
           "builtin_nodes",
           "module_task"
         ],
         "min_matches": 2
+      }],
+      "context": {
+        "symbols": [],
+        "files": [
+          "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+          "app/api/v1/module_storage/core/encrypt.py"
+        ],
+        "entries": [],
+        "tests": [],
+        "hard_negatives": {"symbols": [], "files": []}
       }
-    ],
+    },
     "complexity_tags": [
       "shared-util",
       "alias-import",
@@ -77,10 +93,6 @@
     "difficulty": "hard",
     "changed_symbols": [
       "app.api.v1.module_storage.core.encrypt::decrypt_password"
-    ],
-    "gold_files": [
-      "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
-      "app/api/v1/module_storage/core/encrypt.py"
     ]
   },
   {
@@ -94,27 +106,33 @@
     "changed_symbols": [
       "app.api.v1.module_storage.transfer.engine::execute_transfer_task"
     ],
-    "gold_files": [
-      "app/api/v1/module_storage/transfer/engine.py",
-      "app/api/v1/module_storage/transfer/service.py"
-    ],
     "hint": "单个步骤失败后，循环由中止改为继续执行下一个步骤，失败状态因此不再向上传播。",
-    "gold_findings": [
-      {
+    "gold": {
+      "root_causes": [{
         "id": "failed-transfer-step-never-aborts-task",
-        "file": "app/api/v1/module_storage/transfer/engine.py",
+        "fix_file": "app/api/v1/module_storage/transfer/engine.py",
         "alternate_files": [
           "app/api/v1/module_storage/transfer/service.py"
         ],
-        "keywords": [
+        "mechanism_terms": [
           "StorageTransferService",
           "_launch",
           "create_task",
           "asyncio"
         ],
         "min_matches": 2
+      }],
+      "context": {
+        "symbols": [],
+        "files": [
+          "app/api/v1/module_storage/transfer/engine.py",
+          "app/api/v1/module_storage/transfer/service.py"
+        ],
+        "entries": [],
+        "tests": [],
+        "hard_negatives": {"symbols": [], "files": []}
       }
-    ],
+    },
     "complexity_tags": [
       "error-handling",
       "state-machine",
@@ -134,25 +152,19 @@
     "changed_symbols": [
       "app.utils.common_util::search_to_dict"
     ],
-    "gold_files": [
-      "app/api/v1/module_storage/source/service.py",
-      "app/api/v1/module_system/dict/service.py",
-      "app/api/v1/module_system/role/service.py",
-      "app/api/v1/module_storage/transfer/service.py",
-      "app/utils/common_util.py"
-    ],
     "hint": "序列化时不再丢弃空值字段，因此值为空的查询参数也会进入最终的条件字典。",
-    "gold_findings": [
-      {
+    "gold": {
+      "root_causes": [{
         "id": "none-fields-leak-into-query-conditions",
-        "file": "app/api/v1/module_storage/source/service.py",
+        "fix_file": "app/utils/common_util.py",
         "alternate_files": [
+          "app/api/v1/module_storage/source/service.py",
           "app/api/v1/module_system/dict/service.py",
           "app/api/v1/module_system/role/service.py",
           "app/api/v1/module_storage/transfer/service.py",
           "app/utils/common_util.py"
         ],
-        "keywords": [
+        "mechanism_terms": [
           "StorageSourceService",
           "DictTypeService",
           "DictDataService",
@@ -160,8 +172,20 @@
           "StorageTransferService"
         ],
         "min_matches": 2
+      }],
+      "context": {
+        "symbols": [],
+        "files": [
+          "app/api/v1/module_storage/source/service.py",
+          "app/api/v1/module_system/dict/service.py",
+          "app/api/v1/module_system/role/service.py",
+          "app/api/v1/module_storage/transfer/service.py"
+        ],
+        "entries": [],
+        "tests": [],
+        "hard_negatives": {"symbols": [], "files": []}
       }
-    ],
+    },
     "complexity_tags": [
       "shared-util",
       "fan-in",
@@ -181,25 +205,19 @@
     "changed_symbols": [
       "app.api.v1.module_storage.core.encrypt::decrypt_password"
     ],
-    "gold_files": [
-      "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
-      "app/api/v1/module_storage/source/service.py",
-      "app/api/v1/module_storage/file/service.py",
-      "app/api/v1/module_storage/transfer/engine.py",
-      "app/api/v1/module_storage/core/encrypt.py"
-    ],
     "hint": "解密失败的分支由抛出异常改为返回空字符串，失败因此变得静默。",
-    "gold_findings": [
-      {
+    "gold": {
+      "root_causes": [{
         "id": "decrypt-failure-silently-returns-empty",
-        "file": "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+        "fix_file": "app/api/v1/module_storage/core/encrypt.py",
         "alternate_files": [
+          "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
           "app/api/v1/module_storage/source/service.py",
           "app/api/v1/module_storage/file/service.py",
           "app/api/v1/module_storage/transfer/engine.py",
           "app/api/v1/module_storage/core/encrypt.py"
         ],
-        "keywords": [
+        "mechanism_terms": [
           "_resolve_storage_config",
           "decrypt_storage_password",
           "StorageSourceService",
@@ -208,8 +226,20 @@
           "test_config"
         ],
         "min_matches": 2
+      }],
+      "context": {
+        "symbols": [],
+        "files": [
+          "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+          "app/api/v1/module_storage/source/service.py",
+          "app/api/v1/module_storage/file/service.py",
+          "app/api/v1/module_storage/transfer/engine.py"
+        ],
+        "entries": [],
+        "tests": [],
+        "hard_negatives": {"symbols": [], "files": []}
       }
-    ],
+    },
     "complexity_tags": [
       "shared-util",
       "silent-failure",
@@ -229,27 +259,33 @@
     "changed_symbols": [
       "app.api.v1.module_storage.core.encrypt::encrypt_password"
     ],
-    "gold_files": [
-      "app/api/v1/module_storage/source/service.py",
-      "app/api/v1/module_storage/core/encrypt.py"
-    ],
     "hint": "加密函数被改成了解密：传入明文时会直接抛出异常。",
-    "gold_findings": [
-      {
+    "gold": {
+      "root_causes": [{
         "id": "password-encrypt-now-decrypts",
-        "file": "app/api/v1/module_storage/source/service.py",
+        "fix_file": "app/api/v1/module_storage/core/encrypt.py",
         "alternate_files": [
-          "app/api/v1/module_storage/core/encrypt.py"
+          "app/api/v1/module_storage/source/service.py"
         ],
-        "keywords": [
+        "mechanism_terms": [
           "StorageSourceService",
           "StorageSourceCRUD",
           "create",
           "update"
         ],
         "min_matches": 2
+      }],
+      "context": {
+        "symbols": [],
+        "files": [
+          "app/api/v1/module_storage/source/service.py",
+          "app/api/v1/module_storage/core/encrypt.py"
+        ],
+        "entries": [],
+        "tests": [],
+        "hard_negatives": {"symbols": [], "files": []}
       }
-    ],
+    },
     "complexity_tags": [
       "shared-util",
       "hidden-caller",
@@ -268,27 +304,33 @@
     "changed_symbols": [
       "app.api.v1.module_storage.transfer.engine::_build_config"
     ],
-    "gold_files": [
-      "app/api/v1/module_storage/transfer/engine.py",
-      "app/api/v1/module_storage/transfer/service.py"
-    ],
     "hint": "构造适配器配置时不再对密码解密，配置里携带的是数据库中存储的密文。",
-    "gold_findings": [
-      {
+    "gold": {
+      "root_causes": [{
         "id": "transfer-config-passes-encrypted-password",
-        "file": "app/api/v1/module_storage/transfer/engine.py",
+        "fix_file": "app/api/v1/module_storage/transfer/engine.py",
         "alternate_files": [
           "app/api/v1/module_storage/transfer/service.py"
         ],
-        "keywords": [
+        "mechanism_terms": [
           "_run_step",
           "execute_transfer_task",
           "StorageTransferService",
           "_launch"
         ],
         "min_matches": 2
+      }],
+      "context": {
+        "symbols": [],
+        "files": [
+          "app/api/v1/module_storage/transfer/engine.py",
+          "app/api/v1/module_storage/transfer/service.py"
+        ],
+        "entries": [],
+        "tests": [],
+        "hard_negatives": {"symbols": [], "files": []}
       }
-    ],
+    },
     "complexity_tags": [
       "deep-chain",
       "cross-module",
@@ -307,27 +349,33 @@
     "changed_symbols": [
       "app.api.v1.module_storage.file.service::StorageFileService._get_source"
     ],
-    "gold_files": [
-      "app/api/v1/module_storage/file/service.py",
-      "app/api/v1/module_storage/source/service.py"
-    ],
     "hint": "查询可用存储源时传入的标识由解析出的值改成了空值，因此走的是兜底分支而不是指定的存储源。",
-    "gold_findings": [
-      {
+    "gold": {
+      "root_causes": [{
         "id": "file-ops-lookup-source-with-none-id",
-        "file": "app/api/v1/module_storage/file/service.py",
+        "fix_file": "app/api/v1/module_storage/file/service.py",
         "alternate_files": [
           "app/api/v1/module_storage/source/service.py"
         ],
-        "keywords": [
+        "mechanism_terms": [
           "copy_or_move",
           "get_url",
           "is_default",
           "target_id"
         ],
         "min_matches": 2
+      }],
+      "context": {
+        "symbols": [],
+        "files": [
+          "app/api/v1/module_storage/file/service.py",
+          "app/api/v1/module_storage/source/service.py"
+        ],
+        "entries": [],
+        "tests": [],
+        "hard_negatives": {"symbols": [], "files": []}
       }
-    ],
+    },
     "complexity_tags": [
       "null-argument",
       "cross-module",

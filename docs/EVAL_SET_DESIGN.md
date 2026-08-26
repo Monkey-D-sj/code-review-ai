@@ -314,6 +314,15 @@ def demo():
 
 ## 5. 评分与报告
 
+### 统一 Gold 与双层评分
+
+`case-backend` 每个 case 只维护一个 `gold`：`root_causes` 描述独立修复单元，
+`context` 描述应召回的 symbols/files/entries/tests 和显式 hard negatives。同一份
+gold 产生两组独立结果：`graph_retrieval` 只评价索引检索，`agent_review` 评价根因
+与 Agent 结构化报告的影响面。两组指标不能合并成一个 F1；没有标注的维度记为
+`not applicable`，不能用 0 填充。旧 `gold_findings`/`gold_files` 仅用于兼容历史
+manifest，不再作为 case-backend 的答案源。
+
 ### 指标
 
 - **token ratio** = native_tokens / graph_tokens,**仅在双方都 correct 时计算**;

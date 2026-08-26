@@ -18,6 +18,14 @@ from typing import Callable
 from code_review_ai.changes import detect_changed_symbols
 from code_review_ai.config import Config, load_config
 from code_review_ai.db import connect, init_schema
+from code_review_ai.eval_gold import (
+    EvaluationGold,
+    GoldContext,
+    GoldFinding,
+    parse_evaluation_gold,
+    score_agent_review,
+    score_root_causes,
+)
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
 from code_review_ai.parser import SOURCE_GLOBS, filter_excluded, list_source_files
@@ -37,21 +45,6 @@ _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 @dataclass(frozen=True)
-class GoldFinding:
-    finding_id: str
-    file: str
-    line_start: int | None
-    line_end: int | None
-    keywords: tuple[str, ...]
-    alternate_files: tuple[str, ...] = ()
-    # Minimum number of distinct keywords that must appear in the prediction
-    # text. 1 = the legacy OR-match (any single keyword scores). >1 forces a
-    # causal description: a finding that merely echoes a surface keyword (e.g.
-    # "timeout is None") without naming the failure mechanism scores nothing.
-    min_matches: int = 1
-
-
-@dataclass(frozen=True)
 class AgentEvalCase:
     case_id: str
     prompt: str
@@ -64,6 +57,11 @@ class AgentEvalCase:
     mutation_paths: tuple[str, ...] = ()
     complexity_tags: tuple[str, ...] = ()
     difficulty: str = DEFAULT_DIFFICULTY
+    gold_context: GoldContext = GoldContext()
+
+    @property
+    def gold(self) -> EvaluationGold:
+        return EvaluationGold(self.gold_findings, self.gold_context)
 
 
 @dataclass(frozen=True)
@@ -118,7 +116,7 @@ def _parse_case(record: object, position: int) -> AgentEvalCase:
     prompt = record.get("prompt", record.get("hint"))
     diff = record.get("diff", "")
     symbols = record.get("changed_symbols", [])
-    golds = record.get("gold_findings")
+    evaluation_gold = parse_evaluation_gold(record, str(case_id))
     valid_symbols = isinstance(symbols, list) and all(
         isinstance(symbol, str) and symbol for symbol in symbols)
     if not isinstance(case_id, str) or not case_id:
@@ -127,9 +125,6 @@ def _parse_case(record: object, position: int) -> AgentEvalCase:
         raise ValueError(f"case {case_id} requires a non-empty prompt")
     if not isinstance(diff, str) or not valid_symbols:
         raise ValueError(f"case {case_id} has invalid diff or changed_symbols")
-    if not isinstance(golds, list) or not golds:
-        raise ValueError(f"case {case_id} requires gold_findings")
-    findings = tuple(_parse_gold(gold, case_id) for gold in golds)
     source_commit = record.get("source_commit")
     if source_commit is not None and (not isinstance(source_commit, str)
                                       or not source_commit):
@@ -161,43 +156,17 @@ def _parse_case(record: object, position: int) -> AgentEvalCase:
         if not valid_paths:
             raise ValueError(f"case {case_id} has invalid mutation_paths")
     return AgentEvalCase(
-        case_id, prompt, diff, tuple(symbols), findings, source_commit,
+        case_id, prompt, diff, tuple(symbols), evaluation_gold.root_causes,
+        source_commit,
         repo_name if is_external else None, repo_url if is_external else None,
         tuple(mutation_paths) if is_external else (),
-        tuple(complexity_tags), difficulty,
+        tuple(complexity_tags), difficulty, evaluation_gold.context,
     )
 
 
 def _parse_gold(record: object, case_id: str) -> GoldFinding:
-    if not isinstance(record, dict):
-        raise ValueError(f"case {case_id} has an invalid gold finding")
-    finding_id = record.get("id")
-    file_path = record.get("file")
-    line_start = record.get("line_start")
-    line_end = record.get("line_end", line_start)
-    keywords = record.get("keywords", [])
-    alternate_files = record.get("alternate_files", [])
-    min_matches = record.get("min_matches", 1)
-    valid_lines = ((line_start is None and line_end is None) or
-                   (isinstance(line_start, int) and isinstance(line_end, int)
-                    and 1 <= line_start <= line_end))
-    valid_keywords = isinstance(keywords, list) and all(
-        isinstance(keyword, str) and keyword for keyword in keywords)
-    valid_alternates = isinstance(alternate_files, list) and all(
-        isinstance(path, str) and path and not Path(path).is_absolute()
-        and ".." not in Path(path).parts for path in alternate_files)
-    valid_min_matches = (isinstance(min_matches, int) and min_matches >= 1
-                         and min_matches <= len(keywords))
-    if not isinstance(finding_id, str) or not finding_id:
-        raise ValueError(f"case {case_id} gold finding requires id")
-    if not isinstance(file_path, str) or not file_path or not valid_lines:
-        raise ValueError(f"case {case_id} gold finding has invalid file/lines")
-    if not valid_keywords or not valid_alternates or not valid_min_matches:
-        raise ValueError(f"case {case_id} gold finding has invalid keywords")
-    return GoldFinding(finding_id, _normalize(file_path), line_start, line_end,
-                       tuple(keyword.lower() for keyword in keywords),
-                       tuple(_normalize(path) for path in alternate_files),
-                       min_matches=min_matches)
+    return parse_evaluation_gold(
+        {"gold_findings": [record]}, case_id).root_causes[0]
 
 
 def run_agent_eval(config: Config, conn: sqlite3.Connection,
@@ -730,6 +699,7 @@ def _run_once(config: Config, case: AgentEvalCase, mode: str, repetition: int,
     run = executor(command, prompt, config.repo_path, environment, timeout_seconds)
     payload, parse_error = _parse_agent_output(run.stdout)
     score = _score(payload.get("findings", []), case.gold_findings)
+    agent_review = score_agent_review(payload, case.gold)
     usage = _usage(payload, prompt, run.stdout)
     result = {
         "case_id": case.case_id, "mode": mode, "repetition": repetition,
@@ -739,6 +709,7 @@ def _run_once(config: Config, case: AgentEvalCase, mode: str, repetition: int,
         "success": run.returncode == 0 and parse_error is None,
         "returncode": run.returncode, "elapsed_ms": round(run.elapsed_ms, 3),
         "parse_error": parse_error, **score,
+        "agent_review": agent_review,
         "files_read": _string_values(payload.get("files_read")),
         "unique_files_touched": _string_values(
             payload.get("unique_files_touched") or payload.get("files_read")),
@@ -776,6 +747,8 @@ def _agent_prompt(mode: str, context: str) -> str:
     contract = {
         "findings": [{"file": "path", "line": 1, "title": "...",
                       "description": "..."}],
+        "affected_symbols": [], "affected_files": [],
+        "affected_entries": [], "tests": [],
         "files_read": ["path"], "tool_calls": ["tool_name"],
         "usage": {"input_tokens": 0, "output_tokens": 0},
     }
@@ -839,51 +812,7 @@ def _parse_agent_output(stdout: str) -> tuple[dict, str | None]:
 
 
 def _score(predictions: list[object], golds: tuple[GoldFinding, ...]) -> dict:
-    valid_predictions = [item for item in predictions if isinstance(item, dict)]
-    # Maximum bipartite matching avoids prediction-order artifacts when a
-    # multi-site fix has related gold findings in the same file.
-    gold_to_prediction: dict[int, int] = {}
-
-    def assign(prediction_index: int, seen: set[int]) -> bool:
-        for gold_index, gold in enumerate(golds):
-            if gold_index in seen or not _matches(
-                    valid_predictions[prediction_index], gold):
-                continue
-            seen.add(gold_index)
-            previous = gold_to_prediction.get(gold_index)
-            if previous is None or assign(previous, seen):
-                gold_to_prediction[gold_index] = prediction_index
-                return True
-        return False
-
-    for prediction_index in range(len(valid_predictions)):
-        assign(prediction_index, set())
-    matches = [{"gold_id": golds[index].finding_id,
-                "file": golds[index].file}
-               for index in sorted(gold_to_prediction)]
-    true_positives = len(matches)
-    precision = true_positives / len(valid_predictions) if valid_predictions else 0.0
-    recall = true_positives / len(golds) if golds else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-    return {"predicted_findings": len(valid_predictions),
-            "gold_findings": len(golds), "matched_findings": matches,
-            "precision": round(precision, 4), "recall": round(recall, 4),
-            "f1": round(f1, 4)}
-
-
-def _matches(prediction: dict, gold: GoldFinding) -> bool:
-    valid_files = (gold.file, *gold.alternate_files)
-    if _normalize(str(prediction.get("file", ""))) not in valid_files:
-        return False
-    if gold.line_start is not None:
-        line = prediction.get("line")
-        if not isinstance(line, int) or not gold.line_start <= line <= gold.line_end:
-            return False
-    if gold.keywords:
-        text = f"{prediction.get('title', '')} {prediction.get('description', '')}".lower()
-        if sum(keyword in text for keyword in gold.keywords) < gold.min_matches:
-            return False
-    return True
+    return score_root_causes(predictions, golds)
 
 
 def _usage(payload: dict, prompt: str, stdout: str) -> dict:

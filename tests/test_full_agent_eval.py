@@ -155,6 +155,26 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
             "timed_with_agent": False,
         },
     )
+    monkeypatch.setattr(
+        "code_review_ai.full_agent_eval._graph_retrieval_result",
+        lambda item, setup: {
+            "case_id": item.case.case_id,
+            "changed_symbols": ["app::target"],
+            "found_symbols": ["app::target"],
+            "evidence": {"symbols": [], "files": [],
+                         "entries": [], "tests": []},
+            "score": {
+                **{name: {"applicable": False, "expected": 0,
+                          "returned": 0, "hits": [], "misses": [],
+                          "precision": None, "recall": None, "f1": None}
+                   for name in ("symbols", "files", "entries", "tests")},
+                "macro_recall": None,
+                "hard_negatives": {"applicable": False, "expected": 0,
+                                   "hits": {"symbols": [], "files": []},
+                                   "correctness": None},
+            },
+        },
+    )
 
     def fake_executor(command, prompt, cwd, env, timeout):
         assert env["CRAI_EVAL_TOOL_PROFILE"] in {"native", "full_project"}
@@ -224,6 +244,7 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
         "mcp_tool_adoption_rate"
     ]["get_change_context"] == 1.0
     assert report["index_setup"][0]["timed_with_agent"] is False
+    assert report["graph_retrieval"]["aggregate"]["symbol_found_rate"] == 1.0
 
 
 def test_default_full_eval_is_native_vs_compact_core():
