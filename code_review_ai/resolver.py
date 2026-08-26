@@ -555,6 +555,33 @@ def _resolve_one(c: RawCall, local: dict, imports: dict,
                                  target_expr)
             if match:
                 target_expr = f"{match.group(1)}.{match.group(2)}"
+        if c.language == "python":
+            # A method called directly on a freshly constructed object has a
+            # statically known receiver even though the source text contains
+            # no variable annotation: ``Service(auth, db).create()``.  Treat
+            # only a simple named constructor as deterministic; arbitrary
+            # factories such as ``get_service().create()`` remain dynamic.
+            constructed = re.fullmatch(
+                r"([A-Za-z_][A-Za-z0-9_]*)\(.*\)\."
+                r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)",
+                target_expr,
+                flags=re.DOTALL,
+            )
+            if constructed:
+                receiver_type, member = constructed.groups()
+                hits = _resolve_py_type(
+                    receiver_type, local, imports, existing, all_import_maps,
+                    mod_syms, source_module, star_modules, star_map,
+                    module_alls, default_exports,
+                    reexport_memo=reexport_memo,
+                )
+                hits = [hit for hit in hits if hit in (class_qnames or set())]
+                targets = [_join_target(hit, member) for hit in hits]
+                targets = [target for target in targets if target in existing]
+                if len(targets) == 1:
+                    return [_resolved(base, targets[0], existing)]
+                if len(targets) > 1:
+                    return _candidates(base, targets)
         if c.language in ("typescript", "javascript"):
             class_qn = _enclosing_class_qname_cached(c.source_qname, class_qnames,
                                                      enclosing_cache)

@@ -137,6 +137,40 @@ def test_constructor_links_to_init(tmp_path):
     assert ("svc", "svc::Service.__init__", "call", "resolved") in by  # to __init__
 
 
+def test_resolve_method_called_on_fresh_python_instance(tmp_path):
+    """A direct constructor receiver is static, unlike an arbitrary factory."""
+    service = tmp_path / "service.py"
+    service.write_text(
+        "class Service:\n"
+        "    def __init__(self, dep):\n"
+        "        self.dep = dep\n"
+        "    def create(self, data):\n"
+        "        return data\n",
+        encoding="utf-8",
+    )
+    controller = tmp_path / "controller.py"
+    controller.write_text(
+        "from service import Service\n"
+        "def endpoint(dep, data):\n"
+        "    return Service(dep).create(data)\n"
+        "def dynamic(factory, data):\n"
+        "    return factory().create(data)\n",
+        encoding="utf-8",
+    )
+    files = [parse_file(str(service), str(tmp_path)),
+             parse_file(str(controller), str(tmp_path))]
+    qnames = {node.qualified_name for parsed in files for node in parsed.nodes}
+    edges = resolve_calls(files, qnames)
+    by = {(edge.source, edge.target, edge.resolution) for edge in edges}
+
+    assert (Q("controller", "endpoint"),
+            Q("service", "create", Q("service", "Service")),
+            "resolved") in by
+    assert any(edge.source == Q("controller", "dynamic")
+               and edge.target == "factory().create"
+               and edge.resolution == "dynamic" for edge in edges)
+
+
 def test_resolve_self_method_to_enclosing_class(tmp_path):
     """A Python method calling self.g() resolves to the enclosing class's
     method (mirrors Java's this./receiver-type binding); a bare g() stays
