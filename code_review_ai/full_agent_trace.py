@@ -98,6 +98,8 @@ def render(report: dict, transcripts_root: Path | None = None) -> str:
         lines.extend([
             f"- score: P={run.get('precision')} R={run.get('recall')} F1={run.get('f1')}",
             f"- elapsed: {run.get('elapsed_ms')} ms; calls: {len(trace)}; files: {len(run.get('files_read', []))}",
+            f"- access: read={run.get('read_calls', 0)}, search={run.get('search_calls', 0)}, bash={run.get('bash_calls', 0)}, unique_files={len(run.get('unique_files_touched', run.get('files_read', [])))}, unknown_file_access={run.get('unknown_file_access', False)}",
+            f"- responses: native={run.get('native_response_chars', 0)} chars; mcp={run.get('mcp_response_chars', 0)} chars; total_tool_calls={run.get('total_tool_calls', run.get('tool_call_count', len(trace)))}",
             f"- tokens: input={usage.get('input_tokens', 0)}, cache_read={usage.get('cache_read_input_tokens', 0)}, output={usage.get('output_tokens', 0)}; cost=${usage.get('total_cost_usd', 0)}",
             "",
             "```text",

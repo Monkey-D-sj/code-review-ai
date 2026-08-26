@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -60,6 +61,15 @@ READ_ONLY_BASH_RULES = (
     "Bash(du *)",
     "Bash(diff *)",
 )
+
+_BASH_SEARCH_COMMANDS = {"rg", "grep"}
+_BASH_READ_COMMANDS = {"cat", "head", "tail"}
+_BASH_OPTION_ARGS = {
+    "-A", "-B", "-C", "-e", "-f", "-g", "-m", "-n", "-t",
+    "--after-context", "--before-context", "--byte-offset", "--color",
+    "--context", "--glob", "--max-count", "--regexp", "--type",
+    "--type-not", "--line-number", "--lines", "--bytes",
+}
 # Deny rules win over allow rules. In particular, ripgrep's --pre option can
 # execute an arbitrary preprocessor and is therefore not a read-only search.
 DENIED_BASH_RULES = (
@@ -264,6 +274,12 @@ def normalize_claude_stream(stdout: str) -> dict:
     payload["tool_call_count"] = len(calls)
     payload["files_read"] = list(dict.fromkeys(files))
     payload["tool_trace"] = tool_trace
+    payload.update(_tool_telemetry(tool_trace))
+    # ``files_read`` is a legacy field. Keep it populated with the same
+    # best-effort set as ``unique_files_touched`` so existing reports stop
+    # under-counting Bash reads, while ``unknown_file_access`` makes the
+    # incompleteness explicit.
+    payload["files_read"] = payload["unique_files_touched"]
     return payload
 
 
@@ -343,6 +359,245 @@ def _compact_tool_input(value: object) -> object:
     return value
 
 
+def _tool_telemetry(tool_trace: list[dict]) -> dict:
+    """Derive auditable tool/access counters from observed tool events.
+
+    Bash is intentionally treated as a partial observation source. Explicit
+    file operands for the small read/search allowlist are counted, but a
+    command with an implicit directory/stdin/variable target is marked as
+    unknown instead of disappearing from the read statistics.
+    """
+    read_calls = 0
+    search_calls = 0
+    bash_calls = 0
+    native_response_chars = 0
+    mcp_response_chars = 0
+    files: list[str] = []
+    unknown: list[dict] = []
+
+    def add_file(value: str) -> None:
+        value = value.strip().strip("'\"")
+        if not value or value == "-" or _looks_like_shell_path(value):
+            return
+        files.append(_relative_tool_path(value))
+
+    for trace in tool_trace:
+        if not isinstance(trace, dict):
+            continue
+        tool = trace.get("tool")
+        response_chars = trace.get("response_chars", 0)
+        if not isinstance(response_chars, int):
+            response_chars = 0
+        if isinstance(tool, str) and tool.startswith("mcp__"):
+            mcp_response_chars += response_chars
+        else:
+            native_response_chars += response_chars
+
+        if tool == "Read":
+            read_calls += 1
+            data = trace.get("input") if isinstance(trace.get("input"), dict) else {}
+            path = data.get("file_path") or data.get("path")
+            if isinstance(path, str):
+                add_file(path)
+            else:
+                _mark_unknown(unknown, trace, "Read has no file path")
+        elif tool == "Grep":
+            search_calls += 1
+            data = trace.get("input") if isinstance(trace.get("input"), dict) else {}
+            path = data.get("path")
+            if isinstance(path, str) and _is_explicit_file(path):
+                add_file(path)
+            else:
+                _mark_unknown(unknown, trace, "Grep path is implicit or not a file")
+        elif tool == "Bash":
+            bash_calls += 1
+            data = trace.get("input") if isinstance(trace.get("input"), dict) else {}
+            command = data.get("command")
+            if not isinstance(command, str):
+                _mark_unknown(unknown, trace, "Bash has no command")
+                continue
+            _classify_bash(command, trace, files, unknown)
+            # The classifier returns counts because a single Bash tool call
+            # may contain a pipeline or a compound command.
+            read_calls += _bash_count(command, _BASH_READ_COMMANDS)
+            search_calls += _bash_count(command, _BASH_SEARCH_COMMANDS)
+
+    return {
+        "read_calls": read_calls,
+        "search_calls": search_calls,
+        "bash_calls": bash_calls,
+        "unique_files_touched": list(dict.fromkeys(files)),
+        "unknown_file_access": bool(unknown),
+        "unknown_file_access_details": unknown,
+        "native_response_chars": native_response_chars,
+        "mcp_response_chars": mcp_response_chars,
+        "total_tool_calls": len(tool_trace),
+    }
+
+
+def _classify_bash(command: str, trace: dict, files: list[str],
+                   unknown: list[dict]) -> None:
+    try:
+        tokens = [token.strip("'\"") for token in shlex.split(
+            command, posix=os.name != "nt")]
+    except ValueError:
+        _mark_unknown(unknown, trace, "Bash command could not be tokenized")
+        return
+    if not tokens:
+        _mark_unknown(unknown, trace, "Bash command is empty")
+        return
+
+    working_dir = Path.cwd()
+    for segment in _bash_segments(tokens):
+        if not segment:
+            continue
+        command_name = Path(segment[0]).name.lower()
+        if command_name == "cd":
+            target = segment[1] if len(segment) == 2 else None
+            if not isinstance(target, str) or not target or target == "-":
+                _mark_unknown(unknown, trace, "cd target is ambiguous")
+            else:
+                candidate = Path(target)
+                if not candidate.is_absolute():
+                    candidate = working_dir / candidate
+                try:
+                    if candidate.is_dir():
+                        working_dir = candidate.resolve()
+                    else:
+                        _mark_unknown(unknown, trace, "cd target is not a directory")
+                except OSError:
+                    _mark_unknown(unknown, trace, "cd target could not be resolved")
+            continue
+        if command_name in _BASH_SEARCH_COMMANDS:
+            operands = _bash_operands(segment, command_name)
+            if not operands or any(not _is_explicit_file(path, working_dir)
+                                   for path in operands):
+                _mark_unknown(unknown, trace,
+                              f"{command_name} has an implicit or directory target")
+            for path in operands:
+                if _is_explicit_file(path, working_dir):
+                    files.append(_relative_bash_path(path, working_dir))
+        elif command_name in _BASH_READ_COMMANDS:
+            operands = _bash_operands(segment, command_name)
+            if not operands or any(path == "-" or not _is_explicit_file(
+                    path, working_dir)
+                                   for path in operands):
+                _mark_unknown(unknown, trace,
+                              f"{command_name} has an implicit or non-file target")
+            for path in operands:
+                if _is_explicit_file(path, working_dir):
+                    files.append(_relative_bash_path(path, working_dir))
+        else:
+            _mark_unknown(unknown, trace,
+                          f"unclassified Bash command: {command_name}")
+
+
+def _bash_segments(tokens: list[str]) -> list[list[str]]:
+    separators = {"&&", "||", "|", ";"}
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in separators:
+            if current:
+                segments.append(current)
+                current = []
+        else:
+            current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _bash_count(command: str, names: set[str]) -> int:
+    try:
+        tokens = [token.strip("'\"") for token in shlex.split(
+            command, posix=os.name != "nt")]
+    except ValueError:
+        return 0
+    return sum(Path(segment[0]).name.lower() in names
+               for segment in _bash_segments(tokens) if segment)
+
+
+def _bash_operands(tokens: list[str], command_name: str) -> list[str]:
+    """Return positional path operands for rg/grep/cat/head/tail."""
+    operands: list[str] = []
+    positional: list[str] = []
+    skip_next = False
+    after_double_dash = False
+    for token in tokens[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if token == "--":
+            after_double_dash = True
+            continue
+        if not after_double_dash and token.startswith("-"):
+            option = token.split("=", 1)[0]
+            if option in _BASH_OPTION_ARGS and "=" not in token:
+                skip_next = True
+            continue
+        positional.append(token)
+
+    if command_name in _BASH_SEARCH_COMMANDS:
+        # rg/grep take a pattern before their file operands. `grep -f` is
+        # already treated as uncertain by skipping its file argument above.
+        return positional[1:] if positional else []
+    if command_name in _BASH_READ_COMMANDS:
+        if command_name in {"head", "tail"} and positional:
+            # -n/-c values are skipped above; all remaining positionals are
+            # file operands. No pattern is consumed for these commands.
+            return positional
+        return positional
+    return []
+
+
+def _is_explicit_file(value: object, base_dir: Path | None = None) -> bool:
+    if not isinstance(value, str):
+        return False
+    value = value.strip().strip("'\"")
+    if not value or value in {"-", ".", ".."}:
+        return False
+    if any(marker in value for marker in ("*", "?", "$", "`")):
+        return False
+    try:
+        path = Path(value)
+        if base_dir is not None and not path.is_absolute():
+            path = base_dir / path
+        return not path.resolve().is_dir()
+    except OSError:
+        return False
+
+
+def _relative_bash_path(value: str, working_dir: Path) -> str:
+    path = Path(value)
+    if not path.is_absolute():
+        path = working_dir / path
+    return _relative_tool_path(str(path))
+
+
+def _looks_like_shell_path(value: str) -> bool:
+    return any(marker in value for marker in ("$", "`", "*", "?"))
+
+
+def _mark_unknown(unknown: list[dict], trace: dict, reason: str) -> None:
+    record = {"sequence": trace.get("sequence", 0), "reason": reason}
+    data = trace.get("input") if isinstance(trace.get("input"), dict) else {}
+    command = data.get("command")
+    if isinstance(command, str):
+        record["command"] = command[:500]
+    if record not in unknown:
+        unknown.append(record)
+
+
+def _telemetry_defaults() -> dict:
+    return {
+        "read_calls": 0, "search_calls": 0, "bash_calls": 0,
+        "unique_files_touched": [], "unknown_file_access": False,
+        "unknown_file_access_details": [], "native_response_chars": 0,
+        "mcp_response_chars": 0, "total_tool_calls": 0,
+    }
+
+
 def _tool_use_blocks(value: object):
     if isinstance(value, dict):
         if value.get("type") == "tool_use":
@@ -380,11 +635,12 @@ def normalize_claude_result(outer: object) -> dict:
     result["files_read"] = []
     result["tool_calls"] = []
     result["usage"] = _provider_usage(outer)
+    result.update(_telemetry_defaults())
     return result
 
 
 _EMPTY_CONTRACT = {"findings": [], "files_read": [], "tool_calls": [],
-                   "usage": {}}
+                   "usage": {}, **_telemetry_defaults()}
 
 
 def _error_payload(stdout: str) -> dict:

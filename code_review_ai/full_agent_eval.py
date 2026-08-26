@@ -382,7 +382,7 @@ def rescore_full_agent_report(report_path: str, cases: list[FullAgentCase],
         run["difficulty"] = by_id[case_id].difficulty
         run["complexity_tags"] = list(by_id[case_id].complexity_tags)
         calls = [call for call in run.get("tool_calls", [])
-                 if call in {"Read", "Glob", "Grep"}
+                 if call in {"Read", "Glob", "Grep", "Bash"}
                  or (isinstance(call, str) and call.startswith("mcp__code-review-ai__"))]
         removed = len(run.get("tool_calls", [])) - len(calls)
         run["tool_calls"] = calls
@@ -476,9 +476,30 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
         if isinstance(payload, dict) else None,
         **score,
         "files_read": _string_values(payload.get("files_read")),
+        "unique_files_touched": _string_values(
+            payload.get("unique_files_touched") or payload.get("files_read")),
+        "read_calls": payload.get("read_calls", 0)
+        if isinstance(payload.get("read_calls"), int) else 0,
+        "search_calls": payload.get("search_calls", 0)
+        if isinstance(payload.get("search_calls"), int) else 0,
+        "bash_calls": payload.get("bash_calls", 0)
+        if isinstance(payload.get("bash_calls"), int) else 0,
+        "unknown_file_access": payload.get("unknown_file_access", False)
+        if isinstance(payload.get("unknown_file_access"), bool) else False,
+        "unknown_file_access_details": payload.get(
+            "unknown_file_access_details", [])
+        if isinstance(payload.get("unknown_file_access_details"), list) else [],
+        "native_response_chars": payload.get("native_response_chars", 0)
+        if isinstance(payload.get("native_response_chars"), int) else 0,
+        "mcp_response_chars": payload.get("mcp_response_chars", 0)
+        if isinstance(payload.get("mcp_response_chars"), int) else 0,
         "tool_calls": _string_values(payload.get("tool_calls")),
         "tool_call_count": payload.get("tool_call_count", 0)
         if isinstance(payload.get("tool_call_count"), int) else 0,
+        "total_tool_calls": payload.get("total_tool_calls",
+                                       payload.get("tool_call_count", 0))
+        if isinstance(payload.get("total_tool_calls",
+                                 payload.get("tool_call_count", 0)), int) else 0,
         "tool_trace": payload.get("tool_trace", [])
         if isinstance(payload.get("tool_trace"), list) else [],
         "context_files": [], "usage": _usage(payload, prompt, run.stdout),

@@ -230,7 +230,7 @@ def test_default_full_eval_is_native_vs_compact_core():
     assert DEFAULT_FULL_EVAL_MODES == ("native_agent", "full_project_core")
 
 
-def test_rescore_uses_stored_outputs_and_filters_unavailable_tools(tmp_path):
+def test_rescore_uses_stored_outputs_and_keeps_native_bash_tools(tmp_path):
     case = _case()
     report_path = tmp_path / "report.json"
     report_path.write_text(json.dumps({
@@ -251,6 +251,6 @@ def test_rescore_uses_stored_outputs_and_filters_unavailable_tools(tmp_path):
     rescored = rescore_full_agent_report(
         str(report_path), [case], str(transcript_dir))
     assert rescored["runs"][0]["f1"] == 1.0
-    assert rescored["runs"][0]["tool_calls"] == ["Read"]
+    assert rescored["runs"][0]["tool_calls"] == ["Read", "Bash"]
     assert rescored["runs"][0]["difficulty"] == "medium"
     assert rescored["rescored"]["gold_finding_count"] == 1

@@ -84,6 +84,58 @@ def test_normalize_claude_stream_uses_observed_tool_events(monkeypatch, tmp_path
     ]
 
 
+def test_normalize_claude_stream_counts_bash_access_and_marks_unknown(
+        monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("print('ok')", encoding="utf-8")
+    events = [
+        {"type": "system", "subtype": "init", "tools": [
+            "Read", "Grep", "Bash", "mcp__code-review-ai__query_graph",
+            "StructuredOutput"]},
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Read", "id": "read-1",
+             "input": {"file_path": str(source)}},
+            {"type": "tool_use", "name": "Grep", "id": "grep-1",
+             "input": {"pattern": "print", "path": "src/app.py"}},
+            {"type": "tool_use", "name": "Bash", "id": "bash-1",
+             "input": {"command": "rg print src/app.py"}},
+            {"type": "tool_use", "name": "Bash", "id": "bash-2",
+             "input": {"command": "cat src/app.py"}},
+            {"type": "tool_use", "name": "Bash", "id": "bash-3",
+             "input": {"command": "rg print"}},
+            {"type": "tool_use", "name": "Bash", "id": "bash-4",
+             "input": {"command": "git status --short"}},
+            {"type": "tool_use", "name": "mcp__code-review-ai__query_graph",
+             "id": "mcp-1", "input": {}}]}},
+        {"type": "user", "message": {"content": [
+            *[{"type": "tool_result", "tool_use_id": tool_id,
+               "content": "x"} for tool_id in (
+                   "read-1", "grep-1", "bash-1", "bash-2", "bash-3",
+                   "bash-4")],
+            {"type": "tool_result", "tool_use_id": "mcp-1",
+             "content": "mcp"}]}},
+        {"type": "result", "structured_output": {
+            "findings": [], "files_read": [], "tool_calls": []},
+         "usage": {"input_tokens": 10, "output_tokens": 2}},
+    ]
+
+    payload = normalize_claude_stream(
+        "\n".join(json.dumps(event) for event in events))
+
+    assert payload["read_calls"] == 2  # Read + cat
+    assert payload["search_calls"] == 3  # Grep + two rg calls
+    assert payload["bash_calls"] == 4
+    assert payload["unique_files_touched"] == ["src/app.py"]
+    assert payload["files_read"] == ["src/app.py"]
+    assert payload["unknown_file_access"] is True
+    assert len(payload["unknown_file_access_details"]) == 2
+    assert payload["native_response_chars"] == 6
+    assert payload["mcp_response_chars"] == 3
+    assert payload["total_tool_calls"] == 7
+
+
 def test_online_eval_uses_prebuilt_index_without_rebuild_tool(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CRAI_EVAL_DB_PATH", str(tmp_path / "prebuilt.db"))
@@ -140,8 +192,11 @@ def test_error_payload_preserves_budget_stream_telemetry():
 
 
 def test_error_payload_blank_stdout_returns_contract():
-    assert _error_payload("") == {
-        "findings": [], "files_read": [], "tool_calls": [], "usage": {}}
+    payload = _error_payload("")
+    assert payload["findings"] == []
+    assert payload["files_read"] == []
+    assert payload["unknown_file_access"] is False
+    assert payload["total_tool_calls"] == 0
 
 
 def test_run_claude_error_preserves_stream_telemetry(monkeypatch):

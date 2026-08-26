@@ -411,6 +411,14 @@ native 在 hard 档失败不预先标成`unsolvable`,而按实际运行结果记
 它用于定位重复图查询和大响应;provider stream 当前没有可靠的逐工具耗时,因此不
 伪造`elapsed_ms`,只保留整次 run 的真实耗时。
 
+读取成本同时记录`read_calls`、`search_calls`、`bash_calls`、
+`unique_files_touched`、`native_response_chars`、`mcp_response_chars`和
+`total_tool_calls`。`Read`、`Grep`以及 Bash 中带明确文件操作数的
+`rg/grep/cat/head/tail`会进入唯一文件集合；Bash 的目录、stdin、变量、通配符、
+隐式路径或未分类命令不会被猜测为文件，而是将`unknown_file_access`设为 true，
+并在`unknown_file_access_details`保留序号、命令和原因。旧的`files_read`字段保留
+为该可解析集合的兼容别名，因此它是下界而不是“所有文件访问已完整解析”的声明。
+
 `get_change_context`默认最多选4个 symbol、每个最多5个邻居并限制为8 KB。symbol
 选择先覆盖不同 changed file,再按生产调用者数量补位;构造器降权、test-only caller
 默认不占图响应预算。对于 FastAPI validation-alias hard case,9个 changed symbols

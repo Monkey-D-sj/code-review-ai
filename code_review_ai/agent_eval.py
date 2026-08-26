@@ -740,7 +740,30 @@ def _run_once(config: Config, case: AgentEvalCase, mode: str, repetition: int,
         "returncode": run.returncode, "elapsed_ms": round(run.elapsed_ms, 3),
         "parse_error": parse_error, **score,
         "files_read": _string_values(payload.get("files_read")),
+        "unique_files_touched": _string_values(
+            payload.get("unique_files_touched") or payload.get("files_read")),
+        "read_calls": payload.get("read_calls", 0)
+        if isinstance(payload.get("read_calls"), int) else 0,
+        "search_calls": payload.get("search_calls", 0)
+        if isinstance(payload.get("search_calls"), int) else 0,
+        "bash_calls": payload.get("bash_calls", 0)
+        if isinstance(payload.get("bash_calls"), int) else 0,
+        "unknown_file_access": payload.get("unknown_file_access", False)
+        if isinstance(payload.get("unknown_file_access"), bool) else False,
+        "unknown_file_access_details": payload.get(
+            "unknown_file_access_details", [])
+        if isinstance(payload.get("unknown_file_access_details"), list) else [],
+        "native_response_chars": payload.get("native_response_chars", 0)
+        if isinstance(payload.get("native_response_chars"), int) else 0,
+        "mcp_response_chars": payload.get("mcp_response_chars", 0)
+        if isinstance(payload.get("mcp_response_chars"), int) else 0,
         "tool_calls": _string_values(payload.get("tool_calls")),
+        "tool_call_count": payload.get("tool_call_count", 0)
+        if isinstance(payload.get("tool_call_count"), int) else 0,
+        "total_tool_calls": payload.get("total_tool_calls",
+                                       payload.get("tool_call_count", 0))
+        if isinstance(payload.get("total_tool_calls",
+                                 payload.get("tool_call_count", 0)), int) else 0,
         "context_files": _context_files(config, context),
         "usage": usage,
     }
@@ -928,6 +951,24 @@ def _mode_metrics(results: list[dict]) -> dict:
             result.get("usage", {}).get("total_cost_usd") or 0.0
             for result in results), 6),
         "mean_files_read": _mean(results, lambda result: len(result["files_read"])),
+        "mean_unique_files_touched": _mean(
+            results, lambda result: len(result.get("unique_files_touched", []))),
+        "mean_read_calls": _mean(results, lambda result: result.get("read_calls", 0)),
+        "mean_search_calls": _mean(
+            results, lambda result: result.get("search_calls", 0)),
+        "mean_bash_calls": _mean(results, lambda result: result.get("bash_calls", 0)),
+        "unknown_file_access_rate": _mean(
+            results, lambda result: float(result.get("unknown_file_access", False))),
+        "mean_native_response_chars": _mean(
+            results, lambda result: result.get("native_response_chars", 0)),
+        "mean_mcp_response_chars": _mean(
+            results, lambda result: result.get("mcp_response_chars", 0)),
+        "mean_total_tool_calls": _mean(
+            results, lambda result: result.get(
+                "total_tool_calls", result.get("tool_call_count", 0))),
+        "mean_total_tokens": _mean(
+            results, lambda result: result.get("usage", {}).get("input_tokens", 0)
+            + result.get("usage", {}).get("output_tokens", 0)),
         "mean_context_files": _mean(results, lambda result: len(result["context_files"])),
         "mean_tool_calls": _mean(results, lambda result: len(result["tool_calls"])),
     }

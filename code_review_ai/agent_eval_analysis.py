@@ -114,6 +114,26 @@ def _mode_analysis(runs: list[dict], mode: str, samples: int,
             [_total_tokens(run) for run in selected]),
         "mean_files_read": _mean_values(
             [float(len(run.get("files_read", []))) for run in selected]),
+        "mean_unique_files_touched": _mean_values([
+            float(len(run.get("unique_files_touched",
+                              run.get("files_read", []))))
+            for run in selected]),
+        "mean_read_calls": _mean_values([
+            float(run.get("read_calls", 0)) for run in selected]),
+        "mean_search_calls": _mean_values([
+            float(run.get("search_calls", 0)) for run in selected]),
+        "mean_bash_calls": _mean_values([
+            float(run.get("bash_calls", 0)) for run in selected]),
+        "unknown_file_access_rate": _mean_values([
+            float(bool(run.get("unknown_file_access", False)))
+            for run in selected]),
+        "mean_native_response_chars": _mean_values([
+            float(run.get("native_response_chars", 0)) for run in selected]),
+        "mean_mcp_response_chars": _mean_values([
+            float(run.get("mcp_response_chars", 0)) for run in selected]),
+        "mean_total_tool_calls": _mean_values([
+            float(run.get("total_tool_calls", _tool_call_count(run)))
+            for run in selected]),
         "stable_case_hits": sum(all(run["recall"] == 1 for run in case_runs)
                                 for case_runs in cases.values()),
         "cases_with_any_hit": sum(any(run["recall"] > 0 for run in case_runs)
