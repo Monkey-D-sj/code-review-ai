@@ -2,9 +2,15 @@
 
 本文说明如何继续扩充 `case-backend` 评测集，以及如何运行、检查和解释评测结果。
 
+如果由 AI 针对**当前** `case-backend` 继续扩题，请先执行
+[case-backend Case 扩充执行手册（AI 版）](CASE_BACKEND_EXPANSION_PLAYBOOK.md)。它规定了当前
+case 的偏差、下一批配额、候选池和停止条件。两份文档有选题优先级差异时，以该执行手册的当前
+配额为准；manifest、Gold 和评分规则仍以本文为准。
+
 当前推荐做法是：把 `full_agent_eval/case-backend` 作为固定的“正确版本”源码树，在
-`benchmarks/case-backend-cases.json` 中为每个回归保存一份 **fixed → buggy** 的内联
-patch，并用同一个结构化 `gold` 同时驱动 Graph Retrieval 和 Agent Review 两层评分。
+`benchmarks/case-backend-cases.json` 中为每个回归保存一份内联的 **bug 注入 patch**。它的
+应用方向是 fixed → buggy，不是修复补丁。评测再用同一个结构化 `gold` 同时驱动 Graph
+Retrieval 和 Agent Review 两层评分。
 
 ## 1. 评测到底在测什么
 
@@ -60,9 +66,10 @@ patch，并用同一个结构化 `gold` 同时驱动 Graph Retrieval 和 Agent R
 一个后另一个仍然存在时，才写成两个 `root_causes`。每条回答最多允许 3 个 finding，
 因此单个 case 不应包含超过 3 个独立根因。
 
-### 第二步：准备 fixed → buggy patch
+### 第二步：准备 bug 注入 patch（fixed → buggy）
 
-`full_agent_eval/case-backend` 始终保存正确代码。patch 则把正确代码改坏：
+`full_agent_eval/case-backend` 始终保存正确代码。manifest 里的 patch 专门把正确代码改坏，
+与日常“把 bug 修好”的补丁方向相反：
 
 ```text
 固定源码树（fixed） --应用 manifest.patch--> 隔离评测仓库（buggy）

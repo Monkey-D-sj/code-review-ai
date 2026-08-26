@@ -62,9 +62,15 @@ def test_case_backend_uses_one_structured_gold_source():
         context = record["gold"]["context"]
         assert set(context) == {
             "symbols", "files", "entries", "tests", "hard_negatives"}
+        for dimension in ("symbols", "files", "entries", "tests"):
+            assert context[dimension], (
+                f"{case.case_id}: gold.context.{dimension} must be annotated")
+        assert any(context["hard_negatives"].values()), (
+            f"{case.case_id}: needs at least one hard negative")
         assert case.gold_context.files == tuple(context["files"])
         assert case.gold.root_causes == case.gold_findings
-        for path in context["files"]:
+        for path in (*context["files"],
+                     *context["hard_negatives"]["files"]):
             assert (REPO / path).is_file(), (
                 f"{case.case_id}: gold context file not in repo: {path}")
 
@@ -81,8 +87,17 @@ def test_case_backend_graph_retrieval_uses_structured_context_gold(tmp_path):
         str(tmp_path / "repos"), str(tmp_path / "work"))
     aggregate = report["aggregate"]["graph_retrieval"]
     assert aggregate["symbol_found_rate"] == 1.0
-    assert aggregate["dimensions"]["files"]["macro_recall"] == 1.0
+    for dimension in ("symbols", "files", "entries", "tests"):
+        score = aggregate["dimensions"][dimension]
+        assert score["applicable_cases"] == len(report["cases"])
+        assert score["macro_recall"] == 1.0
+    assert aggregate["hard_negative_correctness"] is not None
     for case in report["cases"]:
         score = case["graph_retrieval"]["score"]
-        assert score["files"]["applicable"] is True
-        assert score["files"]["misses"] == []
+        for dimension in ("symbols", "files", "entries", "tests"):
+            assert score[dimension]["applicable"] is True
+            assert score[dimension]["misses"] == []
+        test_evidence = case["graph_retrieval"]["evidence"]["tests"]
+        assert not any(target.startswith(("app.", "app/"))
+                       for target in test_evidence), (
+            f"{case['case_id']}: production symbol misclassified as a test")

@@ -265,6 +265,9 @@ See [docs/EVALUATION_AUTHORING_GUIDE.md](docs/EVALUATION_AUTHORING_GUIDE.md) for
 the case-backend authoring workflow, Gold annotation rules, validation commands,
 and report interpretation.
 
+For the current repository-specific expansion order and Native/Graph balancing
+quota, follow [docs/CASE_BACKEND_EXPANSION_PLAYBOOK.md](docs/CASE_BACKEND_EXPANSION_PLAYBOOK.md).
+
 ### Visualization (`graph`)
 
 Export interactive HTML graphs of the call structure:

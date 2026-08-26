@@ -9,30 +9,47 @@
     "patch": "diff --git a/app/utils/common_util.py b/app/utils/common_util.py\nindex 1524fad..2cdc526 100644\n--- a/app/utils/common_util.py\n+++ b/app/utils/common_util.py\n@@ -102,11 +102,6 @@ def search_to_dict(search: Any, default: Any = None) -> dict | None:\n         return default\n     d = search.model_dump(exclude_none=True)\n \n-    # 处理数组格式的时间范围参数 → (\"between\", [start, end])\n-    for key in list(d.keys()):\n-        if isinstance(d[key], list) and len(d[key]) == 2 and key.endswith(\"_time\"):\n-            d[key] = (\"between\", d[key])\n-\n     for field_name, field_info in search.model_fields.items():\n         if field_name not in d:\n             continue\n",
     "hint": "共享的查询参数序列化函数原先会把成对的时间范围参数合并成区间条件，本次改动删除了这段归并逻辑。",
     "gold": {
-      "root_causes": [{
-        "id": "time-range-filter-crashes-list-api",
-        "fix_file": "app/utils/common_util.py",
-        "alternate_files": [
-          "app/api/v1/module_system/log/service.py",
-          "app/core/base_crud.py"
-        ],
-        "mechanism_terms": [
-          "BaseQueryParam",
-          "LoginLogService",
-          "OperationLogService",
-          "base_schema"
-        ],
-        "min_matches": 2
-      }],
+      "root_causes": [
+        {
+          "id": "time-range-filter-crashes-list-api",
+          "fix_file": "app/utils/common_util.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "BaseQueryParam",
+            "LoginLogService",
+            "OperationLogService",
+            "base_schema"
+          ],
+          "min_matches": 2
+        }
+      ],
       "context": {
-        "symbols": [],
+        "symbols": [
+          "app.utils.common_util::search_to_dict",
+          "app.api.v1.module_system.log.service::LoginLogService.page",
+          "app.api.v1.module_system.log.service::OperationLogService.get_list",
+          "app.api.v1.module_system.log.service::OperationLogService.page"
+        ],
         "files": [
           "app/api/v1/module_system/log/service.py",
           "app/utils/common_util.py"
         ],
-        "entries": [],
-        "tests": [],
-        "hard_negatives": {"symbols": [], "files": []}
+        "entries": [
+          "app.api.v1.module_system.log.controller::export_operation_log_list_controller",
+          "app.api.v1.module_system.log.controller::get_log_list_controller",
+          "app.api.v1.module_system.log.controller::get_operation_log_list_controller"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_search_to_dict_builds_time_range"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.utils.common_util::get_parent_id_map"
+          ],
+          "files": [
+            "app/utils/upload_util.py"
+          ]
+        }
       }
     },
     "complexity_tags": [
@@ -56,32 +73,53 @@
     "patch": "diff --git a/app/api/v1/module_storage/core/encrypt.py b/app/api/v1/module_storage/core/encrypt.py\nindex 5a504d4..31ec48f 100644\n--- a/app/api/v1/module_storage/core/encrypt.py\n+++ b/app/api/v1/module_storage/core/encrypt.py\n@@ -30,6 +30,6 @@ def decrypt_password(cipher: str | None) -> str:\n     if not cipher:\n         return \"\"\n     try:\n-        return _get_fernet().decrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n+        return _get_fernet().encrypt(cipher.encode(\"utf-8\")).decode(\"utf-8\")\n     except (InvalidToken, ValueError):\n         raise CustomException(msg=\"存储源密码解密失败，可能原因：SECRET_KEY 变更或数据损坏\")\n",
     "hint": "密码解密函数被改成了再次加密：调用方拿到的不再是明文，而是一段新的密文。",
     "gold": {
-      "root_causes": [{
-        "id": "storage-password-re-encrypted-on-decrypt",
-        "fix_file": "app/api/v1/module_storage/core/encrypt.py",
-        "alternate_files": [
-          "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
-          "app/api/v1/module_storage/source/service.py",
-          "app/api/v1/module_storage/file/service.py",
-          "app/api/v1/module_storage/transfer/engine.py"
-        ],
-        "mechanism_terms": [
-          "_resolve_storage_config",
-          "decrypt_storage_password",
-          "builtin_nodes",
-          "module_task"
-        ],
-        "min_matches": 2
-      }],
+      "root_causes": [
+        {
+          "id": "storage-password-re-encrypted-on-decrypt",
+          "fix_file": "app/api/v1/module_storage/core/encrypt.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "_resolve_storage_config",
+            "decrypt_storage_password",
+            "builtin_nodes",
+            "module_task"
+          ],
+          "min_matches": 2
+        }
+      ],
       "context": {
-        "symbols": [],
-        "files": [
-          "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
-          "app/api/v1/module_storage/core/encrypt.py"
+        "symbols": [
+          "app.api.v1.module_storage.core.encrypt::decrypt_password",
+          "app.api.v1.module_storage.file.service::StorageFileService._get_source",
+          "app.api.v1.module_storage.source.service::StorageSourceService._build_config",
+          "app.api.v1.module_storage.transfer.engine::_build_config",
+          "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::_resolve_storage_config"
         ],
-        "entries": [],
-        "tests": [],
-        "hard_negatives": {"symbols": [], "files": []}
+        "files": [
+          "app/api/v1/module_storage/core/encrypt.py",
+          "app/api/v1/module_storage/file/service.py",
+          "app/api/v1/module_storage/source/service.py",
+          "app/api/v1/module_storage/transfer/engine.py",
+          "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+          "app/api/v1/module_storage/source/controller.py"
+        ],
+        "entries": [
+          "app.api.v1.module_storage.file.controller::upload_storage_file_controller",
+          "app.api.v1.module_storage.source.controller::test_storage_source_config_controller",
+          "app.api.v1.module_storage.transfer.controller::create_transfer_task_controller",
+          "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::storage_upload"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_storage_password_round_trip"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_storage.core.encrypt::encrypt_password"
+          ],
+          "files": [
+            "app/api/v1/module_storage/core/constants.py"
+          ]
+        }
       }
     },
     "complexity_tags": [
@@ -108,29 +146,49 @@
     ],
     "hint": "单个步骤失败后，循环由中止改为继续执行下一个步骤，失败状态因此不再向上传播。",
     "gold": {
-      "root_causes": [{
-        "id": "failed-transfer-step-never-aborts-task",
-        "fix_file": "app/api/v1/module_storage/transfer/engine.py",
-        "alternate_files": [
-          "app/api/v1/module_storage/transfer/service.py"
-        ],
-        "mechanism_terms": [
-          "StorageTransferService",
-          "_launch",
-          "create_task",
-          "asyncio"
-        ],
-        "min_matches": 2
-      }],
+      "root_causes": [
+        {
+          "id": "failed-transfer-step-never-aborts-task",
+          "fix_file": "app/api/v1/module_storage/transfer/engine.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "StorageTransferService",
+            "_launch",
+            "create_task",
+            "asyncio"
+          ],
+          "min_matches": 2
+        }
+      ],
       "context": {
-        "symbols": [],
+        "symbols": [
+          "app.api.v1.module_storage.transfer.engine::execute_transfer_task",
+          "app.api.v1.module_storage.transfer.service::StorageTransferService._launch",
+          "app.api.v1.module_storage.transfer.service::StorageTransferService.create",
+          "app.api.v1.module_storage.transfer.service::StorageTransferService.create_local",
+          "app.api.v1.module_storage.transfer.controller::create_transfer_task_controller",
+          "app.api.v1.module_storage.transfer.controller::create_local_transfer_task_controller"
+        ],
         "files": [
           "app/api/v1/module_storage/transfer/engine.py",
-          "app/api/v1/module_storage/transfer/service.py"
+          "app/api/v1/module_storage/transfer/service.py",
+          "app/api/v1/module_storage/transfer/controller.py"
         ],
-        "entries": [],
-        "tests": [],
-        "hard_negatives": {"symbols": [], "files": []}
+        "entries": [
+          "app.api.v1.module_storage.transfer.controller::create_transfer_task_controller",
+          "app.api.v1.module_storage.transfer.controller::create_local_transfer_task_controller"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_transfer_task_stops_after_first_failed_step"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_storage.transfer.engine::_resolve_source_size"
+          ],
+          "files": [
+            "app/api/v1/module_storage/core/constants.py"
+          ]
+        }
       }
     },
     "complexity_tags": [
@@ -154,36 +212,53 @@
     ],
     "hint": "序列化时不再丢弃空值字段，因此值为空的查询参数也会进入最终的条件字典。",
     "gold": {
-      "root_causes": [{
-        "id": "none-fields-leak-into-query-conditions",
-        "fix_file": "app/utils/common_util.py",
-        "alternate_files": [
-          "app/api/v1/module_storage/source/service.py",
-          "app/api/v1/module_system/dict/service.py",
-          "app/api/v1/module_system/role/service.py",
-          "app/api/v1/module_storage/transfer/service.py",
-          "app/utils/common_util.py"
-        ],
-        "mechanism_terms": [
-          "StorageSourceService",
-          "DictTypeService",
-          "DictDataService",
-          "RoleService",
-          "StorageTransferService"
-        ],
-        "min_matches": 2
-      }],
+      "root_causes": [
+        {
+          "id": "none-fields-leak-into-query-conditions",
+          "fix_file": "app/utils/common_util.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "StorageSourceService",
+            "DictTypeService",
+            "DictDataService",
+            "RoleService",
+            "StorageTransferService"
+          ],
+          "min_matches": 2
+        }
+      ],
       "context": {
-        "symbols": [],
+        "symbols": [
+          "app.utils.common_util::search_to_dict",
+          "app.api.v1.module_storage.source.service::StorageSourceService.page",
+          "app.api.v1.module_storage.transfer.service::StorageTransferService.page",
+          "app.api.v1.module_system.dict.service::DictTypeService.page",
+          "app.api.v1.module_system.role.service::RoleService.page"
+        ],
         "files": [
+          "app/utils/common_util.py",
           "app/api/v1/module_storage/source/service.py",
           "app/api/v1/module_system/dict/service.py",
           "app/api/v1/module_system/role/service.py",
           "app/api/v1/module_storage/transfer/service.py"
         ],
-        "entries": [],
-        "tests": [],
-        "hard_negatives": {"symbols": [], "files": []}
+        "entries": [
+          "app.api.v1.module_storage.source.controller::get_storage_source_page_controller",
+          "app.api.v1.module_storage.transfer.controller::get_transfer_task_page_controller",
+          "app.api.v1.module_system.dict.controller::get_type_list_controller",
+          "app.api.v1.module_system.role.controller::get_role_list_controller"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_search_to_dict_excludes_none_fields"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.utils.common_util::get_parent_id_map"
+          ],
+          "files": [
+            "app/utils/upload_util.py"
+          ]
+        }
       }
     },
     "complexity_tags": [
@@ -207,37 +282,55 @@
     ],
     "hint": "解密失败的分支由抛出异常改为返回空字符串，失败因此变得静默。",
     "gold": {
-      "root_causes": [{
-        "id": "decrypt-failure-silently-returns-empty",
-        "fix_file": "app/api/v1/module_storage/core/encrypt.py",
-        "alternate_files": [
+      "root_causes": [
+        {
+          "id": "decrypt-failure-silently-returns-empty",
+          "fix_file": "app/api/v1/module_storage/core/encrypt.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "_resolve_storage_config",
+            "decrypt_storage_password",
+            "StorageSourceService",
+            "StorageFileService",
+            "_build_config",
+            "test_config"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_storage.core.encrypt::decrypt_password",
+          "app.api.v1.module_storage.file.service::StorageFileService._get_source",
+          "app.api.v1.module_storage.source.service::StorageSourceService._build_config",
+          "app.api.v1.module_storage.transfer.engine::_build_config",
+          "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::_resolve_storage_config"
+        ],
+        "files": [
+          "app/api/v1/module_storage/core/encrypt.py",
           "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
           "app/api/v1/module_storage/source/service.py",
           "app/api/v1/module_storage/file/service.py",
           "app/api/v1/module_storage/transfer/engine.py",
-          "app/api/v1/module_storage/core/encrypt.py"
+          "app/api/v1/module_storage/source/controller.py"
         ],
-        "mechanism_terms": [
-          "_resolve_storage_config",
-          "decrypt_storage_password",
-          "StorageSourceService",
-          "StorageFileService",
-          "_build_config",
-          "test_config"
+        "entries": [
+          "app.api.v1.module_storage.file.controller::upload_storage_file_controller",
+          "app.api.v1.module_storage.source.controller::test_storage_source_config_controller",
+          "app.api.v1.module_storage.transfer.controller::create_transfer_task_controller",
+          "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::storage_upload"
         ],
-        "min_matches": 2
-      }],
-      "context": {
-        "symbols": [],
-        "files": [
-          "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
-          "app/api/v1/module_storage/source/service.py",
-          "app/api/v1/module_storage/file/service.py",
-          "app/api/v1/module_storage/transfer/engine.py"
+        "tests": [
+          "tests.test_eval_storage_regressions::test_invalid_storage_password_is_not_silenced"
         ],
-        "entries": [],
-        "tests": [],
-        "hard_negatives": {"symbols": [], "files": []}
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_storage.core.encrypt::encrypt_password"
+          ],
+          "files": [
+            "app/api/v1/module_storage/core/constants.py"
+          ]
+        }
       }
     },
     "complexity_tags": [
@@ -261,29 +354,48 @@
     ],
     "hint": "加密函数被改成了解密：传入明文时会直接抛出异常。",
     "gold": {
-      "root_causes": [{
-        "id": "password-encrypt-now-decrypts",
-        "fix_file": "app/api/v1/module_storage/core/encrypt.py",
-        "alternate_files": [
-          "app/api/v1/module_storage/source/service.py"
-        ],
-        "mechanism_terms": [
-          "StorageSourceService",
-          "StorageSourceCRUD",
-          "create",
-          "update"
-        ],
-        "min_matches": 2
-      }],
+      "root_causes": [
+        {
+          "id": "password-encrypt-now-decrypts",
+          "fix_file": "app/api/v1/module_storage/core/encrypt.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "StorageSourceService",
+            "StorageSourceCRUD",
+            "create",
+            "update"
+          ],
+          "min_matches": 2
+        }
+      ],
       "context": {
-        "symbols": [],
+        "symbols": [
+          "app.api.v1.module_storage.core.encrypt::encrypt_password",
+          "app.api.v1.module_storage.source.service::StorageSourceService.create",
+          "app.api.v1.module_storage.source.service::StorageSourceService.update",
+          "app.api.v1.module_storage.source.controller::create_storage_source_controller",
+          "app.api.v1.module_storage.source.controller::update_storage_source_controller"
+        ],
         "files": [
           "app/api/v1/module_storage/source/service.py",
+          "app/api/v1/module_storage/source/controller.py",
           "app/api/v1/module_storage/core/encrypt.py"
         ],
-        "entries": [],
-        "tests": [],
-        "hard_negatives": {"symbols": [], "files": []}
+        "entries": [
+          "app.api.v1.module_storage.source.controller::create_storage_source_controller",
+          "app.api.v1.module_storage.source.controller::update_storage_source_controller"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_storage_password_round_trip"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_storage.core.encrypt::decrypt_password"
+          ],
+          "files": [
+            "app/api/v1/module_storage/core/constants.py"
+          ]
+        }
       }
     },
     "complexity_tags": [
@@ -306,29 +418,50 @@
     ],
     "hint": "构造适配器配置时不再对密码解密，配置里携带的是数据库中存储的密文。",
     "gold": {
-      "root_causes": [{
-        "id": "transfer-config-passes-encrypted-password",
-        "fix_file": "app/api/v1/module_storage/transfer/engine.py",
-        "alternate_files": [
-          "app/api/v1/module_storage/transfer/service.py"
-        ],
-        "mechanism_terms": [
-          "_run_step",
-          "execute_transfer_task",
-          "StorageTransferService",
-          "_launch"
-        ],
-        "min_matches": 2
-      }],
+      "root_causes": [
+        {
+          "id": "transfer-config-passes-encrypted-password",
+          "fix_file": "app/api/v1/module_storage/transfer/engine.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "_run_step",
+            "execute_transfer_task",
+            "StorageTransferService",
+            "_launch"
+          ],
+          "min_matches": 2
+        }
+      ],
       "context": {
-        "symbols": [],
+        "symbols": [
+          "app.api.v1.module_storage.transfer.engine::_build_config",
+          "app.api.v1.module_storage.transfer.engine::_run_step",
+          "app.api.v1.module_storage.transfer.engine::execute_transfer_task",
+          "app.api.v1.module_storage.transfer.service::StorageTransferService.create",
+          "app.api.v1.module_storage.transfer.service::StorageTransferService.create_local",
+          "app.api.v1.module_storage.transfer.controller::create_transfer_task_controller",
+          "app.api.v1.module_storage.transfer.controller::create_local_transfer_task_controller"
+        ],
         "files": [
           "app/api/v1/module_storage/transfer/engine.py",
-          "app/api/v1/module_storage/transfer/service.py"
+          "app/api/v1/module_storage/transfer/service.py",
+          "app/api/v1/module_storage/transfer/controller.py"
         ],
-        "entries": [],
-        "tests": [],
-        "hard_negatives": {"symbols": [], "files": []}
+        "entries": [
+          "app.api.v1.module_storage.transfer.controller::create_transfer_task_controller",
+          "app.api.v1.module_storage.transfer.controller::create_local_transfer_task_controller"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_transfer_config_decrypts_password"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_storage.file.service::StorageFileService._get_source"
+          ],
+          "files": [
+            "app/api/v1/module_storage/file/service.py"
+          ]
+        }
       }
     },
     "complexity_tags": [
@@ -351,29 +484,55 @@
     ],
     "hint": "查询可用存储源时传入的标识由解析出的值改成了空值，因此走的是兜底分支而不是指定的存储源。",
     "gold": {
-      "root_causes": [{
-        "id": "file-ops-lookup-source-with-none-id",
-        "fix_file": "app/api/v1/module_storage/file/service.py",
-        "alternate_files": [
-          "app/api/v1/module_storage/source/service.py"
-        ],
-        "mechanism_terms": [
-          "copy_or_move",
-          "get_url",
-          "is_default",
-          "target_id"
-        ],
-        "min_matches": 2
-      }],
+      "root_causes": [
+        {
+          "id": "file-ops-lookup-source-with-none-id",
+          "fix_file": "app/api/v1/module_storage/file/service.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "copy_or_move",
+            "get_url",
+            "is_default",
+            "target_id"
+          ],
+          "min_matches": 2
+        }
+      ],
       "context": {
-        "symbols": [],
+        "symbols": [
+          "app.api.v1.module_storage.file.service::StorageFileService._get_source",
+          "app.api.v1.module_storage.source.service::StorageSourceService.get_active_source",
+          "app.api.v1.module_storage.file.service::StorageFileService.copy_or_move",
+          "app.api.v1.module_storage.file.service::StorageFileService.delete",
+          "app.api.v1.module_storage.file.service::StorageFileService.download",
+          "app.api.v1.module_storage.file.service::StorageFileService.get_url",
+          "app.api.v1.module_storage.file.service::StorageFileService.list",
+          "app.api.v1.module_storage.file.service::StorageFileService.upload"
+        ],
         "files": [
           "app/api/v1/module_storage/file/service.py",
+          "app/api/v1/module_storage/file/controller.py",
           "app/api/v1/module_storage/source/service.py"
         ],
-        "entries": [],
-        "tests": [],
-        "hard_negatives": {"symbols": [], "files": []}
+        "entries": [
+          "app.api.v1.module_storage.file.controller::copy_or_move_storage_file_controller",
+          "app.api.v1.module_storage.file.controller::delete_storage_file_controller",
+          "app.api.v1.module_storage.file.controller::download_storage_file_controller",
+          "app.api.v1.module_storage.file.controller::get_storage_file_url_controller",
+          "app.api.v1.module_storage.file.controller::list_storage_file_controller",
+          "app.api.v1.module_storage.file.controller::upload_storage_file_controller"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_storage_file_lookup_forwards_source_id"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_storage.transfer.engine::_build_config"
+          ],
+          "files": [
+            "app/api/v1/module_storage/transfer/engine.py"
+          ]
+        }
       }
     },
     "complexity_tags": [
@@ -382,5 +541,697 @@
       "hidden-caller"
     ],
     "difficulty": "medium"
+  },
+  {
+    "id": "cb-trivial-transfer-dt-none-guard",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/transfer/engine.py b/app/api/v1/module_storage/transfer/engine.py\nindex b23ddd5..e2f0ef9 100644\n--- a/app/api/v1/module_storage/transfer/engine.py\n+++ b/app/api/v1/module_storage/transfer/engine.py\n@@ -30,7 +30,7 @@ _STEP_RUNNING_PROGRESS = 50\n \n \n def _dt(value: datetime | None) -> str | None:\n-    return value.isoformat() if value else None\n+    return value.isoformat()\n \n \n def _step_payload(step: StorageTransferStepModel) -> dict:\n",
+    "hint": "传输任务或步骤的时间字段未设置时，进度推送载荷的序列化会直接崩溃，任务无法正常推送进度。",
+    "changed_symbols": [
+      "app.api.v1.module_storage.transfer.engine::_dt"
+    ],
+    "difficulty": "trivial",
+    "complexity_tags": [
+      "diff-local",
+      "family-transfer-payload"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "dt-missing-none-guard",
+          "fix_file": "app/api/v1/module_storage/transfer/engine.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "_task_payload",
+            "_broadcast",
+            "transfer_ws_manager"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_storage.transfer.engine::_dt",
+          "app.api.v1.module_storage.transfer.engine::_step_payload",
+          "app.api.v1.module_storage.transfer.engine::_task_payload",
+          "app.api.v1.module_storage.transfer.engine::_broadcast"
+        ],
+        "files": [
+          "app/api/v1/module_storage/transfer/engine.py"
+        ],
+        "entries": [
+          "app.api.v1.module_storage.transfer.controller::create_transfer_task_controller",
+          "app.api.v1.module_storage.transfer.controller::create_local_transfer_task_controller"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_dt_none_returns_none",
+          "tests.test_eval_storage_regressions::test_dt_serializes_aware_datetime_to_iso"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_storage.transfer.engine::_resolve_source_size"
+          ],
+          "files": [
+            "app/api/v1/module_storage/transfer/ws_manager.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-trivial-transfer-running-progress",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/transfer/engine.py b/app/api/v1/module_storage/transfer/engine.py\nindex b23ddd5..5bfd572 100644\n--- a/app/api/v1/module_storage/transfer/engine.py\n+++ b/app/api/v1/module_storage/transfer/engine.py\n@@ -117,7 +117,7 @@ async def _run_step(db: AsyncSession, task: StorageTransferTaskModel, step: Stor\n     started_at = datetime.now(UTC)\n     step.status = \"running\"\n     step.started_at = started_at\n-    step.progress = _STEP_RUNNING_PROGRESS\n+    step.progress = 100\n     await db.commit()\n     await _broadcast(task, await _load_steps(db, task.id))\n \n",
+    "hint": "传输步骤还在执行中就被标记为已完成：步骤进度直接显示 100%，用户看到任务未结束却已显示完成进度。",
+    "changed_symbols": [
+      "app.api.v1.module_storage.transfer.engine::_run_step"
+    ],
+    "difficulty": "trivial",
+    "complexity_tags": [
+      "grep-friendly",
+      "family-transfer-state"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "running-step-reports-completed-progress",
+          "fix_file": "app/api/v1/module_storage/transfer/engine.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "_step_payload",
+            "transfer_ws_manager",
+            "execute_transfer_task"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_storage.transfer.engine::_run_step",
+          "app.api.v1.module_storage.transfer.engine::execute_transfer_task",
+          "app.api.v1.module_storage.transfer.engine::_broadcast"
+        ],
+        "files": [
+          "app/api/v1/module_storage/transfer/engine.py"
+        ],
+        "entries": [
+          "app.api.v1.module_storage.transfer.controller::create_transfer_task_controller",
+          "app.api.v1.module_storage.transfer.controller::create_local_transfer_task_controller"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_running_step_reports_intermediate_progress"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_storage.transfer.engine::_resolve_source_size"
+          ],
+          "files": [
+            "app/api/v1/module_storage/transfer/registry.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-medium-storage-path-traversal",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/file/service.py b/app/api/v1/module_storage/file/service.py\nindex e82ad7b..3938f3c 100644\n--- a/app/api/v1/module_storage/file/service.py\n+++ b/app/api/v1/module_storage/file/service.py\n@@ -31,7 +31,7 @@ class StorageFileService:\n         if not remote_path or not remote_path.strip():\n             raise CustomException(msg=\"请提供文件路径\")\n         parts = [p for p in remote_path.replace(\"\\\\\", \"/\").split(\"/\") if p not in (\"\", \".\")]\n-        if any(p == \"..\" for p in parts) or \"\\x00\" in remote_path:\n+        if \"\\x00\" in remote_path:\n             raise CustomException(msg=\"非法的文件路径\")\n         return \"/\".join(parts)\n \n",
+    "hint": "远端路径校验不再拦截 .. 穿越片段，上传/下载/删除可通过 .. 访问配置前缀之外的路径。",
+    "changed_symbols": [
+      "app.api.v1.module_storage.file.service::StorageFileService._validate_remote_path"
+    ],
+    "difficulty": "medium",
+    "complexity_tags": [
+      "grep-friendly",
+      "family-storage-path"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "remote-path-traversal-allowed",
+          "fix_file": "app/api/v1/module_storage/file/service.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "copy_or_move",
+            "get_url",
+            "download"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_storage.file.service::StorageFileService._validate_remote_path",
+          "app.api.v1.module_storage.file.service::StorageFileService.upload",
+          "app.api.v1.module_storage.file.service::StorageFileService.download",
+          "app.api.v1.module_storage.file.service::StorageFileService.copy_or_move",
+          "app.api.v1.module_storage.file.service::StorageFileService.delete",
+          "app.api.v1.module_storage.file.service::StorageFileService.list"
+        ],
+        "files": [
+          "app/api/v1/module_storage/file/service.py",
+          "app/api/v1/module_storage/file/controller.py"
+        ],
+        "entries": [
+          "app.api.v1.module_storage.file.controller::upload_storage_file_controller",
+          "app.api.v1.module_storage.file.controller::download_storage_file_controller",
+          "app.api.v1.module_storage.file.controller::delete_storage_file_controller",
+          "app.api.v1.module_storage.file.controller::copy_or_move_storage_file_controller",
+          "app.api.v1.module_storage.file.controller::list_storage_file_controller",
+          "app.api.v1.module_storage.file.controller::get_storage_file_url_controller"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_remote_path_rejects_traversal"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_storage.file.service::StorageFileService._get_source"
+          ],
+          "files": [
+            "app/api/v1/module_storage/core/constants.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-medium-workflow-node-code",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py b/app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py\nindex 9f62742..bfba3b2 100644\n--- a/app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py\n+++ b/app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py\n@@ -68,7 +68,7 @@ def builtin_node(*, code: str, name: str, category: str = \"action\", description:\n \n \n def get_builtin_node(code: str) -> BuiltinNode | None:\n-    return BUILTIN_NODES.get(code)\n+    return BUILTIN_NODES.get(code.upper())\n \n \n def builtin_node_options() -> list[dict]:\n",
+    "hint": "工作流执行内置节点时全部提示节点未注册，内置的存储、通知、AI 节点都无法运行。",
+    "changed_symbols": [
+      "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::get_builtin_node"
+    ],
+    "difficulty": "medium",
+    "complexity_tags": [
+      "graph-blind-spot",
+      "family-workflow-registry"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "builtin-node-lookup-key-mismatch",
+          "fix_file": "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "execute_workflow",
+            "storage_upload",
+            "ai_chat"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::get_builtin_node",
+          "app.api.v1.module_task.workflow.flows.service::WorkflowService.execute_workflow",
+          "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::builtin_node_options"
+        ],
+        "files": [
+          "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+          "app/api/v1/module_task/workflow/flows/service.py",
+          "app/api/v1/module_task/workflow/flows/controller.py"
+        ],
+        "entries": [
+          "app.api.v1.module_task.workflow.flows.controller::execute_workflow_controller"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_builtin_node_storage_url_is_registered"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::builtin_node"
+          ],
+          "files": [
+            "app/api/v1/module_task/workflow/node_type/service.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-trivial-hierarchy-parent-map",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/utils/common_util.py b/app/utils/common_util.py\nindex 1524fad..6972bf9 100644\n--- a/app/utils/common_util.py\n+++ b/app/utils/common_util.py\n@@ -125,7 +125,7 @@ def get_parent_id_map(model_list: Sequence[DeclarativeBase]) -> dict[int, int]:\n     返回:\n     - Dict[int, int]: {id: parent_id} 映射字典。\n     \"\"\"\n-    return {item.id: item.parent_id for item in model_list}  # pyright: ignore[reportAttributeAccessIssue]\n+    return {item.parent_id: item.id for item in model_list}  # pyright: ignore[reportAttributeAccessIssue]\n \n \n def get_parent_recursion(id: int, id_map: dict[int, int], ids: list[int] | None = None) -> list[int]:\n",
+    "hint": "组织/菜单的批量启用在计算受影响子集时父级映射方向错误，启用的节点集合可能指向自身或错误的上级。",
+    "changed_symbols": [
+      "app.utils.common_util::get_parent_id_map"
+    ],
+    "difficulty": "trivial",
+    "complexity_tags": [
+      "grep-friendly",
+      "family-hierarchy"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "parent-id-map-swapped",
+          "fix_file": "app/utils/common_util.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "batch_set_available",
+            "enable_ids",
+            "get_child_recursion"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.utils.common_util::get_parent_id_map",
+          "app.utils.common_util::get_parent_recursion",
+          "app.api.v1.module_system.dept.service::DeptService.batch_set_available"
+        ],
+        "files": [
+          "app/utils/common_util.py",
+          "app/api/v1/module_system/dept/service.py"
+        ],
+        "entries": [
+          "app.api.v1.module_system.dept.controller::batch_set_available_obj_controller",
+          "app.api.v1.module_system.menu.controller::batch_set_available_obj_controller"
+        ],
+        "tests": [
+          "tests.test_eval_system_regressions::test_parent_id_map_maps_id_to_parent"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.utils.common_util::get_child_id_map"
+          ],
+          "files": [
+            "app/api/v1/module_system/position/service.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-trivial-position-page-offset",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_system/position/service.py b/app/api/v1/module_system/position/service.py\nindex 7c2bf1f..ea7cf96 100644\n--- a/app/api/v1/module_system/position/service.py\n+++ b/app/api/v1/module_system/position/service.py\n@@ -49,7 +49,7 @@ class PositionService:\n         search: PositionQueryParam | None = None,\n         order_by: list[dict[str, str]] | None = None,\n     ) -> PageResultSchema[PositionOutSchema]:\n-        offset = (page_no - 1) * page_size\n+        offset = page_no * page_size\n         return await PositionCRUD(self.auth, self.db).page(\n             offset=offset,\n             limit=page_size,\n",
+    "hint": "岗位列表分页第二页起的偏移量计算错误，翻页时每页会多跳过一页的记录。",
+    "changed_symbols": [
+      "app.api.v1.module_system.position.service::PositionService.page"
+    ],
+    "difficulty": "trivial",
+    "complexity_tags": [
+      "diff-local",
+      "family-pagination"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "position-page-offset-off-by-one",
+          "fix_file": "app/api/v1/module_system/position/service.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "get_obj_list_controller",
+            "get_options",
+            "get_list"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_system.position.service::PositionService.page"
+        ],
+        "files": [
+          "app/api/v1/module_system/position/service.py"
+        ],
+        "entries": [
+          "app.api.v1.module_system.position.controller::get_obj_list_controller"
+        ],
+        "tests": [
+          "tests.test_eval_system_regressions::test_position_page_second_page_offsets_by_one_page"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_system.position.service::PositionService.detail"
+          ],
+          "files": [
+            "app/utils/excel_util.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-trivial-notice-status-hardcoded",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_system/notice/service.py b/app/api/v1/module_system/notice/service.py\nindex cb64ba6..46ab361 100644\n--- a/app/api/v1/module_system/notice/service.py\n+++ b/app/api/v1/module_system/notice/service.py\n@@ -138,7 +138,7 @@ class NoticeService:\n         参数:\n         - data (BatchSetAvailable): 批量设置状态模型\n         \"\"\"\n-        await NoticeCRUD(self.auth, self.db).set(ids=data.ids, status=data.status)\n+        await NoticeCRUD(self.auth, self.db).set(ids=data.ids, status=1)\n \n     @staticmethod\n     def export(notice_list: list[dict]) -> bytes:\n",
+    "hint": "公告批量启用/禁用时请求的状态值被忽略，无论选择启用还是禁用都写死为停用状态。",
+    "changed_symbols": [
+      "app.api.v1.module_system.notice.service::NoticeService.set_available"
+    ],
+    "difficulty": "trivial",
+    "complexity_tags": [
+      "diff-local",
+      "family-notice-status"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "notice-status-ignored-on-set",
+          "fix_file": "app/api/v1/module_system/notice/service.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "batch_set_available_notice_controller",
+            "get_notice_list_available_controller",
+            "delete_notice_controller"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_system.notice.service::NoticeService.set_available"
+        ],
+        "files": [
+          "app/api/v1/module_system/notice/service.py"
+        ],
+        "entries": [
+          "app.api.v1.module_system.notice.controller::batch_set_available_notice_controller"
+        ],
+        "tests": [
+          "tests.test_eval_system_regressions::test_notice_set_available_forwards_requested_status"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_system.notice.service::NoticeService.delete"
+          ],
+          "files": [
+            "app/api/v1/module_system/notice/schema.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-trivial-dict-type-default-order",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_system/dict/service.py b/app/api/v1/module_system/dict/service.py\nindex 0fec5b1..b28f67a 100644\n--- a/app/api/v1/module_system/dict/service.py\n+++ b/app/api/v1/module_system/dict/service.py\n@@ -90,7 +90,7 @@ class DictTypeService:\n         return await DictTypeCRUD(self.auth, self.db).page(\n             offset=offset,\n             limit=page_size,\n-            order_by=order_by or [{\"id\": \"asc\"}],\n+            order_by=order_by or [{\"id\": \"desc\"}],\n             search=search_to_dict(search),\n             out_schema=DictTypeOutSchema,\n         )\n",
+    "hint": "字典类型列表默认按主键倒序返回，而之前的默认行为是按主键升序。",
+    "changed_symbols": [
+      "app.api.v1.module_system.dict.service::DictTypeService.page"
+    ],
+    "difficulty": "trivial",
+    "complexity_tags": [
+      "grep-friendly",
+      "family-dict-query"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "dict-type-page-default-order-reversed",
+          "fix_file": "app/api/v1/module_system/dict/service.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "get_type_list_controller",
+            "get_data_list_controller",
+            "batch_set_available_dict_type_controller"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_system.dict.service::DictTypeService.page"
+        ],
+        "files": [
+          "app/api/v1/module_system/dict/service.py"
+        ],
+        "entries": [
+          "app.api.v1.module_system.dict.controller::get_type_list_controller"
+        ],
+        "tests": [
+          "tests.test_eval_system_regressions::test_dict_type_page_defaults_to_ascending_id"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_system.dict.service::DictDataService.page"
+          ],
+          "files": [
+            "app/api/v1/module_system/dict/crud.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-medium-hierarchy-tree-orphan",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/utils/common_util.py b/app/utils/common_util.py\nindex 1524fad..aaf29ca 100644\n--- a/app/utils/common_util.py\n+++ b/app/utils/common_util.py\n@@ -213,8 +213,8 @@ def traversal_to_tree(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:\n                     parent_node[\"children\"] = []\n                 if node not in parent_node[\"children\"]:\n                     parent_node[\"children\"].append(node)\n-            elif node not in tree:\n-                tree.append(node)\n+            else:\n+                pass\n \n     # 确保所有节点都有children字段\n     for node in tree:\n",
+    "hint": "组织/菜单树构建时，父节点缺失的游离节点被静默丢弃，树里会少掉这些节点。",
+    "changed_symbols": [
+      "app.utils.common_util::traversal_to_tree"
+    ],
+    "difficulty": "medium",
+    "complexity_tags": [
+      "grep-friendly",
+      "family-hierarchy"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "tree-drops-orphan-nodes",
+          "fix_file": "app/utils/common_util.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "get_dept_tree_controller",
+            "get_menu_tree_controller",
+            "get_current_user_info_controller"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.utils.common_util::traversal_to_tree",
+          "app.api.v1.module_system.dept.service::DeptService.tree"
+        ],
+        "files": [
+          "app/utils/common_util.py",
+          "app/api/v1/module_system/dept/service.py",
+          "app/api/v1/module_system/menu/service.py"
+        ],
+        "entries": [
+          "app.api.v1.module_system.dept.controller::get_dept_tree_controller",
+          "app.api.v1.module_system.menu.controller::get_menu_tree_controller"
+        ],
+        "tests": [
+          "tests.test_eval_system_regressions::test_traversal_tree_keeps_orphan_as_root"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.utils.common_util::recursive_to_tree"
+          ],
+          "files": [
+            "app/api/v1/module_system/user/service.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-medium-notice-create-unique",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_system/notice/service.py b/app/api/v1/module_system/notice/service.py\nindex cb64ba6..0d0f90b 100644\n--- a/app/api/v1/module_system/notice/service.py\n+++ b/app/api/v1/module_system/notice/service.py\n@@ -94,9 +94,6 @@ class NoticeService:\n         返回:\n         - NoticeOutSchema: 公告响应模型\n         \"\"\"\n-        notice = await NoticeCRUD(self.auth, self.db).get(notice_title=data.notice_title)\n-        if notice:\n-            raise CustomException(msg=\"创建失败，该数据已存在\")\n         notice_obj = await NoticeCRUD(self.auth, self.db).create(data=data)\n         return await self.detail(id=notice_obj.id)\n \n",
+    "hint": "创建公告时不再校验标题是否已存在，同标题公告可以被重复创建。",
+    "changed_symbols": [
+      "app.api.v1.module_system.notice.service::NoticeService.create"
+    ],
+    "difficulty": "medium",
+    "complexity_tags": [
+      "diff-local",
+      "family-notice-uniq"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "notice-duplicate-title-created",
+          "fix_file": "app/api/v1/module_system/notice/service.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "create_notice_controller",
+            "update_notice_controller",
+            "delete_notice_controller"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_system.notice.service::NoticeService.create",
+          "app.api.v1.module_system.notice.service::NoticeService.detail"
+        ],
+        "files": [
+          "app/api/v1/module_system/notice/service.py"
+        ],
+        "entries": [
+          "app.api.v1.module_system.notice.controller::create_notice_controller"
+        ],
+        "tests": [
+          "tests.test_eval_system_regressions::test_notice_create_rejects_duplicate_title"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_system.notice.service::NoticeService.update"
+          ],
+          "files": [
+            "app/api/v1/module_system/notice/crud.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-medium-log-search-forwarded",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_system/log/service.py b/app/api/v1/module_system/log/service.py\nindex 98bd7b4..d9a4c36 100644\n--- a/app/api/v1/module_system/log/service.py\n+++ b/app/api/v1/module_system/log/service.py\n@@ -46,7 +46,7 @@ class LoginLogService:\n             offset=(page_no - 1) * page_size,\n             limit=page_size,\n             order_by=order_by or [{\"updated_time\": \"desc\"}],\n-            search=search_to_dict(search),\n+            search=None,\n             out_schema=LoginLogOutSchema,\n         )\n \n",
+    "hint": "登录日志分页查询时不再应用查询条件，按用户名等条件的筛选全部失效。",
+    "changed_symbols": [
+      "app.api.v1.module_system.log.service::LoginLogService.page"
+    ],
+    "difficulty": "medium",
+    "complexity_tags": [
+      "grep-friendly",
+      "family-log-query"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "login-log-search-filter-dropped",
+          "fix_file": "app/api/v1/module_system/log/service.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "get_log_list_controller",
+            "delete_log_controller",
+            "export_operation_log_list_controller"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_system.log.service::LoginLogService.page"
+        ],
+        "files": [
+          "app/api/v1/module_system/log/service.py"
+        ],
+        "entries": [
+          "app.api.v1.module_system.log.controller::get_log_list_controller"
+        ],
+        "tests": [
+          "tests.test_eval_system_regressions::test_login_log_page_forwards_search_filters"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_system.log.service::OperationLogService.page"
+          ],
+          "files": [
+            "app/api/v1/module_system/log/crud.py"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "cb-medium-notice-delete-existence",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_system/notice/service.py b/app/api/v1/module_system/notice/service.py\nindex cb64ba6..0f8fc12 100644\n--- a/app/api/v1/module_system/notice/service.py\n+++ b/app/api/v1/module_system/notice/service.py\n@@ -127,9 +127,6 @@ class NoticeService:\n             raise CustomException(msg=\"删除失败，删除对象不能为空\")\n         notices = await NoticeCRUD(self.auth, self.db).get_list(search={\"id\": (\"in\", ids)})\n         notice_map = {n.id: n for n in notices}\n-        for nid in ids:\n-            if nid not in notice_map:\n-                raise CustomException(msg=\"删除失败，该数据不存在\")\n         await NoticeCRUD(self.auth, self.db).delete(ids=ids)\n \n     async def set_available(self, data: BatchSetAvailable) -> None:\n",
+    "hint": "批量删除公告时不再校验每个 id 是否真实存在，部分 id 不存在时仍然直接删除。",
+    "changed_symbols": [
+      "app.api.v1.module_system.notice.service::NoticeService.delete"
+    ],
+    "difficulty": "medium",
+    "complexity_tags": [
+      "diff-local",
+      "family-notice-batch"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "notice-delete-skips-existence-check",
+          "fix_file": "app/api/v1/module_system/notice/service.py",
+          "alternate_files": [],
+          "mechanism_terms": [
+            "delete_notice_controller",
+            "get_notice_detail_controller",
+            "get_notice_list_controller"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_system.notice.service::NoticeService.delete"
+        ],
+        "files": [
+          "app/api/v1/module_system/notice/service.py"
+        ],
+        "entries": [
+          "app.api.v1.module_system.notice.controller::delete_notice_controller"
+        ],
+        "tests": [
+          "tests.test_eval_system_regressions::test_notice_delete_rejects_missing_ids"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_system.notice.service::NoticeService.detail"
+          ],
+          "files": [
+            "app/api/v1/module_system/notice/model.py"
+          ]
+        }
+      }
+    }
   }
 ]

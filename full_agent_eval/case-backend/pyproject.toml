@@ -140,3 +140,8 @@ line-ending = "auto"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.code-review-ai]
+# 业务代码包含 test_connection/test_config 方法；仅凭 test_* 名称会把它们
+# 误判成测试。该 fixture 的测试都位于 tests/，因此按路径识别更准确。
+test_names = []
