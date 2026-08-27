@@ -42,7 +42,7 @@ Retrieval 和 Agent Review 两层评分。
 - schema 和防泄漏测试：`tests/test_case_backend_recall.py`
 - Gold 单元测试：`tests/test_eval_gold.py`
 
-评测报告和运行中间产物放在 `.code-review-ai/`，不要提交到仓库。
+评测报告和运行中间产物放在 `eval-results/`，不要提交到仓库。
 
 ## 3. 新增一条 case 的标准流程
 
@@ -147,7 +147,7 @@ code-review-ai full-agent-eval \
   --cases benchmarks/case-backend-cases.json \
   --case-ids case-backend-short-stable-name \
   --dry-run \
-  -o .code-review-ai/full-agent-preflight.json
+  -o eval-results/full-agent-preflight.json
 ```
 
 preflight 不调用模型，但会完成以下检查：
@@ -249,7 +249,7 @@ code-review-ai full-agent-eval \
   --modes native_agent full_project_core \
   --agent-command "python -m code_review_ai.agent_adapter claude --model sonnet --max-budget-usd 1.00" \
   --repetitions 3 --workers 2 \
-  -o .code-review-ai/full-agent-report.json
+  -o eval-results/full-agent-report.json
 ```
 
 确认新增 case 行为合理后，再去掉 `--case-ids` 跑完整回归集。固定对比模型、预算、模式、
@@ -279,6 +279,31 @@ Agent 的结构化回答包含：
 `findings` 用于 root cause 评分，其余 `affected_*` 和 `tests` 用于 Agent Review 的 context
 评分。Native 文件访问和 MCP 调用以执行器观测到的 telemetry 为准，不要只相信模型自行
 填写的 `files_read` / `tool_calls`。
+
+### 6.1 无 LLM 的接线回归（`scripted` agent）
+
+需要快速确认评测链路（建索引 → agent 子进程 → MCP server 子进程 → transcript →
+计分 → 聚合）没有坏、且图工具确实能在该 case 索引上查到东西，但不想登录 claude、
+不烧 token 时，用 `scripted` 替代真实模型：
+
+```bash
+code-review-ai full-agent-eval \
+  --cases benchmarks/fast-cases.json \
+  --local-repo benchmarks/fast-repo \
+  --agent-command "python -m code_review_ai.agent_adapter scripted" \
+  --modes native_agent full_project_core \
+  -o eval-results/scripted-report.json
+```
+
+`scripted` 与真实 claude 走完全相同的编排：`native_agent` 臂只用 Read/Grep 语义
+（`mcp_adoption_rate` 应为 0），`full_project_core` 臂通过 stdio 协议真实连接 MCP
+server 子进程并调用 `get_change_summary` / `get_impact` / `get_test_impact`
+（`mcp_adoption_rate` 应为 1），图工具对该 case 返回的 `affected_entries` 是真实索引
+结果。场景由 `CRAI_EVAL_MODE` 自动派生，一条 `--agent-command` 服务两个臂。
+
+它是**能力与接线的 oracle，不是模型行为的替代**：能证明管线正确、图工具可答，但
+不能说明真实 LLM agent 会怎么用这些工具。行为对比仍须用真实 claude 跑；scripted
+臂适合进 CI 做回归。对应测试在 `tests/test_scripted_full_agent_eval.py`。
 
 ## 7. 如何读报告
 
@@ -321,10 +346,10 @@ Agent Review：
 
 ```bash
 code-review-ai full-agent-eval-rescore \
-  --report .code-review-ai/full-agent-report.json \
+  --report eval-results/full-agent-report.json \
   --cases benchmarks/case-backend-cases.json \
-  --transcripts .code-review-ai/full-agent-eval/transcripts \
-  -o .code-review-ai/full-agent-report-rescored.json
+  --transcripts eval-results/full-agent-eval/transcripts \
+  -o eval-results/full-agent-report-rescored.json
 ```
 
 只允许在看到模型输出前已经定义、或能由独立代码证据证明的 Gold 修正。不能因为某个模式

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
+import re
 import shlex
+from contextlib import asynccontextmanager
 import shutil
 import subprocess
 import sys
@@ -218,6 +221,128 @@ def _mcp_config() -> dict:
         "type": "stdio", "command": sys.executable,
         "args": ["-m", "code_review_ai.mcp_server"], "env": env,
     }}}
+
+
+def run_scripted_agent(prompt: str, scenario: str | None = None) -> dict:
+    """Deterministic full-agent-eval agent (no LLM, no claude, no network).
+
+    Exercises the same wiring as the real claude adapter — CLI subprocess,
+    eval env vars, and an MCP server subprocess connected through the stdio
+    protocol — but emits a scripted finding instead of a model call, so the
+    eval harness can run in CI without claude login, tokens, or a live index
+    server. ``core`` scenarios call the real get_change_summary / get_impact /
+    get_test_impact through an in-process MCP stdio client; ``native``
+    scenarios touch only Read/Grep semantics. When ``scenario`` is omitted it
+    is derived from ``CRAI_EVAL_MODE`` so one ``--agent-command`` serves both
+    eval arms.
+    """
+    effective = scenario or _scripted_scenario_from_env()
+    changed_files = _changed_files_from_prompt(prompt)
+    if effective == "core":
+        return asyncio.run(_scripted_core(changed_files))
+    return _scripted_native(changed_files)
+
+
+def _scripted_scenario_from_env() -> str:
+    mode = os.environ.get("CRAI_EVAL_MODE", "")
+    return "native" if mode == "native_agent" else "core"
+
+
+def _changed_files_from_prompt(prompt: str) -> list[str]:
+    """The repo-relative files a patch touches, from the embedded diff."""
+    files: list[str] = []
+    for line in prompt.splitlines():
+        match = re.match(r"^diff --git a/(\S+) b/\S+", line)
+        if match and match.group(1) not in files:
+            files.append(match.group(1))
+    return files
+
+
+def _scripted_native(changed_files: list[str]) -> dict:
+    """Native-arm script: Read/Grep only, no MCP tool call."""
+    target = changed_files[0] if changed_files else "src/app.py"
+    return {
+        "findings": [{
+            "file": target, "line": 1, "title": "scripted native finding",
+            "description": "Deterministic finding over the changed file."}],
+        "affected_symbols": [], "affected_files": [target],
+        "affected_entries": [], "tests": [],
+        "files_read": [target], "tool_calls": ["Read", "Grep"],
+        "tool_call_count": 2,
+        "usage": {"input_tokens": 0, "output_tokens": 0, "estimated": True},
+    }
+
+
+async def _scripted_core(changed_files: list[str]) -> dict:
+    """Core-arm script: drive the real graph tools over the MCP protocol."""
+    calls: list[str] = []
+    async with _mcp_session() as session:
+        summary_text = await _session_call(session, "get_change_summary", {})
+        calls.append("mcp__code-review-ai__get_change_summary")
+        summary = json.loads(summary_text)
+        changed = summary.get("changed_functions", [])
+        symbol = changed[0]["qname"] if changed else None
+        target = (changed[0]["file"] if changed
+                  else (changed_files[0] if changed_files else "src/app.py"))
+        if symbol:
+            impact_text = await _session_call(
+                session, "get_impact",
+                {"symbols": [symbol], "include_call_sites": True})
+            calls.append("mcp__code-review-ai__get_impact")
+            impact = json.loads(impact_text)
+            test_text = await _session_call(
+                session, "get_test_impact", {"symbols": [symbol]})
+            calls.append("mcp__code-review-ai__get_test_impact")
+        else:
+            impact = []
+    entries = sorted({entry for record in impact
+                      for entry in record.get("affected_entries", [])})
+    return {
+        "findings": [{
+            "file": target, "line": 1, "title": "scripted core finding",
+            "description": "Deterministic finding over the changed file."}],
+        "affected_symbols": [symbol] if symbol else [],
+        "affected_files": [target],
+        "affected_entries": entries,
+        "tests": [], "files_read": [target],
+        "tool_calls": calls, "tool_call_count": len(calls),
+        "usage": {"input_tokens": 0, "output_tokens": 0, "estimated": True},
+    }
+
+
+@asynccontextmanager
+async def _mcp_session():
+    """A connected ClientSession to the eval's in-process MCP server.
+
+    Reuses the exact server parameters the claude adapter injects via
+    ``--strict-mcp-config`` (see ``_mcp_config``) so the scripted agent
+    exercises the same server subprocess path.
+    """
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    server_config = _mcp_config()["mcpServers"]["code-review-ai"]
+    env = dict(os.environ)
+    env.update(server_config.get("env") or {})
+    params = StdioServerParameters(
+        command=server_config["command"], args=server_config["args"],
+        env=env, cwd=os.getcwd(), encoding="utf-8",
+        encoding_error_handler="replace")
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            yield session
+
+
+async def _session_call(session, tool_name: str,
+                        arguments: dict) -> str:
+    result = await session.call_tool(tool_name, arguments)
+    parts = []
+    for block in getattr(result, "content", []) or []:
+        text = getattr(block, "text", None)
+        if isinstance(text, str):
+            parts.append(text)
+    return "\n".join(parts)
 
 
 def _failure_reason(result_event: dict) -> str | None:
@@ -719,8 +844,17 @@ def main(argv: list[str] | None = None) -> int:
     claude.add_argument("--tool-profile",
                         choices=["none", "native", "full_project"],
                         default=os.environ.get("CRAI_EVAL_TOOL_PROFILE", "none"))
+    scripted = subparsers.add_parser(
+        "scripted",
+        help="deterministic agent (no LLM) for wiring/regression tests")
+    scripted.add_argument("--scenario", choices=["core", "native"],
+                          help="default: derived from CRAI_EVAL_MODE")
     args = parser.parse_args(argv)
     prompt = sys.stdin.read()
+    if args.provider == "scripted":
+        payload = run_scripted_agent(prompt, scenario=args.scenario)
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
     profile = None if args.tool_profile == "none" else args.tool_profile
     returncode, payload, error = run_claude(
         prompt, model=args.model, max_budget_usd=args.max_budget_usd,

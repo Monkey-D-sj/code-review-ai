@@ -105,7 +105,7 @@ Route a change to `local` or `graph` and build one bounded evidence package
 using only git diff, tree-sitter and the local SQLite index:
 
 ```bash
-code-review-ai context-plan --max-chars 8000 -o .code-review-ai/context-plan.json
+code-review-ai context-plan --max-chars 8000 -o eval-results/context-plan.json
 ```
 
 ## Agentic Eval
@@ -128,8 +128,8 @@ code-review-ai agent-eval --repo . \
   --cases examples/agent-eval-cases.example.json \
   --agent-command "your-agent --json" --repetitions 3 \
   --workers 4 \
-  --runs-dir .code-review-ai/agent-eval \
-  -o .code-review-ai/agent-eval-report.json
+  --runs-dir eval-results/agent-eval \
+  -o eval-results/agent-eval-report.json
 ```
 
 Use `--case-ids case-a case-b` to rerun provider failures without paying for
@@ -159,7 +159,7 @@ code-review-ai agent-eval --repo . \
   --cases examples/agent-eval-cases.example.json \
   --agent-command "python -m code_review_ai.agent_adapter claude --model sonnet" \
   --repetitions 3 --workers 4 \
-  -o .code-review-ai/agent-eval-example-r3.json
+  -o eval-results/agent-eval-example-r3.json
 ```
 
 `examples/agent-eval-cases.example.json` is a single offline case (inline diff,
@@ -178,7 +178,7 @@ sizes, and supplied files:
 ```bash
 code-review-ai agent-eval --repo . \
   --cases examples/agent-eval-cases.example.json --dry-run \
-  -o .code-review-ai/agent-eval-preflight.json
+  -o eval-results/agent-eval-preflight.json
 ```
 
 After a multi-repetition run, generate bootstrap confidence intervals and
@@ -186,8 +186,8 @@ paired comparisons against Diff Only:
 
 ```bash
 code-review-ai agent-eval-analyze \
-  --report .code-review-ai/agent-eval-report.json \
-  -o .code-review-ai/agent-eval-analysis.json
+  --report eval-results/agent-eval-report.json \
+  -o eval-results/agent-eval-analysis.json
 ```
 
 ### Full-project tool-use eval
@@ -212,13 +212,13 @@ blast radius remains uncertain or the change crosses an important boundary.
 ```bash
 code-review-ai full-agent-eval \
   --cases benchmarks/case-backend-cases.json --dry-run \
-  -o .code-review-ai/full-agent-preflight.json
+  -o eval-results/full-agent-preflight.json
 
 code-review-ai full-agent-eval \
   --cases benchmarks/case-backend-cases.json \
   --agent-command "python -m code_review_ai.agent_adapter claude --model sonnet --max-budget-usd 1.00" \
   --repetitions 3 --workers 4 \
-  -o .code-review-ai/full-agent-report.json
+  -o eval-results/full-agent-report.json
 ```
 
 `benchmarks/case-backend-cases.json` holds the business-shaped project cases
@@ -227,6 +227,34 @@ network needed), and `benchmarks/fast-cases.json` is the fast single-repo
 regression set against `benchmarks/fast-repo` (`--local-repo`). Both run the
 same `full-agent-eval` harness and share the `examples/agent-eval-cases.example.json`
 offline shape.
+
+#### Run without an LLM (`scripted` agent)
+
+The real agent command above needs a logged-in `claude` CLI and spends tokens.
+For a deterministic, no-network wiring regression that runs in CI, the same
+harness accepts a scripted agent that replaces the model with a fixed script:
+
+```bash
+code-review-ai full-agent-eval \
+  --cases benchmarks/fast-cases.json \
+  --local-repo benchmarks/fast-repo \
+  --agent-command "python -m code_review_ai.agent_adapter scripted" \
+  --modes native_agent full_project_core \
+  -o eval-results/scripted-report.json
+```
+
+The `scripted` adapter walks the exact same pipeline as the real one — CLI
+subprocess, eval env vars, transcript persistence, scoring, and aggregation —
+and, in the `full_project_core` arm, opens a real MCP server subprocess over
+stdio and calls `get_change_summary` / `get_impact` / `get_test_impact`, so the
+graph tools genuinely answer against the case index. It makes no model call, so
+it needs no claude login, tokens, or network. The scenario (native vs core) is
+derived from `CRAI_EVAL_MODE`, so one `--agent-command` serves both arms. This
+is a capability-and-wiring oracle, not a behavior substitute: it proves the
+harness wiring and that the graph tools answer on the index, but it cannot say
+how a real LLM agent would use those tools. Keep real `claude` runs for
+behavioral native-vs-core comparison; run the scripted arm in CI for regressions.
+Coverage is `tests/test_scripted_full_agent_eval.py`.
 
 Cases are graded **blind**: the prompt states the deliverable (what broke, which
 callers / entry points / tests are affected) and shows the diff, but never names a
