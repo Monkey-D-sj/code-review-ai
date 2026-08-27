@@ -252,8 +252,8 @@ code-review-ai full-agent-eval \
 The `scripted` adapter walks the exact same pipeline as the real one — CLI
 subprocess, eval env vars, transcript persistence, scoring, and aggregation —
 and, in the `full_project_core` arm, opens a real MCP server subprocess over
-stdio and calls `get_change_summary` / `get_impact` / `get_test_impact`, so the
-graph tools genuinely answer against the case index. It makes no model call, so
+stdio and calls `get_change_summary` / `get_impact`, so the graph tools
+genuinely answer against the case index. It makes no model call, so
 it needs no claude login, tokens, or network. The scenario (native vs core) is
 derived from `CRAI_EVAL_MODE`, so one `--agent-command` serves both arms. This
 is a capability-and-wiring oracle, not a behavior substitute: it proves the

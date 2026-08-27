@@ -320,13 +320,6 @@ async def _scripted_core(changed_files: list[str]) -> dict:
                 2, "mcp__code-review-ai__get_impact", impact_args,
                 impact_text))
             impact = json.loads(impact_text)
-            test_args: dict[str, object] = {"symbols": [symbol]}
-            test_text = await _session_call(session, "get_test_impact",
-                                            test_args)
-            calls.append("mcp__code-review-ai__get_test_impact")
-            trace.append(_trace_record(
-                3, "mcp__code-review-ai__get_test_impact", test_args,
-                test_text))
         else:
             impact = []
     entries = sorted({entry for record in impact

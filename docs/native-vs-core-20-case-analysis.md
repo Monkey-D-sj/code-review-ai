@@ -13,7 +13,7 @@
 | 预算上限 | **无**（uncapped；记忆：cap 是混杂变量） |
 | 模型 | sonnet，workers=4，timeout 1200s |
 
-core 模式可用的 MCP 工具（`_CORE_MCP_TOOLS`）：`get_impact`、`get_test_impact`、`get_change_summary`、`search_symbol`、`get_symbol_detail`。`query_graph`、`get_change_context` 被排除——get_impact 已含直接调用点代码,get_change_context 与其重叠故关闭（本分析运行时的旧工具集曾含它）。
+core 模式可用的 MCP 工具（`_CORE_MCP_TOOLS`）：`get_impact`、`get_change_summary`、`search_symbol`、`get_symbol_detail`。`query_graph`、`get_change_context`、`get_test_impact` 被排除——get_impact 已含直接调用点代码,get_change_context 与其重叠故关闭;get_test_impact（测试选择）是 CI 职责、对 LLM 评审无帮助故关闭（本分析运行时的旧工具集曾含它们）。
 
 ## 执行摘要
 

@@ -99,19 +99,21 @@ def test_core_mode_exposes_review_tools_except_explicit_exclusions(tmp_path):
         _case(), str(tmp_path), "diff --git a/src/app.py b/src/app.py")
     core = _prompt(prepared, "full_project_core")
     assert _CORE_MCP_TOOLS == (
-        "get_impact", "get_test_impact", "get_change_summary",
+        "get_impact", "get_change_summary",
         "search_symbol", "get_symbol_detail",
     )
     assert _CORE_EXCLUDED_MCP_TOOLS == {
         "rebuild_index", "get_communities", "get_community",
         "call_external_service", "find_dead_code", "query_graph",
-        "get_change_context",
+        "get_change_context", "get_test_impact",
     }
     for tool in (*_CORE_MCP_TOOLS, *_CORE_EXCLUDED_MCP_TOOLS):
         assert tool in core
     # get_change_context is off: get_impact's direct call_site already carries
     # the call line code, so a separate per-symbol expansion would be redundant.
     assert "get_change_context（已关闭）" in core
+    # get_test_impact is off too: test selection is CI's job, not LLM review.
+    assert "get_test_impact（测试选择）是 CI 的职责" in core
     # The first tool call must be get_change_summary, before any native tool.
     assert "第一个工具调用必须是 get_change_summary" in core
     assert "在任何其他工具之前（包括所有原生只读工具）" in core
@@ -223,12 +225,13 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
             calls = ["Read", "mcp__code-review-ai__search_symbol"]
         elif mode == "full_project_core":
             assert "get_change_context（已关闭）" in prompt
+            assert "get_test_impact（测试选择）是 CI 的职责" in prompt
             assert "query_graph" in prompt
             assert "get_change_summary" in prompt
             assert "search_symbol" in prompt
             assert "get_impact" in prompt
             assert env["CRAI_EVAL_MCP_TOOLS"] == (
-                "get_impact,get_test_impact,get_change_summary,"
+                "get_impact,get_change_summary,"
                 "search_symbol,get_symbol_detail")
             calls = ["Read", "mcp__code-review-ai__search_symbol"]
         else:
@@ -260,10 +263,13 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
     assert report["aggregate"]["full_project_core"][
         "mcp_tool_adoption_rate"
     ]["search_symbol"] == 1.0
-    # get_change_context is excluded from the core mode tool set.
+    # get_change_context and get_test_impact are excluded from the core set.
     assert report["aggregate"]["full_project_core"][
         "mcp_tool_adoption_rate"
     ]["get_change_context"] == 0.0
+    assert report["aggregate"]["full_project_core"][
+        "mcp_tool_adoption_rate"
+    ]["get_test_impact"] == 0.0
     assert report["index_setup"][0]["timed_with_agent"] is False
     assert report["graph_retrieval"]["aggregate"]["symbol_found_rate"] == 1.0
 

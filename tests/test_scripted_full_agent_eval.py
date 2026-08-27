@@ -65,7 +65,9 @@ def test_scripted_core_arm_really_calls_graph_tools(tmp_path):
     calls = core["tool_calls"]
     assert "mcp__code-review-ai__get_change_summary" in calls
     assert "mcp__code-review-ai__get_impact" in calls
-    assert "mcp__code-review-ai__get_test_impact" in calls
+    # get_test_impact / get_change_context are excluded from the core tool set.
+    assert "mcp__code-review-ai__get_test_impact" not in calls
+    assert "mcp__code-review-ai__get_change_context" not in calls
     # The transcript persisted the run so the pipeline end is reachable.
     transcript = (tmp_path / "work" / "transcripts"
                   / "caller-return-shape" / "full_project_core" / "run-1.json")
