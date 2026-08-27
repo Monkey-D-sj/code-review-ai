@@ -385,7 +385,8 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
                max_nodes_per_direction: int = 20,
                tests: str = "exclude",
                include_signatures: bool = True,
-               include_call_sites: bool = True) -> list[dict]:
+               include_call_sites: bool = True,
+               max_level: int = 0) -> list[dict]:
     """Impact analysis for changed symbols. `tests` selects which nodes the
     upstream/downstream/affected_entries contain: 'exclude' (default, business
     impact) drops test nodes, 'only' keeps only test nodes (for test-impact
@@ -399,6 +400,13 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
     correctness is unchanged — a sibling branch that never calls the symbol is
     never reported. `include_signatures=False` drops the `sig` field
     (signatures are ~26% of payload) for compact tool responses.
+    `max_level` bounds how many BFS hops are returned: 0 (default) keeps the
+    full transitive closure; 1 keeps only DIRECT neighbors and attaches a
+    `depth` summary ({upstream_max, downstream_max, upstream_total,
+    downstream_total}) so a reviewer sees how far impact propagates without
+    paying for every transitive node — the propagation path is recoverable by
+    querying each direct neighbor's own get_impact. Transitive-only consumers
+    (get_test_impact) must keep max_level=0 to preserve reachability.
     `include_call_sites=True` attaches a `call_site` (call_form/line/args/code,
     read from the calling file) to DIRECT upstream/downstream neighbors — the
     call points where a contract change (params/return/exception) actually
@@ -439,6 +447,22 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
             conn, nid, test_filter, adjacency, "down", max_nodes_per_direction)
         direct_up = set(reverse.get(nid, ()))
         direct_down = set(forward.get(nid, ()))
+        depth: dict[str, int] | None = None
+        if max_level >= 1:
+            # Report how far impact propagates before dropping transitive nodes,
+            # so the reviewer knows a deeper chain exists to query per-neighbor.
+            depth = {
+                "upstream_max": max((up_levels.get(id_, 0) for id_ in up_ids),
+                                    default=0),
+                "downstream_max": max((down_levels.get(id_, 0)
+                                       for id_ in down_ids), default=0),
+                "upstream_total": len(up_ids),
+                "downstream_total": len(down_ids),
+            }
+            up_ids = [id_ for id_ in up_ids
+                      if up_levels.get(id_, 1) <= max_level]
+            down_ids = [id_ for id_ in down_ids
+                        if down_levels.get(id_, 1) <= max_level]
         up_all = [_node_brief(conn, nid_, include_signatures) for nid_ in up_ids]
         down_all = [_node_brief(conn, nid_, include_signatures) for nid_ in down_ids]
         _attach_chain_details(conn, up_all, up_ids, up_levels, up_parents,
@@ -454,6 +478,8 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
             "affected_entries": sorted(entries),
             "uncertainty": uncertainty, "coverage": coverage,
         }
+        if depth is not None:
+            result["depth"] = depth
         _attach_aliases(result, conn, qname)
         results.append(result)
     return results

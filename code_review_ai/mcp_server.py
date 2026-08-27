@@ -92,7 +92,8 @@ def create_server(config: Config):
                    files: list[str] | None = None,
                    max_nodes_per_direction: int = 20,
                    include_signatures: bool = False,
-                   include_call_sites: bool = True) -> str:
+                   include_call_sites: bool = True,
+                   max_level: int = 1) -> str:
         """Impact analysis for changed symbols: the affected business entry
         points plus upstream callers / downstream callees per flow. Pass
         explicit `symbols` (e.g. ["auth::login"]) or `files`; if both omitted,
@@ -103,11 +104,14 @@ def create_server(config: Config):
         add per-node `sig` fields (default off — signatures are ~26% of the
         payload). Direct upstream/downstream neighbors carry a `call_site`
         (call_form/line/args/code snippet) by default so a contract change is
-        visible at the exact call points without opening the caller file;
-        transitive hops carry a slim `via` marker ({via, line, args} — the
-        parent function the hop hangs off + the connecting call) so the
-        propagation path needs no Reads either. Every node has a `level` (BFS
-        hop count). Pass `include_call_sites=false` to omit both. Each result
+        visible at the exact call points without opening the caller file.
+        Every node has a `level` (BFS hop count). `max_level` bounds how many
+        BFS hops are returned: 1 (default) returns only DIRECT neighbors and a
+        `depth` summary ({upstream_max, downstream_max, upstream_total,
+        downstream_total}) showing how far impact propagates — query a direct
+        neighbor's own get_impact to walk deeper; 0 returns the full transitive
+        closure (transitive hops carry a slim `via` marker instead of a code
+        snippet). Each result
         also carries `uncertainty` (one-hop
         non-resolved edges around the symbol — dynamic/unresolved/candidate —
         capped at 20) and `coverage` (adjacent-edge counts per resolution), so
@@ -118,7 +122,8 @@ def create_server(config: Config):
             conn, changed,
             max_nodes_per_direction=max_nodes_per_direction,
             include_signatures=include_signatures,
-            include_call_sites=include_call_sites))
+            include_call_sites=include_call_sites,
+            max_level=max_level))
 
     @mcp.tool()
     def get_test_impact(symbols: list[str] | None = None,

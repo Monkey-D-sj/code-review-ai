@@ -111,6 +111,9 @@ def test_core_mode_exposes_review_tools_except_explicit_exclusions(tmp_path):
     # The first tool call must be get_change_summary, before any native tool.
     assert "第一个工具调用必须是 get_change_summary" in core
     assert "在任何其他工具之前（包括所有原生只读工具）" in core
+    # get_impact returns direct neighbors + a depth summary, not the full closure.
+    assert "depth 摘要" in core
+    assert "max_level=0" in core
     assert "将同一缺陷的多个表现合并为一个发现" in core
     assert "按独立修复单元组织发现" in core
     assert "修复一个生产代码位置后另一个回归仍然存在" in core

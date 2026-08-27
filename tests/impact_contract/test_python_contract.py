@@ -74,6 +74,29 @@ def test_python_caller_recall(tmp_path):
     assert {Q("app", "main"), Q("admin", "main")} <= set(res["affected_entries"])
 
 
+def test_python_max_level_returns_direct_and_depth(tmp_path):
+    """max_level=1 keeps only direct neighbors plus a depth summary."""
+    _, conn = build_index(tmp_path, GRAPH)
+    res = get_impact(conn, [Q("service", "find")], max_level=1)[0]
+    assert res["found"]
+    upstream = qname_set(res["upstream"])
+    # direct callers only: controller::get, admin::main, api::direct
+    assert Q("controller", "get") in upstream
+    assert Q("admin", "main") in upstream
+    assert Q("api", "direct") in upstream
+    # app::main is 2 hops away (app -> controller -> service) and is dropped
+    assert Q("app", "main") not in upstream
+    # depth tells the reviewer the deeper chain still exists
+    assert res["depth"]["upstream_max"] == 2
+    assert res["depth"]["upstream_total"] == 4
+    # every returned node is a direct neighbor (level 1)
+    assert {n["level"] for n in res["upstream"]} == {1}
+    # default (max_level=0) still returns the full transitive closure
+    full = get_impact(conn, [Q("service", "find")])[0]
+    assert Q("app", "main") in qname_set(full["upstream"])
+    assert "depth" not in full
+
+
 def test_python_test_impact_direct(tmp_path):
     """A test calling the changed symbol directly is selected."""
     _, conn = build_index(tmp_path,GRAPH)
