@@ -11,6 +11,13 @@ from code_review_ai.installer import (
 )
 
 
+class _P:
+    def __init__(self, returncode: int = 0, stderr: str = ""):
+        self.returncode = returncode
+        self.stdout = ""
+        self.stderr = stderr
+
+
 def test_launch_command_uses_uvx_from_source():
     assert _launch_command(DEFAULT_SOURCE, DEFAULT_MCP_ENTRY) == [
         "uvx", "--from", DEFAULT_SOURCE, DEFAULT_MCP_ENTRY,
@@ -40,35 +47,40 @@ def test_install_unsupported_platform():
     assert "unsupported" in res.message
 
 
-def test_install_claude_not_found(monkeypatch):
-    monkeypatch.setattr("code_review_ai.installer.shutil.which", lambda _: None)
+def test_install_default_skips_global_mcp(monkeypatch, tmp_path):
+    """Default install does NOT run `claude mcp add` — the review hook injects
+    the server on-demand, so everyday sessions carry no tool-description cost."""
+    monkeypatch.setattr("code_review_ai.installer.shutil.which",
+                        lambda _: "/usr/bin/claude")
+    monkeypatch.setattr("code_review_ai.installer.append_usage_docs",
+                        lambda platform="claude-code": tmp_path / "CLAUDE.md")
+    monkeypatch.setattr("code_review_ai.installer.deploy_skills",
+                        lambda platform="claude-code", skills_root=None: tmp_path / "skills")
+    calls = []
+    monkeypatch.setattr("code_review_ai.installer.subprocess.run",
+                        lambda cmd, **kw: calls.append(cmd) or _P(0))
     res = install()
-    assert res.success is False
-    assert "claude CLI not found" in res.message
-    # manual command is surfaced so the user can run it themselves
-    assert "claude mcp add" in res.message
-    assert "uvx" in res.command
+    assert res.success is True
+    assert calls == []  # no `claude mcp add`
+    assert "NOT globally registered" in res.message
+    assert "--register-mcp" in res.message
 
 
-def test_install_success_runs_claude_mcp_add(monkeypatch, tmp_path):
-    monkeypatch.setattr("code_review_ai.installer.shutil.which", lambda _: "/usr/bin/claude")
+def test_install_register_mcp_runs_claude_mcp_add(monkeypatch, tmp_path):
+    monkeypatch.setattr("code_review_ai.installer.shutil.which",
+                        lambda _: "/usr/bin/claude")
     monkeypatch.setattr("code_review_ai.installer.append_usage_docs",
                         lambda platform="claude-code": tmp_path / "CLAUDE.md")
     monkeypatch.setattr("code_review_ai.installer.deploy_skills",
                         lambda platform="claude-code", skills_root=None: tmp_path / "skills")
     captured = {}
 
-    class _P:
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
-        return _P()
+        return _P(0)
 
     monkeypatch.setattr("code_review_ai.installer.subprocess.run", fake_run)
-    res = install()
+    res = install(register_mcp=True)
     assert res.success is True
     assert captured["cmd"] == [
         "/usr/bin/claude", "mcp", "add", DEFAULT_NAME, "-s", "user", "--",
@@ -78,8 +90,19 @@ def test_install_success_runs_claude_mcp_add(monkeypatch, tmp_path):
     assert f"Deployed {len(SKILL_NAMES)} review skills" in res.message
 
 
-def test_install_failure_does_not_append_docs(monkeypatch):
-    monkeypatch.setattr("code_review_ai.installer.shutil.which", lambda _: "/usr/bin/claude")
+def test_install_claude_not_found_when_registering(monkeypatch):
+    monkeypatch.setattr("code_review_ai.installer.shutil.which", lambda _: None)
+    res = install(register_mcp=True)
+    assert res.success is False
+    assert "claude CLI not found" in res.message
+    # manual command is surfaced so the user can run it themselves
+    assert "claude mcp add" in res.message
+    assert "uvx" in res.command
+
+
+def test_install_register_failure_does_not_append_docs(monkeypatch):
+    monkeypatch.setattr("code_review_ai.installer.shutil.which",
+                        lambda _: "/usr/bin/claude")
     calls = []
 
     class _P:
@@ -92,7 +115,7 @@ def test_install_failure_does_not_append_docs(monkeypatch):
                         lambda **kw: calls.append("docs") or None)
     monkeypatch.setattr("code_review_ai.installer.deploy_skills",
                         lambda **kw: calls.append("skills") or None)
-    res = install()
+    res = install(register_mcp=True)
     assert res.success is False
     assert "server already exists" in res.message
     assert calls == []  # 失败时不写文档、不部署 skill

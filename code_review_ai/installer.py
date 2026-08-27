@@ -194,47 +194,64 @@ def _install_codex(source: str, name: str, mcp_entry: str) -> InstallResult:
 
 
 def _install_claude(source: str, scope: str, name: str,
-                    mcp_entry: str) -> InstallResult:
-    """Register the MCP server with Claude Code, then deploy docs + skills."""
-    add_cmd = _claude_add_command(name, scope, _launch_command(source, mcp_entry))
-    claude = _claude_executable()
-    if claude is None:
-        return InstallResult(
-            False,
-            "claude CLI not found on PATH. Install Claude Code, then run:\n  "
-            + " ".join(add_cmd),
-            add_cmd,
-        )
-    add_cmd = [claude, *add_cmd[1:]]
-    proc = subprocess.run(add_cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout).strip()
-        return InstallResult(
-            False,
-            f"claude mcp add failed (exit {proc.returncode}):\n{detail}\n"
-            f"If '{name}' already exists, remove it first: claude mcp remove {name}",
-            add_cmd,
-        )
+                    mcp_entry: str,
+                    register_mcp: bool = False) -> InstallResult:
+    """Deploy docs + skills for Claude Code, optionally registering the MCP
+    server globally. By default the graph tools are NOT registered globally:
+    the post-commit review hook injects the server on-demand via
+    --strict-mcp-config, so everyday interactive sessions never load the tool
+    descriptions (a real per-session token cost). Pass register_mcp=True for
+    interactive manual review instead of hook-driven review."""
+    add_cmd: list[str] = []
+    if register_mcp:
+        add_cmd = _claude_add_command(name, scope,
+                                      _launch_command(source, mcp_entry))
+        claude = _claude_executable()
+        if claude is None:
+            return InstallResult(
+                False,
+                "claude CLI not found on PATH. Install Claude Code, then run:\n  "
+                + " ".join(add_cmd),
+                add_cmd,
+            )
+        add_cmd = [claude, *add_cmd[1:]]
+        proc = subprocess.run(add_cmd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip()
+            return InstallResult(
+                False,
+                f"claude mcp add failed (exit {proc.returncode}):\n{detail}\n"
+                f"If '{name}' already exists, remove it first: claude mcp remove {name}",
+                add_cmd,
+            )
     msg = _deploy_docs_and_skills(
         "claude-code",
-        f"Registered '{name}' with Claude Code (scope={scope}).",
+        f"Registered '{name}' with Claude Code (scope={scope})."
+        if register_mcp else
+        "Deployed docs + skills. MCP graph tools are NOT globally registered: "
+        "the post-commit review hook injects them on-demand via --strict-mcp-config, "
+        "so everyday sessions carry no tool-description overhead. "
+        "Run `install --register-mcp` for interactive manual review.",
     )
-    msg += " Restart Claude Code (or run /mcp) to see the tools."
+    if register_mcp:
+        msg += " Restart Claude Code (or run /mcp) to see the tools."
     return InstallResult(True, msg, add_cmd)
 
 
 def install(platform: str = "claude-code", source: str = DEFAULT_SOURCE,
             scope: str = "user", name: str = DEFAULT_NAME,
-            mcp_entry: str = DEFAULT_MCP_ENTRY) -> InstallResult:
-    """Register MCP + deploy skills/docs for the target platform. Returns a
-    result; never raises - callers just print ``message`` and map ``success``
-    to exit code."""
+            mcp_entry: str = DEFAULT_MCP_ENTRY,
+            register_mcp: bool = False) -> InstallResult:
+    """Deploy skills/docs for the target platform; optionally register the MCP
+    server globally. Returns a result; never raises - callers just print
+    ``message`` and map ``success`` to exit code."""
     if platform not in SUPPORTED_PLATFORMS:
         return InstallResult(False, f"unsupported platform: {platform}", [])
     if platform == "codex":
         return _install_codex(source, name, mcp_entry)
-    return _install_claude(source, scope, name, mcp_entry)
+    return _install_claude(source, scope, name, mcp_entry,
+                           register_mcp=register_mcp)
 
 
 def _launch_command(source: str, mcp_entry: str) -> list[str]:

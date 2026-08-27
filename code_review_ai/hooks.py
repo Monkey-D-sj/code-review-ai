@@ -18,11 +18,12 @@ report to ``.code-review-ai/last-review.md``. Review runs on post-commit only,
 where the changed-file set is unambiguous; the other hooks always sync only.
 """
 
+import json
 import re
 import subprocess
 from pathlib import Path
 
-from code_review_ai.installer import DEFAULT_SOURCE
+from code_review_ai.installer import DEFAULT_MCP_ENTRY, DEFAULT_SOURCE
 from code_review_ai.skills import load_skill_body
 
 HOOK_NAMES = ("post-commit", "post-merge", "post-checkout", "post-rewrite")
@@ -71,7 +72,10 @@ _PLATFORM_REVIEW: dict[str, tuple[str, str, str]] = {
     "claude-code": (
         "claude -p",
         '--output-format stream-json --verbose '
-        '--allowedTools Bash Read Grep Glob "mcp__code-review-ai__*" "mcp__codegraph__*"',
+        '--allowedTools Bash Read Grep Glob '
+        '"mcp__code-review-ai__get_impact" '
+        '"mcp__code-review-ai__get_change_summary" '
+        '"mcp__code-review-ai__search_symbol"',
         "extract",
     ),
     "codex": ("codex exec", "--full-auto", "stdout"),
@@ -177,16 +181,50 @@ def _sync_script(repo: str, db: str, launch: str, source: str) -> str:
     )
 
 
+def _mcp_inject(repo_abs: str, db_abs: str, source: str,
+                mcp_entry: str, tools: str) -> str:
+    """The `--mcp-config` JSON injecting the review-only MCP server.
+
+    The review LLM (claude -p) gets the graph server on-demand via
+    --strict-mcp-config instead of relying on a globally-registered server, so
+    everyday interactive sessions never load these tool descriptions. Only the
+    review tools are registered (get_impact / get_change_summary / search_symbol),
+    so the model's decision space stays minimal.
+    """
+    cfg = {
+        "mcpServers": {
+            "code-review-ai": {
+                "type": "stdio",
+                "command": "uvx",
+                "args": ["--from", source, mcp_entry],
+                "env": {
+                    "CRAI_REPO_PATH": repo_abs,
+                    "CRAI_DB_PATH": db_abs,
+                    "CRAI_SKIP_STARTUP_SYNC": "true",
+                    "CRAI_DISABLE_WATCHER": "true",
+                    "CRAI_MCP_ONLY_TOOLS": tools,
+                },
+            }
+        }
+    }
+    return "--strict-mcp-config --mcp-config '" \
+        + json.dumps(cfg).replace("'", "'\\''") + "'"
+
+
 def _review_script(repo: str, db: str, launch: str, review_cmd: str,
                    review_args: str, answer_mode: str, review_out: str | None,
-                   source: str) -> str:
+                   source: str, mcp_entry: str = DEFAULT_MCP_ENTRY) -> str:
     repo_abs = str(Path(repo).resolve())
     db_abs = str(Path(db).resolve()).replace("\\", "/")
     out_abs = str(Path(review_out or Path(repo_abs) / ".code-review-ai" / "last-review.md")
                   .resolve()).replace("\\", "/")
-    review_block = (_extract_review_block(review_cmd, review_args)
+    mcp_args = _mcp_inject(repo_abs, db_abs, source, mcp_entry,
+                           "get_impact,get_change_summary,search_symbol")
+    if review_args:
+        mcp_args = mcp_args + " " + review_args
+    review_block = (_extract_review_block(review_cmd, mcp_args)
                     if answer_mode == "extract"
-                    else _direct_review_block(review_cmd, review_args))
+                    else _direct_review_block(review_cmd, mcp_args))
     return (
         "#!/bin/sh\n"
         "# code-review-ai: rebuild index + review the commit's change impact\n"

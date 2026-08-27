@@ -45,9 +45,10 @@ def _add_common(sp):
 
 
 def _run_install(args) -> int:
-    """Register the MCP server with an AI tool. No repo/db needed."""
+    """Deploy skills/docs; optionally register the MCP server globally."""
     res = install(platform=args.platform, source=args.source,
-                  scope=args.scope, name=args.name)
+                  scope=args.scope, name=args.name,
+                  register_mcp=args.register_mcp)
     print(res.message)
     return 0 if res.success else 1
 
@@ -251,6 +252,10 @@ def main(argv: list[str] | None = None) -> int:
     ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
     ip.add_argument("--from", dest="source", default=DEFAULT_SOURCE)
     ip.add_argument("--name", default="code-review-ai")
+    ip.add_argument("--register-mcp", action="store_true",
+                    help="also register the MCP server globally (default off: "
+                         "the review hook injects it on-demand, so everyday "
+                         "sessions carry no tool-description token cost)")
 
     args = p.parse_args(argv)
 

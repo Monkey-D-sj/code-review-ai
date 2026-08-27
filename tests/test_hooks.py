@@ -82,7 +82,7 @@ def test_install_hooks_review_captures_debug_log(tmp_path):
     content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
     assert "--output-format stream-json --verbose" in content
     assert "--allowedTools" in content
-    assert 'mcp__code-review-ai__*' in content
+    assert 'mcp__code-review-ai__get_impact' in content
     assert "extract-review" in content
     assert ".debug.log" in content
 
@@ -97,6 +97,20 @@ def test_install_hooks_review_prompt_uses_impact_for_context(tmp_path):
     assert "不要先调 search_symbol" in content
     # get_change_context is no longer guided: get_impact covers direct call sites.
     assert "get_change_context" not in content
+
+
+def test_install_hooks_injects_review_mcp_via_strict_mcp_config(tmp_path):
+    """claude -p gets the graph server on-demand, not from a global install."""
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    written = install_hooks(str(repo), str(tmp_path / "i.db"), with_review=True)
+    content = Path(written[HOOK_NAMES.index("post-commit")]).read_text(encoding="utf-8")
+    assert "--strict-mcp-config --mcp-config" in content
+    # only the review tools are injected
+    assert "CRAI_MCP_ONLY_TOOLS" in content
+    assert "get_impact,get_change_summary,search_symbol" in content
+    # the injected server points at the repo's own index
+    assert str(tmp_path / "i.db").replace("\\", "/") in content
 
 
 def test_install_hooks_review_archives_by_date(tmp_path):

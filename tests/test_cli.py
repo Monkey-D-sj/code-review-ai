@@ -225,8 +225,17 @@ def test_cli_install_dispatches_with_defaults(monkeypatch, capsys):
     assert code == 0
     assert captured == {"platform": "claude-code", "scope": "user",
                         "name": "code-review-ai",
-                        "source": cli.DEFAULT_SOURCE}
+                        "source": cli.DEFAULT_SOURCE,
+                        "register_mcp": False}
     assert "registered ok" in capsys.readouterr().out
+
+
+def test_cli_install_register_mcp_flag(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(cli, "install",
+                        lambda **kwargs: captured.update(kwargs) or _Res(True, "ok"))
+    assert main(["install", "--register-mcp"]) == 0
+    assert captured["register_mcp"] is True
 
 
 def test_cli_install_returns_nonzero_on_failure(monkeypatch):

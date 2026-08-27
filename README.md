@@ -24,7 +24,15 @@ uv tool install "code-review-ai[community] @ git+https://github.com/Monkey-D-sj/
 code-review-ai install --platform claude-code
 ```
 
-This runs `claude mcp add` to register the MCP server at **user scope** (available in all your projects). Restart Claude Code or run `/mcp` to see the tools.
+This deploys the review docs + skills. By default it does **not** register
+the MCP server globally: the post-commit review hook (see *Review hooks*)
+injects the graph tools on-demand via `--strict-mcp-config`, so everyday
+interactive sessions never load the ~1.5k tokens of tool descriptions. To
+register globally for interactive manual review, add `--register-mcp`:
+
+```bash
+code-review-ai install --platform claude-code --register-mcp
+```
 
 No install step - run it straight from git with `uvx`:
 
@@ -32,7 +40,7 @@ No install step - run it straight from git with `uvx`:
 uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai install --platform claude-code
 ```
 
-Options: `--scope user|project|local`, `--name <server-name>`, `--from <source>` (defaults to the git URL above; use `--from .` to register a local dev checkout).
+Options: `--register-mcp`, `--scope user|project|local`, `--name <server-name>`, `--from <source>` (defaults to the git URL above; use `--from .` to register a local dev checkout).
 
 ### Manual registration
 
@@ -342,8 +350,11 @@ dives), so history is kept and `last-review.md` always points at the newest.
 The review prompt first asks the LLM to classify the supplied local change.
 Self-contained changes use no graph context; non-local changes call `get_impact`
 once for direct call sites + affected entries, then use targeted native reads
-only for missing evidence. The headless run
-pre-authorizes those tools so they don't fail on permission prompts. The LLM
+only for missing evidence. The headless `claude -p` run injects the graph server
+on-demand via `--strict-mcp-config` (only `get_impact` / `get_change_summary` /
+`search_symbol`) and pre-authorizes those tools so they don't fail on permission
+prompts — no global MCP registration needed, so everyday sessions carry no
+tool-description overhead. The LLM
 platform is selectable — `claude-code` (default, runs `claude -p
 --output-format stream-json --verbose`, extracting the answer from the
 transcript) or `codex` (runs `codex exec --full-auto`, which takes the summary
