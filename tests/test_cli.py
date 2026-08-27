@@ -1,4 +1,5 @@
 import json
+import os
 
 from conftest import FIXTURES as FIX, Q
 
@@ -111,6 +112,34 @@ def test_cli_full_agent_eval_automatically_writes_routes(tmp_path, monkeypatch,
     assert "real-review / native_agent / run-1" in routes.read_text(
         encoding="utf-8")
     assert str(routes) in capsys.readouterr().out
+
+
+def test_cli_full_agent_eval_forwards_model_via_env(tmp_path, monkeypatch):
+    """--model locks the agent model: cli sets CRAI_EVAL_MODEL for the run."""
+    cases = tmp_path / "full-cases.json"
+    cases.write_text(json.dumps([{
+        "id": "real-review", "repo_name": "sample",
+        "repo_url": "https://github.com/example/sample.git",
+        "source_commit": "abc123", "mutation_paths": ["src/app.py"],
+        "prompt": "Review it.", "gold_findings": [{
+            "id": "bug", "file": "src/app.py", "keywords": ["bug"]}],
+    }]), encoding="utf-8")
+    monkeypatch.delenv("CRAI_EVAL_MODEL", raising=False)
+    seen = {}
+
+    def fake_run(*args, **kwargs):
+        seen["model"] = os.environ.get("CRAI_EVAL_MODEL")
+        return {"schema_version": 2, "runs": []}
+
+    monkeypatch.setattr(cli, "run_full_agent_eval", fake_run)
+    code = main([
+        "full-agent-eval", "--cases", str(cases),
+        "--agent-command", "agent", "--work-dir", str(tmp_path / "work"),
+        "--out", str(tmp_path / "report.json"),
+        "--model", "deepseek-v4-flash",
+    ])
+    assert code == 0
+    assert seen["model"] == "deepseek-v4-flash"
 
 
 def test_cli_test_impact(tmp_path, capsys, monkeypatch):

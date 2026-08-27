@@ -108,6 +108,9 @@ def test_core_mode_exposes_review_tools_except_explicit_exclusions(tmp_path):
     }
     for tool in (*_CORE_MCP_TOOLS, *_CORE_EXCLUDED_MCP_TOOLS):
         assert tool in core
+    # The first tool call must be get_change_summary, before any native tool.
+    assert "第一个工具调用必须是 get_change_summary" in core
+    assert "在任何其他工具之前（包括所有原生只读工具）" in core
     assert "将同一缺陷的多个表现合并为一个发现" in core
     assert "按独立修复单元组织发现" in core
     assert "修复一个生产代码位置后另一个回归仍然存在" in core
@@ -177,10 +180,16 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
     )
 
     def fake_executor(command, prompt, cwd, env, timeout):
-        assert env["CRAI_EVAL_TOOL_PROFILE"] in {"native", "full_project"}
+        assert env["CRAI_EVAL_TOOL_PROFILE"] in {"native", "native_full",
+                                                 "full_project"}
         assert env["CRAI_EVAL_DB_PATH"] == str(prebuilt_db)
         mode = env["CRAI_EVAL_MODE"]
-        if mode == "full_project_agent":
+        if mode == "native_full":
+            assert env["CRAI_EVAL_TOOL_PROFILE"] == "native_full"
+            assert "Claude Code 自带的全部内置工具" in prompt
+            assert "get_change_summary" not in prompt
+            calls = ["Read"]
+        elif mode == "full_project_agent":
             assert "不要调用 rebuild_index" in prompt
             assert "query_graph" in prompt
             assert "get_change_summary" in prompt
@@ -230,8 +239,9 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
         modes=FULL_EVAL_MODES,
         executor=fake_executor,
     )
-    assert len(report["runs"]) == 6
+    assert len(report["runs"]) == 7
     assert report["aggregate"]["native_agent"]["macro_f1"] == 1.0
+    assert report["aggregate"]["native_full"]["mcp_adoption_rate"] == 0.0
     assert report["difficulty_counts"] == {"medium": 1}
     assert {run["difficulty"] for run in report["runs"]} == {"medium"}
     assert report["aggregate"]["full_project_agent"]["mcp_adoption_rate"] == 1.0
@@ -249,6 +259,58 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
 
 def test_default_full_eval_is_native_vs_compact_core():
     assert DEFAULT_FULL_EVAL_MODES == ("native_agent", "full_project_core")
+
+
+def test_run_once_injects_eval_model_env(monkeypatch, tmp_path):
+    """CRAI_EVAL_MODEL is forwarded so every arm runs the same model."""
+    monkeypatch.setenv("CRAI_EVAL_MODEL", "deepseek-v4-flash")
+    case = _case()
+    prepared = PreparedCase(case, str(tmp_path),
+                            "diff --git a/src/app.py b/src/app.py")
+    monkeypatch.setattr(
+        "code_review_ai.full_agent_eval.prepare_full_agent_cases",
+        lambda cases, repos_dir, work_dir, **kwargs: [prepared],
+    )
+    monkeypatch.setattr(
+        "code_review_ai.full_agent_eval._prepare_case_index",
+        lambda item, work_dir, label: {
+            "case_id": item.case.case_id, "db_path": str(tmp_path / "x.db"),
+            "nodes": 1, "edges": 0, "flows": 0, "elapsed_ms": 1.0,
+            "timed_with_agent": False,
+        },
+    )
+    monkeypatch.setattr(
+        "code_review_ai.full_agent_eval._graph_retrieval_result",
+        lambda item, setup: {
+            "case_id": item.case.case_id, "changed_symbols": [],
+            "found_symbols": [], "evidence": {"symbols": [], "files": [],
+                                              "entries": [], "tests": []},
+            "score": {
+                **{name: {"applicable": False, "expected": 0,
+                          "returned": 0, "hits": [], "misses": [],
+                          "precision": None, "recall": None, "f1": None}
+                   for name in ("symbols", "files", "entries", "tests")},
+                "macro_recall": None,
+                "hard_negatives": {"applicable": False, "expected": 0,
+                                   "hits": {"symbols": [], "files": []},
+                                   "correctness": None},
+            },
+        },
+    )
+    observed = {}
+
+    def fake_executor(command, prompt, cwd, env, timeout):
+        observed["env"] = env
+        payload = {"findings": [], "files_read": [], "tool_calls": [],
+                   "tool_call_count": 0,
+                   "usage": {"input_tokens": 1, "output_tokens": 1}}
+        return AgentRun(0, json.dumps(payload), "", 1.0)
+
+    run_full_agent_eval(
+        [case], str(tmp_path / "repos"), str(tmp_path / "runs"), ["agent"],
+        modes=("native_agent",), executor=fake_executor,
+    )
+    assert observed["env"]["CRAI_EVAL_MODEL"] == "deepseek-v4-flash"
 
 
 def test_rescore_uses_stored_outputs_and_keeps_native_bash_tools(tmp_path):

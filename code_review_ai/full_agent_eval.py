@@ -40,7 +40,8 @@ from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
 
 
-FULL_EVAL_MODES = ("native_agent", "full_project_agent",
+FULL_EVAL_MODES = ("native_agent", "native_full",
+                   "full_project_agent",
                    "full_project_querygraph", "full_project_summary",
                    "full_project_search", "full_project_core")
 DEFAULT_FULL_EVAL_MODES = ("native_agent", "full_project_core")
@@ -576,17 +577,35 @@ def _difficulty_counts(cases: list[FullAgentCase]) -> dict[str, int]:
             for difficulty in ordered if counts[difficulty]}
 
 
+def _eval_tool_profile(mode: str) -> str:
+    """Map an eval mode to the adapter's tool profile.
+
+    ``native_agent`` restricts the model to the four read-only native tools;
+    ``native_full`` grants every Claude Code built-in tool (no MCP), to probe
+    whether the wider toolset changes agent behavior; every ``full_project_*``
+    mode adds the product's MCP tools.
+    """
+    if mode == "native_agent":
+        return "native"
+    if mode == "native_full":
+        return "native_full"
+    return "full_project"
+
+
 def _run_once(item: PreparedCase, mode: str, repetition: int,
               command: list[str], output_dir: str, timeout_seconds: int,
               executor: AgentExecutor, db_path: str,
               hinted: bool = False) -> dict:
     prompt = _prompt(item, mode, hinted)
-    profile = "native" if mode == "native_agent" else "full_project"
+    profile = _eval_tool_profile(mode)
     environment = {
         "CRAI_EVAL_MODE": mode, "CRAI_EVAL_CASE": item.case.case_id,
         "CRAI_EVAL_TOOL_PROFILE": profile,
         "CRAI_EVAL_DB_PATH": str(db_path),
     }
+    if os.environ.get("CRAI_EVAL_MODEL"):
+        # Lock every arm to the same model so cost/token comparisons are fair.
+        environment["CRAI_EVAL_MODEL"] = os.environ["CRAI_EVAL_MODEL"]
     tools = _MODE_MCP_TOOLS.get(mode)
     if tools:
         # Ablation: the model sees only this MCP subset (both the agent-side
@@ -695,13 +714,19 @@ def _prompt(item: PreparedCase, mode: str, hinted: bool = False) -> str:
         tool_note = """你可以使用原生只读检查工具以及这些 code-review-ai MCP 工具：get_impact、get_test_impact、
 get_change_summary、get_change_context、search_symbol 和 get_symbol_detail。未开放 rebuild_index、query_graph、
 get_communities、get_community、call_external_service、find_dead_code。评审主通道是 get_impact：
-先用 get_change_summary 获取结构化变更符号，然后对每个关键变更符号调用一次 get_impact，一次性获取其传递调用链
+你的第一个工具调用必须是 get_change_summary——在任何其他工具之前（包括所有原生只读工具），必须先调用
+get_change_summary 获取结构化变更符号，然后对每个关键变更符号调用一次 get_impact，一次性获取其传递调用链
 （upstream/downstream，整图 BFS 精确闭包）与受影响业务入口（affected_entries）——这是本模式区别于 grep 的核心价值；
 其 uncertainty 已列出解析缺口、coverage 已给出解析覆盖率。不要在 get_impact 已覆盖的符号上重复调用 get_change_context。
 仅当需要判断某个具体调用点的契约变更（参数、返回值、异常）时，才对那个符号调用 get_change_context
 补齐调用点代码片段（call_site.code）。get_test_impact 仅用于测试影响；search_symbol、get_symbol_detail 仅用于解析
 不确定的 qname。图索引已同步。不要 grep，也不要重新读取 MCP 响应中已经存在的关系；仅使用原生工具验证缺失证据
 或具体候选问题。"""
+    elif mode == "native_full":
+        tool_note = """你可以使用 Claude Code 自带的全部内置工具（Read、Glob、Grep、Bash、Write、Edit、
+WebSearch、WebFetch 等）。未安装任何外部 MCP 工具。这是对 native_agent（仅 Read/Glob/Grep/Bash）的放宽：
+你可以自由选择任何内置工具来获取评审所需的仓库证据；对于涉及签名、返回类型、异常或跨模块调用的任何变更，
+使用 Grep 或 rg 搜索整个代码树，定位并读取所有调用方和被调用方。"""
     else:
         tool_note = """你可以使用原生只读检查工具。使用这些工具获取评审策略所需的仓库证据；对于涉及签名、返回类型、异常或
 跨模块调用的任何变更，使用 Grep 或 rg 搜索整个代码树，定位并读取所有调用方和被调用方。"""

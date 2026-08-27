@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -63,14 +64,17 @@ def _write_json(payload: dict, output_path: str | None) -> None:
 
 
 def _write_full_agent_routes(payload: dict, report_path: str,
-                             work_dir: str) -> Path:
-    """Write the automatic compact trace artifact beside an eval report."""
-    from code_review_ai.full_agent_trace import render
+                             work_dir: str) -> tuple[Path, Path]:
+    """Write the automatic trace artifacts (Markdown + collapsible HTML)
+    beside an eval report."""
+    from code_review_ai.full_agent_trace import render, render_html
     report = Path(report_path)
-    output = report.with_name(f"{report.stem}-routes.md")
-    output.write_text(
-        render(payload, Path(work_dir) / "transcripts"), encoding="utf-8")
-    return output
+    transcripts = Path(work_dir) / "transcripts"
+    md_path = report.with_name(f"{report.stem}-routes.md")
+    md_path.write_text(render(payload, transcripts), encoding="utf-8")
+    html_path = report.with_name(f"{report.stem}-routes.html")
+    html_path.write_text(render_html(payload, transcripts), encoding="utf-8")
+    return md_path, html_path
 
 
 def _normalize_test_paths(files: list[str]) -> list[str]:
@@ -197,6 +201,9 @@ def main(argv: list[str] | None = None) -> int:
                          "build_repo.py if it has no history yet")
     fe.add_argument("--work-dir", default="eval-results/full-agent-eval")
     fe.add_argument("--agent-command")
+    fe.add_argument("--model",
+                    help="Claude model for the agent run; passed to the agent "
+                         "via CRAI_EVAL_MODEL so every arm uses the same model")
     fe.add_argument("--dry-run", action="store_true")
     fe.add_argument("--modes", nargs="+", choices=FULL_EVAL_MODES,
                     default=list(DEFAULT_FULL_EVAL_MODES))
@@ -230,12 +237,15 @@ def main(argv: list[str] | None = None) -> int:
     ft = sub.add_parser(
         "summarize-full-agent-trace",
         aliases=["eval-trace"],
-        help="render compact complete routes from a full-agent-eval report",
+        help="render compact complete routes from one or more full-agent-eval reports",
     )
-    ft.add_argument("report", help="full-agent-eval report JSON")
+    ft.add_argument("report", nargs="+",
+                    help="full-agent-eval report JSON (multiple are merged)")
     ft.add_argument("--transcripts-root",
                     help="transcripts root used to recover each run cwd")
-    ft.add_argument("-o", "--out", help="Markdown output (stdout if omitted)")
+    ft.add_argument("--html", action="store_true",
+                    help="render a collapsible HTML page instead of Markdown")
+    ft.add_argument("-o", "--out", help="output file (stdout if omitted)")
     ip = sub.add_parser("install")
     ip.add_argument("--platform", default="claude-code")
     ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
@@ -266,7 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         from code_review_ai.full_agent_trace import summarize_file
         try:
             output = summarize_file(
-                args.report, args.transcripts_root, args.out)
+                args.report, args.transcripts_root, args.out,
+                as_html=args.html)
         except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
@@ -287,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             cases = select_full_agent_cases(
                 load_full_agent_cases(args.cases), args.case_ids)
+            if args.model:
+                os.environ["CRAI_EVAL_MODEL"] = args.model
             if args.dry_run:
                 payload = preflight_full_agent_eval(
                     cases, args.repos_dir, args.work_dir,
@@ -306,9 +319,10 @@ def main(argv: list[str] | None = None) -> int:
         try:
             _write_json(payload, args.out)
             if args.out and not args.dry_run:
-                route_path = _write_full_agent_routes(
+                route_path, html_path = _write_full_agent_routes(
                     payload, args.out, args.work_dir)
                 print(f"wrote tool routes to {route_path}")
+                print(f"wrote visual routes to {html_path}")
         except OSError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1

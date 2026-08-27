@@ -216,10 +216,16 @@ code-review-ai full-agent-eval \
 
 code-review-ai full-agent-eval \
   --cases benchmarks/case-backend-cases.json \
-  --agent-command "python -m code_review_ai.agent_adapter claude --model sonnet --max-budget-usd 1.00" \
+  --model deepseek-v4-flash \
+  --agent-command "python -m code_review_ai.agent_adapter claude" \
   --repetitions 3 --workers 4 \
   -o eval-results/full-agent-report.json
 ```
+
+`--model` locks every arm to the same model (forwarded to the agent via
+`CRAI_EVAL_MODEL`, so per-mode cost/token comparisons stay apples-to-apples);
+omit it to use the CLI's current default model. A `--model sonnet` inside
+`--agent-command` works too, but a standalone `--model` keeps all modes uniform.
 
 `benchmarks/case-backend-cases.json` holds the business-shaped project cases
 (`source_dir`-anchored under `full_agent_eval/case-backend`, no clone or

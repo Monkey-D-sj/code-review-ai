@@ -159,25 +159,38 @@ def run_claude(prompt: str, model: str | None = None,
                tool_profile: str | None = None) -> tuple[int, dict, str]:
     """Run Claude Code and normalize its result plus observed tool events."""
     executable = _resolve_claude_executable()
-    streaming = tool_profile in {"native", "full_project"}
+    streaming = tool_profile in {"native", "native_full", "full_project"}
     command = [executable, "-p", "--no-session-persistence",
                "--output-format", "stream-json" if streaming else "json",
                "--json-schema", json.dumps(FINDING_SCHEMA)]
     if streaming:
-        command.extend(["--verbose", "--bare", "--disable-slash-commands",
-                        "--permission-mode", "dontAsk",
-                        "--tools", ",".join(READ_ONLY_NATIVE_TOOLS)])
-        allowed = [*READ_ONLY_NATIVE_TOOLS[:-1], *READ_ONLY_BASH_RULES]
-        if tool_profile == "full_project":
-            command.extend(["--strict-mcp-config", "--mcp-config",
-                            json.dumps(_mcp_config())])
-            allowed.extend(f"mcp__code-review-ai__{name}"
-                           for name in _online_mcp_tools())
+        if tool_profile == "native_full":
+            # Every Claude Code built-in tool, no external MCP. --tools default
+            # enables the whole built-in set; an empty strict mcp config keeps
+            # product / third-party servers out. No --allowedTools restriction,
+            # so dontAsk lets any built-in tool through; the eval's read-only
+            # Bash denylist still applies.
+            command.extend(["--verbose", "--bare", "--disable-slash-commands",
+                            "--permission-mode", "dontAsk",
+                            "--tools", "default",
+                            "--strict-mcp-config", "--mcp-config",
+                            json.dumps({"mcpServers": {}}),
+                            "--disallowedTools", ",".join(DENIED_BASH_RULES)])
         else:
-            command.extend(["--strict-mcp-config", "--mcp-config",
-                            json.dumps({"mcpServers": {}})])
-        command.extend(["--allowedTools", ",".join(allowed)])
-        command.extend(["--disallowedTools", ",".join(DENIED_BASH_RULES)])
+            command.extend(["--verbose", "--bare", "--disable-slash-commands",
+                            "--permission-mode", "dontAsk",
+                            "--tools", ",".join(READ_ONLY_NATIVE_TOOLS)])
+            allowed = [*READ_ONLY_NATIVE_TOOLS[:-1], *READ_ONLY_BASH_RULES]
+            if tool_profile == "full_project":
+                command.extend(["--strict-mcp-config", "--mcp-config",
+                                json.dumps(_mcp_config())])
+                allowed.extend(f"mcp__code-review-ai__{name}"
+                               for name in _online_mcp_tools())
+            else:
+                command.extend(["--strict-mcp-config", "--mcp-config",
+                                json.dumps({"mcpServers": {}})])
+            command.extend(["--allowedTools", ",".join(allowed)])
+            command.extend(["--disallowedTools", ",".join(DENIED_BASH_RULES)])
     else:
         command.extend(["--safe-mode", "--tools", ""])
     if model:
@@ -269,6 +282,13 @@ def _scripted_native(changed_files: list[str]) -> dict:
         "affected_entries": [], "tests": [],
         "files_read": [target], "tool_calls": ["Read", "Grep"],
         "tool_call_count": 2,
+        "tool_trace": [
+            {"sequence": 1, "tool": "Read",
+             "input": {"file_path": target}, "response_chars": 0},
+            {"sequence": 2, "tool": "Grep",
+             "input": {"pattern": "def ", "path": target},
+             "response_chars": 0},
+        ],
         "usage": {"input_tokens": 0, "output_tokens": 0, "estimated": True},
     }
 
@@ -276,23 +296,37 @@ def _scripted_native(changed_files: list[str]) -> dict:
 async def _scripted_core(changed_files: list[str]) -> dict:
     """Core-arm script: drive the real graph tools over the MCP protocol."""
     calls: list[str] = []
+    trace: list[dict] = []
     async with _mcp_session() as session:
-        summary_text = await _session_call(session, "get_change_summary", {})
+        summary_args: dict[str, object] = {}
+        summary_text = await _session_call(session, "get_change_summary",
+                                           summary_args)
         calls.append("mcp__code-review-ai__get_change_summary")
+        trace.append(_trace_record(
+            1, "mcp__code-review-ai__get_change_summary", summary_args,
+            summary_text))
         summary = json.loads(summary_text)
         changed = summary.get("changed_functions", [])
         symbol = changed[0]["qname"] if changed else None
         target = (changed[0]["file"] if changed
                   else (changed_files[0] if changed_files else "src/app.py"))
         if symbol:
-            impact_text = await _session_call(
-                session, "get_impact",
-                {"symbols": [symbol], "include_call_sites": True})
+            impact_args: dict[str, object] = {
+                "symbols": [symbol], "include_call_sites": True}
+            impact_text = await _session_call(session, "get_impact",
+                                              impact_args)
             calls.append("mcp__code-review-ai__get_impact")
+            trace.append(_trace_record(
+                2, "mcp__code-review-ai__get_impact", impact_args,
+                impact_text))
             impact = json.loads(impact_text)
-            test_text = await _session_call(
-                session, "get_test_impact", {"symbols": [symbol]})
+            test_args: dict[str, object] = {"symbols": [symbol]}
+            test_text = await _session_call(session, "get_test_impact",
+                                            test_args)
             calls.append("mcp__code-review-ai__get_test_impact")
+            trace.append(_trace_record(
+                3, "mcp__code-review-ai__get_test_impact", test_args,
+                test_text))
         else:
             impact = []
     entries = sorted({entry for record in impact
@@ -306,7 +340,20 @@ async def _scripted_core(changed_files: list[str]) -> dict:
         "affected_entries": entries,
         "tests": [], "files_read": [target],
         "tool_calls": calls, "tool_call_count": len(calls),
+        "tool_trace": trace,
         "usage": {"input_tokens": 0, "output_tokens": 0, "estimated": True},
+    }
+
+
+def _trace_record(sequence: int, tool: str, arguments: dict[str, object],
+                  response: str) -> dict:
+    """One tool_trace row: input as given, response kept in full for the viewer."""
+    return {
+        "sequence": sequence,
+        "tool": tool,
+        "input": arguments,
+        "response_chars": len(response),
+        "response": response,
     }
 
 
@@ -422,6 +469,7 @@ def _build_tool_trace(events: list[dict], available_tools: set[str]) -> list[dic
     """
     result_sizes: dict[str, int] = {}
     result_errors: dict[str, bool] = {}
+    result_texts: dict[str, str] = {}
     for event in events:
         for block in _typed_blocks(event, "tool_result"):
             tool_use_id = block.get("tool_use_id")
@@ -429,6 +477,7 @@ def _build_tool_trace(events: list[dict], available_tools: set[str]) -> list[dic
                 continue
             result_sizes[tool_use_id] = _serialized_chars(block.get("content"))
             result_errors[tool_use_id] = block.get("is_error") is True
+            result_texts[tool_use_id] = _response_text(block.get("content"))
 
     trace: list[dict] = []
     for event in events:
@@ -446,8 +495,13 @@ def _build_tool_trace(events: list[dict], available_tools: set[str]) -> list[dic
                 "response_chars": result_sizes.get(tool_use_id, 0)
                 if isinstance(tool_use_id, str) else 0,
             }
-            if isinstance(tool_use_id, str) and result_errors.get(tool_use_id):
-                record["is_error"] = True
+            if isinstance(tool_use_id, str):
+                if name.startswith("mcp__code-review-ai__"):
+                    # Keep the complete graph response so the route viewer can
+                    # show exactly what the tool returned, not just a size.
+                    record["response"] = result_texts.get(tool_use_id, "")
+                if result_errors.get(tool_use_id):
+                    record["is_error"] = True
             trace.append(record)
     return trace
 
@@ -470,6 +524,34 @@ def _serialized_chars(value: object) -> int:
         return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
     except (TypeError, ValueError):
         return len(str(value))
+
+
+def _response_text(value: object) -> str:
+    """Extract the tool-result payload as text, whatever its block shape.
+
+    A tool_result carries its payload either as a plain string or as a list of
+    content blocks (``{"type": "text", "text": ...}``). This normalizes both so
+    the route viewer can render the complete JSON a graph tool returned.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts: list[str] = []
+        for block in value:
+            if isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+            elif isinstance(block, str):
+                parts.append(block)
+        if parts:
+            return "\n".join(parts)
+    if isinstance(value, dict) and isinstance(value.get("text"), str):
+        return value["text"]
+    try:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _compact_tool_input(value: object) -> object:
@@ -839,7 +921,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="code-review-ai-agent-adapter")
     subparsers = parser.add_subparsers(dest="provider", required=True)
     claude = subparsers.add_parser("claude")
-    claude.add_argument("--model")
+    claude.add_argument("--model",
+                        default=os.environ.get("CRAI_EVAL_MODEL"))
     claude.add_argument("--max-budget-usd", type=float)
     claude.add_argument("--tool-profile",
                         choices=["none", "native", "full_project"],

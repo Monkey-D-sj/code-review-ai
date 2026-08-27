@@ -80,7 +80,8 @@ def test_normalize_claude_stream_uses_observed_tool_events(monkeypatch, tmp_path
         {"sequence": 1, "tool": "Read",
          "input": {"file_path": "src/app.py"}, "response_chars": 11},
         {"sequence": 2, "tool": "mcp__code-review-ai__get_impact",
-         "input": {"files": ["src/app.py"]}, "response_chars": 27},
+         "input": {"files": ["src/app.py"]}, "response_chars": 27,
+         "response": '{"affected":["src/app.py"]}'},
     ]
 
 
@@ -273,3 +274,30 @@ def test_streaming_eval_uses_bare_read_only_claude_session(monkeypatch, profile)
     assert "Bash(git diff)" not in allowed_names
     assert "Bash(git diff *)" in denied
     assert "Bash(git diff)" in denied
+
+
+def test_native_full_uses_all_builtin_tools_no_mcp(monkeypatch):
+    """native_full grants every built-in tool and excludes external MCP."""
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        stdout = "\n".join(json.dumps(event) for event in [
+            {"type": "system", "subtype": "init", "tools": ["Read"]},
+            {"type": "result", "structured_output": {
+                "findings": [], "files_read": [], "tool_calls": []}},
+        ])
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr("code_review_ai.agent_adapter.subprocess.run", fake_run)
+    returncode, _, _ = run_claude("review", tool_profile="native_full")
+    assert returncode == 0
+    command = observed["command"]
+    assert "--bare" in command
+    assert command[command.index("--tools") + 1] == "default"
+    # --tools default enables the whole built-in set; no --allowedTools to gate it.
+    assert "--allowedTools" not in command
+    denied = command[command.index("--disallowedTools") + 1]
+    assert denied.split(",") == list(DENIED_BASH_RULES)
+    # No external MCP: an empty strict mcp config, never the product server.
+    assert command[command.index("--mcp-config") + 1] == '{"mcpServers": {}}'
