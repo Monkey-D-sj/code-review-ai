@@ -48,8 +48,7 @@ FINDING_SCHEMA = {
 MCP_TOOL_NAMES = (
     "rebuild_index", "get_impact", "get_test_impact", "find_dead_code",
     "get_change_summary", "get_change_context", "query_graph", "search_symbol",
-    "get_symbol_detail", "get_communities",
-    "get_community", "call_external_service",
+    "get_communities", "get_community", "call_external_service",
 )
 ONLINE_MCP_TOOL_NAMES = tuple(
     name for name in MCP_TOOL_NAMES

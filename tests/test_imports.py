@@ -4,9 +4,9 @@ The parser has always captured import aliases (`ImportEntry.local_name`) and the
 resolver resolves calls through them, but the binding itself was never written
 to the DB — so a name like ``decrypt_storage_password`` (bound by
 ``from lib import decrypt_password as decrypt_storage_password``) was invisible
-to search_symbol / get_impact / get_symbol_detail and forced a grep. These
+to search_symbol / get_impact and forced a grep. These
 tests guard the new `imports` table + `fts_imports` search index + the inverse
-alias lookup on the three surfaces.
+alias lookup on the search / impact surfaces.
 """
 
 import subprocess

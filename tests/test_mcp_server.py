@@ -124,17 +124,6 @@ def test_get_community_tool(tmp_path):
     assert any(m["qname"] == Q("auth","authenticate","auth::UserService") for m in data["members"])
 
 
-def test_get_symbol_detail_tool(tmp_path):
-    server, conn, cfg = _server(tmp_path)
-    out = server._tool_manager._tools["get_symbol_detail"].fn(qualified_name=Q("auth", "login"))
-    data = json.loads(out)
-    assert data["qname"] == Q("auth", "login")
-    # importance signal surfaced to the AI reviewer
-    assert data["in_degree"] == 1   # called by app::main only
-    assert data["out_degree"] == 0  # calls nothing resolved
-    assert data["callers"] == [Q("app", "main")]
-
-
 def test_get_change_summary_tool(tmp_path):
     server, conn, cfg = _server(tmp_path)
     tools = server._tool_manager._tools

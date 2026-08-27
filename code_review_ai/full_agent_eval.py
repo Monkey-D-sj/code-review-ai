@@ -551,7 +551,6 @@ def _full_aggregates(runs: list[dict], modes: tuple[str, ...]) -> dict:
                 "rebuild_index", "get_change_summary", "get_change_context",
                 "query_graph",
                 "get_test_impact", "search_symbol",
-                "get_symbol_detail",
             )
         }
         aggregate["agent_review"] = _agent_review_aggregate(selected)
@@ -712,8 +711,8 @@ def _prompt(item: PreparedCase, mode: str, hinted: bool = False) -> str:
 然后使用原生工具定位这些符号的调用方和被调用方。"""
     elif mode == "full_project_core":
         tool_note = """你可以使用原生只读检查工具以及这些 code-review-ai MCP 工具：get_impact、
-get_change_summary、search_symbol 和 get_symbol_detail。未开放 rebuild_index、query_graph、get_change_context、
-get_test_impact、get_communities、get_community、call_external_service、find_dead_code。评审主通道是 get_impact：
+get_change_summary 和 search_symbol。未开放 rebuild_index、query_graph、get_change_context、get_test_impact、
+get_symbol_detail、get_communities、get_community、call_external_service、find_dead_code。评审主通道是 get_impact：
 你的第一个工具调用必须是 get_change_summary——在任何其他工具之前（包括所有原生只读工具），必须先调用
 get_change_summary 获取结构化变更符号，然后对每个关键变更符号调用一次 get_impact，获取其直接上下游调用点
 （upstream/downstream，含契约断点 call_site）与受影响业务入口（affected_entries）——这是本模式区别于 grep 的核心价值；
@@ -721,8 +720,9 @@ get_change_summary 获取结构化变更符号，然后对每个关键变更符�
 调用方 qname 再调用一次 get_impact（可传 max_level=0 获取完整传递闭包）。其 uncertainty 已列出解析缺口、coverage
 已给出解析覆盖率。get_impact 的直接调用点 call_site 已含调用行代码（code），足以判断契约变更，
 不需要 get_change_context（已关闭）。get_test_impact（测试选择）是 CI 的职责、对评审无帮助，已关闭；
-search_symbol、get_symbol_detail 仅用于解析不确定的 qname。图索引已同步。不要 grep，也不要重新读取 MCP 响应中
-已经存在的关系；仅使用原生工具验证缺失证据或具体候选问题。"""
+get_symbol_detail 的信息已被 get_impact 覆盖，已删除。search_symbol 仅用于解析不确定的 qname。
+图索引已同步。不要 grep，也不要重新读取 MCP 响应中已经存在的关系；仅使用原生工具验证缺失证据
+或具体候选问题。"""
     elif mode == "native_full":
         tool_note = """你可以使用 Claude Code 自带的全部内置工具（Read、Glob、Grep、Bash、Write、Edit、
 WebSearch、WebFetch 等）。未安装任何外部 MCP 工具。这是对 native_agent（仅 Read/Glob/Grep/Bash）的放宽：

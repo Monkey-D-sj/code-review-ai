@@ -84,7 +84,6 @@ args = ["--from", "git+https://github.com/Monkey-D-sj/code-review-ai", "code-rev
 - `get_impact` - impact chains for changed symbols (or derived from a git diff); direct callers/callees carry `call_site` code snippets (opt-out via `include_call_sites=false`); default `max_level=1` returns direct neighbors plus a `depth` summary (pass `max_level=0` for the full transitive closure)
 - `get_change_context` - manual multi-symbol / directional (in/out/both) graph expansion; largely superseded by `get_impact` (which already carries direct call-site code), kept for ad-hoc graph queries
 - `search_symbol` - find symbols by name; plain-word queries run FTS token match + bm25 ranking with a substring fallback on 0 hits, while queries containing `*`/`?` keep the short-name glob behavior
-- `get_symbol_detail` - node detail + direct callers/callees
 - `get_communities` / `get_community` - Leiden communities (opt-in via `community_detection`)
 
 ## CLI (manual use)

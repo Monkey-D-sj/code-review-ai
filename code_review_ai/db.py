@@ -9,8 +9,8 @@ from pathlib import Path
 # 8: resolved call edges now carry call-site evidence (line + args) in
 #    evidence_json, surfaced by query_graph; older indexes lack it.
 # 9: import bindings (incl. aliases like `from m import x as y`) persisted to
-#    the `imports` table + `fts_imports`, surfaced by search_symbol /
-#    get_impact / get_symbol_detail; older indexes lack the table.
+#    the `imports` table + `fts_imports`, surfaced by search_symbol / get_impact;
+#    older indexes lack the table.
 INDEX_VERSION = 9
 
 SCHEMA = """
@@ -136,7 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_imports_file ON imports(file_path);
 -- Search index over import bindings. Deliberately only local_name/module/
 -- file_path -- NOT imported_name -- so `search "login"` does not surface every
 -- row that aliased a symbol named login (the inverse direction is served by
--- get_impact/get_symbol_detail's aliases field instead).
+-- get_impact's aliases field instead).
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_imports USING fts5(
     local_name, module, file_path,
     content='imports', content_rowid='id'

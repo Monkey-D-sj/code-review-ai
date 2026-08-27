@@ -379,9 +379,9 @@ hard 档的成本来自推理过程:读 import 后发现别名、识别包装层
 
 - `native_agent`:Read / Glob / Grep,以及命令级白名单约束的只读 Bash;
 - `full_project_core`:完全相同的 native 工具，并开放 `get_impact`、
-  `get_test_impact`、`get_change_summary`、`get_change_context`、
-  `query_graph`、`search_symbol`、`get_symbol_detail`;不开放社区查询、外部服务、
-  死代码和入口点工具;
+  `get_change_summary`、`search_symbol`;不开放社区查询、外部服务、
+  死代码、入口点、`get_change_context`/`get_test_impact`/`get_symbol_detail`
+  （其信息已被 `get_impact` 覆盖或属 CI 职责）;
 - 同一模型、prompt、仓库快照、超时和重复次数;正式对比不设 provider
   金额上限,避免大图 case 被预算截断后记成错误。
 

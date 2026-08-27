@@ -268,8 +268,8 @@ def resolve_import_target(imp, path_aliases: dict[str, str] | None,
     resolve identically. Star imports yield None (no single target). Does not
     chase re-exports — good enough for search/display, where the nodes table
     still carries the authoritative definition. This is the persisted
-    ``imports.resolved_target`` that get_impact/get_symbol_detail's inverse
-    alias lookup and fts_imports search are built on."""
+    ``imports.resolved_target`` that get_impact's inverse alias lookup and
+    fts_imports search are built on."""
     if imp.is_star:
         return None
     mod = _import_module(imp.module, path_aliases, base_url, existing)

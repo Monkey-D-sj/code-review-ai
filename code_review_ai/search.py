@@ -137,8 +137,8 @@ def index_imports_fts(conn, import_rows) -> None:
     """Index import bindings just written to `imports` into fts_imports.
 
     Only genuine aliases are indexed (see _is_aliased_import); the plain
-    non-aliased import rows stay searchable through nodes / get_symbol_detail
-    instead. Rows are dicts/sqlite Rows carrying id, local_name, module,
+    non-aliased import rows stay searchable through nodes instead. Rows are
+    dicts/sqlite Rows carrying id, local_name, module,
     imported_name, is_star, file_path."""
     columns = ",".join(_IMPORT_FTS_COLUMNS)
     placeholders = ",".join("?" for _ in _IMPORT_FTS_COLUMNS)

@@ -13,7 +13,6 @@ from code_review_ai.config import Config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.graph import query_graph as _query_graph
 from code_review_ai.impact import get_impact as _get_impact
-from code_review_ai.impact import get_symbol_aliases as _get_symbol_aliases
 from code_review_ai.testimpact import get_test_impact as _get_test_impact
 from code_review_ai.deadcode import find_dead_code as _find_dead_code
 from code_review_ai.search import fts_search
@@ -209,36 +208,9 @@ def create_server(config: Config):
         (e.g. "*login*", "UserService", "login"). Pure-word queries run FTS
         token match + bm25 ranking, falling back to substring on 0 hits.
         Returns a JSON list of {qname, kind, file, line, end_line, signature,
-        score}. Use to find qualified names before get_symbol_detail /
-        get_impact."""
+        score}. Use to find qualified names before get_impact."""
         return _emit(fts_search(
             conn, query, limit=min(limit, _SEARCH_SYMBOL_LIMIT)))
-
-    @mcp.tool()
-    def get_symbol_detail(qualified_name: str) -> str:
-        """Detail for one fully-qualified symbol, e.g. "auth::UserService.login":
-        kind, file, line, signature, in/out degree, direct resolved
-        callers/callees as qnames, and (when present) the import aliases that
-        reference it. Returns a JSON object, or
-        {"error": "symbol not found"}."""
-        r = conn.execute("SELECT * FROM nodes WHERE qualified_name=?", (qualified_name,)).fetchone()
-        if r is None:
-            return _emit({"error": "symbol not found"})
-        callers = [row["source"] for row in conn.execute(
-            "SELECT DISTINCT source FROM edges WHERE target=? AND kind='call' "
-            "AND resolution='resolved'", (qualified_name,))]
-        callees = [row["target"] for row in conn.execute(
-            "SELECT DISTINCT target FROM edges WHERE source=? AND kind='call' "
-            "AND resolution='resolved'", (qualified_name,))]
-        detail = {"qname": r["qualified_name"], "kind": r["kind"],
-                  "file": r["file_path"], "line": r["start_line"],
-                  "signature": r["signature"],
-                  "in_degree": r["in_degree"], "out_degree": r["out_degree"],
-                  "callers": callers, "callees": callees}
-        aliases = _get_symbol_aliases(conn, qualified_name)
-        if aliases:
-            detail["aliases"] = aliases
-        return _emit(detail)
 
     @mcp.tool()
     def get_communities() -> str:
