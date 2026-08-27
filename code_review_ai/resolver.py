@@ -258,6 +258,26 @@ def _module_of(spec: str, path_aliases: dict[str, str] | None,
     return _spec_to_module(spec, path_aliases, existing) or spec
 
 
+def resolve_import_target(imp, path_aliases: dict[str, str] | None,
+                          base_url: str, existing: set[str]) -> str | None:
+    """Best-effort canonical qname an import binding points at.
+
+    ``from m import x`` → ``m::x``; ``import m [as y]`` / ESM default / namespace
+    → the module qname itself. Reuses the same module canonicalization the
+    resolver's import branch uses (_import_module), so path_aliases/baseUrl
+    resolve identically. Star imports yield None (no single target). Does not
+    chase re-exports — good enough for search/display, where the nodes table
+    still carries the authoritative definition. This is the persisted
+    ``imports.resolved_target`` that get_impact/get_symbol_detail's inverse
+    alias lookup and fts_imports search are built on."""
+    if imp.is_star:
+        return None
+    mod = _import_module(imp.module, path_aliases, base_url, existing)
+    if imp.imported_name and imp.imported_name != "default":
+        return qname.join(mod, imp.imported_name)
+    return mod
+
+
 def _dedup_append(edges: list[Edge], seen: set[tuple[str, str, str]],
                   edge: Edge) -> None:
     """Keep one edge per (source, target, kind).

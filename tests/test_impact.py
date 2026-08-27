@@ -76,11 +76,19 @@ def test_impact_call_sites_on_direct_neighbors(tmp_path):
     assert "call_site" in by_qname["b::helper"]
     assert "call_site" in by_qname["d::direct"]
     assert "target()" in by_qname["d::direct"]["call_site"]["code"]
-    # the purely-transitive hop (a::entry -> b::helper -> target) stays qname-only
+    # direct neighbors are level 1
+    assert by_qname["b::helper"]["level"] == 1
+    assert by_qname["d::direct"]["level"] == 1
+    # the purely-transitive hop (a::entry -> b::helper -> target) gets a slim
+    # via marker pointing at the parent it hangs off, NOT a full call_site
     assert "call_site" not in by_qname["a::entry"]
-    # opt-out drops the field entirely
+    assert by_qname["a::entry"]["level"] == 2
+    assert by_qname["a::entry"]["via"] == {"via": Q("b", "helper"), "line": 3}
+    # opt-out drops call-site detail (call_site AND via), level stays
     res_off = get_impact(conn, ["c::target"], include_call_sites=False)[0]
     assert all("call_site" not in node for node in res_off["upstream"])
+    assert all("via" not in node for node in res_off["upstream"])
+    assert all("level" in node for node in res_off["upstream"])
 
 
 def _diamond_idx(tmp_path):

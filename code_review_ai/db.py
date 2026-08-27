@@ -8,7 +8,10 @@ from pathlib import Path
 # older index.db incompatible; indexers check this before rebuilding.
 # 8: resolved call edges now carry call-site evidence (line + args) in
 #    evidence_json, surfaced by query_graph; older indexes lack it.
-INDEX_VERSION = 8
+# 9: import bindings (incl. aliases like `from m import x as y`) persisted to
+#    the `imports` table + `fts_imports`, surfaced by search_symbol /
+#    get_impact / get_symbol_detail; older indexes lack the table.
+INDEX_VERSION = 9
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (
@@ -99,10 +102,45 @@ CREATE TABLE IF NOT EXISTS tombstones (
 );
 CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
+-- Covering index for impact._resolved_call_adjacency: SELECT source,target
+-- WHERE kind='call' AND resolution='resolved' becomes a pure index scan
+-- (~14ms vs ~53ms table scan on the 85MB demo index). Partial because only
+-- resolved-call edges are ever scanned this way, keeping the index to that
+-- subset instead of all 80k rows.
+CREATE INDEX IF NOT EXISTS idx_edges_resolved_call
+    ON edges(source, target)
+    WHERE kind='call' AND resolution='resolved';
 CREATE INDEX IF NOT EXISTS idx_memberships_node ON flow_memberships(node_id);
 CREATE INDEX IF NOT EXISTS idx_community_memberships_node ON community_memberships(node_id);
 CREATE INDEX IF NOT EXISTS idx_tombstones_file ON tombstones(file_path);
 CREATE INDEX IF NOT EXISTS idx_tombstones_qname ON tombstones(qname);
+-- Import bindings: every parsed ImportEntry (local_name = the bound name, i.e.
+-- the alias when `from m import x as y`). resolved_target is the best-effort
+-- canonical qname the binding points at (module for `import m`, else
+-- module::name), so inverse lookups ("which aliases reference this symbol?")
+-- are a single indexed SELECT.
+CREATE TABLE IF NOT EXISTS imports (
+    id INTEGER PRIMARY KEY,
+    module_qname TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    line INTEGER,
+    local_name TEXT NOT NULL,
+    module TEXT NOT NULL,
+    imported_name TEXT,
+    is_star INTEGER NOT NULL DEFAULT 0,
+    resolved_target TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_imports_target ON imports(resolved_target);
+CREATE INDEX IF NOT EXISTS idx_imports_local ON imports(local_name);
+CREATE INDEX IF NOT EXISTS idx_imports_file ON imports(file_path);
+-- Search index over import bindings. Deliberately only local_name/module/
+-- file_path -- NOT imported_name -- so `search "login"` does not surface every
+-- row that aliased a symbol named login (the inverse direction is served by
+-- get_impact/get_symbol_detail's aliases field instead).
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_imports USING fts5(
+    local_name, module, file_path,
+    content='imports', content_rowid='id'
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_nodes USING fts5(
     qualified_name, file_path, signature, decorators, end_line,
     content='nodes', content_rowid='id'

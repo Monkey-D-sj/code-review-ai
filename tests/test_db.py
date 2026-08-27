@@ -58,7 +58,9 @@ def test_files_table_and_busy_timeout(tmp_path):
         "INSERT INTO files(path,mtime,size,file_hash) VALUES('a.py', 1.0, 3, 'x')")
     row = conn.execute("SELECT * FROM files").fetchone()
     assert row["path"] == "a.py" and row["size"] == 3
-    assert INDEX_VERSION == 8
+    # Bumped to 9 when `imports` + `fts_imports` were added (8 -> 9 forces a
+    # full rebuild of any index built before import bindings were persisted).
+    assert INDEX_VERSION == 9
     # busy_timeout 生效（PRAGMA 返回毫秒）
     assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     conn.close()
@@ -139,6 +141,31 @@ def test_init_schema_creates_fts_nodes(tmp_path):
         "SELECT name FROM sqlite_master WHERE type='table' AND name='fts_nodes'"
     ).fetchone()
     assert row is not None
+    conn.close()
+
+
+def test_init_schema_creates_resolved_call_covering_index(tmp_path):
+    """impact._resolved_call_adjacency reads source,target WHERE kind='call'
+    AND resolution='resolved' on every get_impact call; the partial covering
+    index must serve it. Without the covering columns the load degrades back
+    to a table scan (+rowid seeks) on each call."""
+    conn = connect(str(tmp_path / "ix.db"))
+    init_schema(conn)
+    conn.executemany(
+        "INSERT INTO edges(source,target,kind,file_path,resolution)"
+        " VALUES(?,?,?,?,?)",
+        [("m::a", "m::b", "call", "a.py", "resolved"),
+         ("m::a", "m::b", "call", "a.py", "dynamic"),
+         ("m::a", "m::b", "contains", "a.py", "resolved")])
+    conn.commit()
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index'"
+        " AND name='idx_edges_resolved_call'").fetchone()
+    assert row is not None
+    plan = " ".join(r[3] for r in conn.execute(
+        "EXPLAIN QUERY PLAN SELECT source, target FROM edges "
+        "WHERE kind='call' AND resolution='resolved'"))
+    assert "COVERING INDEX" in plan
     conn.close()
 
 

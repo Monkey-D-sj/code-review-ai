@@ -13,6 +13,7 @@ from code_review_ai.config import Config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.graph import query_graph as _query_graph
 from code_review_ai.impact import get_impact as _get_impact
+from code_review_ai.impact import get_symbol_aliases as _get_symbol_aliases
 from code_review_ai.testimpact import get_test_impact as _get_test_impact
 from code_review_ai.deadcode import find_dead_code as _find_dead_code
 from code_review_ai.search import fts_search
@@ -102,9 +103,12 @@ def create_server(config: Config):
         add per-node `sig` fields (default off — signatures are ~26% of the
         payload). Direct upstream/downstream neighbors carry a `call_site`
         (call_form/line/args/code snippet) by default so a contract change is
-        visible at the exact call points without opening the caller file; pass
-        `include_call_sites=false` to omit, and transitive hops always stay
-        qname-only. Each result also carries `uncertainty` (one-hop
+        visible at the exact call points without opening the caller file;
+        transitive hops carry a slim `via` marker ({via, line, args} — the
+        parent function the hop hangs off + the connecting call) so the
+        propagation path needs no Reads either. Every node has a `level` (BFS
+        hop count). Pass `include_call_sites=false` to omit both. Each result
+        also carries `uncertainty` (one-hop
         non-resolved edges around the symbol — dynamic/unresolved/candidate —
         capped at 20) and `coverage` (adjacent-edge counts per resolution), so
         resolution gaps are visible instead of silently dropped. Prefer this
@@ -208,8 +212,9 @@ def create_server(config: Config):
     @mcp.tool()
     def get_symbol_detail(qualified_name: str) -> str:
         """Detail for one fully-qualified symbol, e.g. "auth::UserService.login":
-        kind, file, line, signature, in/out degree, and direct resolved
-        callers/callees as qnames. Returns a JSON object, or
+        kind, file, line, signature, in/out degree, direct resolved
+        callers/callees as qnames, and (when present) the import aliases that
+        reference it. Returns a JSON object, or
         {"error": "symbol not found"}."""
         r = conn.execute("SELECT * FROM nodes WHERE qualified_name=?", (qualified_name,)).fetchone()
         if r is None:
@@ -220,11 +225,15 @@ def create_server(config: Config):
         callees = [row["target"] for row in conn.execute(
             "SELECT DISTINCT target FROM edges WHERE source=? AND kind='call' "
             "AND resolution='resolved'", (qualified_name,))]
-        return _emit({"qname": r["qualified_name"], "kind": r["kind"],
-                      "file": r["file_path"], "line": r["start_line"],
-                      "signature": r["signature"],
-                      "in_degree": r["in_degree"], "out_degree": r["out_degree"],
-                      "callers": callers, "callees": callees})
+        detail = {"qname": r["qualified_name"], "kind": r["kind"],
+                  "file": r["file_path"], "line": r["start_line"],
+                  "signature": r["signature"],
+                  "in_degree": r["in_degree"], "out_degree": r["out_degree"],
+                  "callers": callers, "callees": callees}
+        aliases = _get_symbol_aliases(conn, qualified_name)
+        if aliases:
+            detail["aliases"] = aliases
+        return _emit(detail)
 
     @mcp.tool()
     def get_communities() -> str:

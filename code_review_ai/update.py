@@ -15,11 +15,12 @@ from code_review_ai.config import config_hash as _config_hash
 from code_review_ai.db import INDEX_VERSION, transaction
 from code_review_ai.flow_builder import (EdgeRow, NodeRow, build_flows,
                                          flow_input_hash)
-from code_review_ai.indexer import rebuild, recompute_degrees, _stamp_built_at
+from code_review_ai.indexer import (_write_imports, rebuild,
+                                    recompute_degrees, _stamp_built_at)
 from code_review_ai.parser import (SOURCE_GLOBS, filter_excluded,
                                    is_test_node, list_source_files, parse_file)
 from code_review_ai.resolver import resolve_edges
-from code_review_ai.search import deindex_fts, index_fts
+from code_review_ai.search import deindex_fts, index_fts, reindex_imports_fts
 
 
 def changed_files(config, conn) -> tuple[set[str], set[str], set[str]]:
@@ -198,6 +199,13 @@ def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
     for abs_path in touch:
         # Edges are fully replaced below (re-resolved from the fresh parse).
         conn.execute("DELETE FROM edges WHERE file_path=?", (abs_path,))
+        # Same for import bindings: replace the backing rows below from the
+        # fresh parse via _write_imports. The fts alias index is NOT touched
+        # per-row — a `DELETE FROM fts_imports WHERE rowid=?` on this subset
+        # external-content table throws "database disk image is malformed"
+        # when the rowid isn't in the index (the normal state for plain
+        # imports); reindex_imports_fts rebuilds it wholesale afterwards.
+        conn.execute("DELETE FROM imports WHERE file_path=?", (abs_path,))
         rows = conn.execute(
             "SELECT id, qualified_name FROM nodes WHERE file_path=?",
             (abs_path,)).fetchall()
@@ -225,6 +233,11 @@ def _apply_nodes_edges_delta(conn, repo, parsed, changed_set: set[str],
     edges = resolve_edges(parsed, global_set, config.path_aliases,
                           config.dependency_markers, config.di_annotations)
     _insert_edges(conn, edges)
+    _write_imports(conn, parsed, global_set, config)
+    # Wholesale rebuild of the alias index: per-row fts maintenance is unsafe
+    # on this subset external-content table, and any changed/deleted file may
+    # have left stale or removed aliases. O(aliases), always consistent.
+    reindex_imports_fts(conn)
     recompute_degrees(conn)
     return node_count, len(edges)
 

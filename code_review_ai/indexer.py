@@ -14,7 +14,7 @@ from code_review_ai.db import transaction
 from code_review_ai.flow_builder import NodeRow, EdgeRow, FlowRecord, build_flows, flow_input_hash
 from code_review_ai.parser import ParsedFile, SOURCE_GLOBS, filter_excluded, is_test_node, list_source_files, parse_file
 from code_review_ai.resolver import resolve_edges
-from code_review_ai.search import index_fts
+from code_review_ai.search import index_fts, index_imports_fts
 
 
 def _ms(seconds: float) -> float:
@@ -70,6 +70,7 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
         qname_to_id, inserted = _write_nodes(conn, parsed, config)
         index_fts(conn, inserted, qname_to_id)
         _write_edges(conn, all_edges)
+        _write_imports(conn, parsed, qnames, config)
         recompute_degrees(conn)
         call_edges = [e for e in all_edges if e.kind == "call"]
         flow_count = _write_flows(conn, parsed, call_edges, qname_to_id, config)
@@ -99,6 +100,14 @@ def _clear_tables(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM community_edges")
     conn.execute("DELETE FROM communities")
     conn.execute("DELETE FROM edges")
+    # External-content FTS5: a table-wide `DELETE FROM fts_imports` reads the
+    # content table and throws "database disk image is malformed" whenever some
+    # content rows aren't in the index — which is the normal state here, since
+    # only aliased imports are indexed. The 'delete-all' command clears the
+    # index regardless of content-table state (indexed rows only: the later
+    # DELETE FROM imports removes the content).
+    conn.execute("INSERT INTO fts_imports(fts_imports) VALUES('delete-all')")
+    conn.execute("DELETE FROM imports")
     conn.execute("DELETE FROM nodes")
     conn.execute("DELETE FROM fts_nodes")
 
@@ -153,6 +162,38 @@ def _write_edges(conn, edges) -> None:
           json.dumps(e.evidence_json) if e.evidence_json else None,
           e.site_id) for e in edges],
     )
+
+
+def _write_imports(conn, parsed, qnames: set[str], config) -> int:
+    """Persist every import binding to `imports`, then populate fts_imports.
+
+    local_name is the bound name (the alias for ``from m import x as y``); the
+    alias is never a node, so without this table it is invisible to
+    search_symbol / get_impact. resolved_target is the best-effort canonical
+    qname (``module::name`` for ``from m import name``, the module for
+    ``import m [as y]``). Returns the import row count."""
+    from code_review_ai.resolver import resolve_import_target
+    if not parsed:
+        return 0
+    max_before = conn.execute(
+        "SELECT COALESCE(MAX(id), 0) FROM imports").fetchone()[0]
+    rows = [(pf.module_qname, pf.file_path,
+             imp.span.start_line if imp.span else None,
+             imp.local_name, imp.module, imp.imported_name,
+             1 if imp.is_star else 0,
+             resolve_import_target(imp, config.path_aliases, config.base_url,
+                                   qnames))
+            for pf in parsed for imp in pf.imports]
+    if not rows:
+        return 0
+    conn.executemany(
+        "INSERT INTO imports(module_qname,file_path,line,local_name,module,"
+        "imported_name,is_star,resolved_target) VALUES(?,?,?,?,?,?,?,?)", rows)
+    indexed = [dict(r) for r in conn.execute(
+        "SELECT id,local_name,module,imported_name,is_star,file_path "
+        "FROM imports WHERE id > ?", (max_before,))]
+    index_imports_fts(conn, indexed)
+    return len(rows)
 
 
 def recompute_degrees(conn: sqlite3.Connection) -> None:
