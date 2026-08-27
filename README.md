@@ -81,8 +81,8 @@ args = ["--from", "git+https://github.com/Monkey-D-sj/code-review-ai", "code-rev
 ## MCP tools
 
 - `rebuild_index` - build/rebuild the index from the working tree
-- `get_impact` - impact chains for changed symbols (or derived from a git diff); direct callers/callees carry `call_site` code snippets (opt-out via `include_call_sites=false`)
-- `get_change_context` - compact, on-demand callers/callees for changes the LLM has already judged non-local; accepts qnames or changed files and resolves qnames server-side
+- `get_impact` - impact chains for changed symbols (or derived from a git diff); direct callers/callees carry `call_site` code snippets (opt-out via `include_call_sites=false`); default `max_level=1` returns direct neighbors plus a `depth` summary (pass `max_level=0` for the full transitive closure)
+- `get_change_context` - manual multi-symbol / directional (in/out/both) graph expansion; largely superseded by `get_impact` (which already carries direct call-site code), kept for ad-hoc graph queries
 - `search_symbol` - find symbols by name; plain-word queries run FTS token match + bm25 ranking with a substring fallback on 0 hits, while queries containing `*`/`?` keep the short-name glob behavior
 - `get_symbol_detail` - node detail + direct callers/callees
 - `get_communities` / `get_community` - Leiden communities (opt-in via `community_detection`)
@@ -341,9 +341,9 @@ exists), pipes that JSON into the review LLM, and writes the report to
 for claude-code, a `.debug.jsonl` raw `stream-json` transcript for deeper
 dives), so history is kept and `last-review.md` always points at the newest.
 The review prompt first asks the LLM to classify the supplied local change.
-Self-contained changes use no graph context; non-local changes call the compact
-`get_change_context` once with qnames or affected files, then use targeted
-native reads only for missing evidence. The headless run
+Self-contained changes use no graph context; non-local changes call `get_impact`
+once for direct call sites + affected entries, then use targeted native reads
+only for missing evidence. The headless run
 pre-authorizes those tools so they don't fail on permission prompts. The LLM
 platform is selectable — `claude-code` (default, runs `claude -p
 --output-format stream-json --verbose`, extracting the answer from the

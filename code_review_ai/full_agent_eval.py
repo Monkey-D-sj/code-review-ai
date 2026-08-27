@@ -51,7 +51,7 @@ DEFAULT_FULL_EVAL_MODES = ("native_agent", "full_project_core")
 # registration filter). None = the full online tool set.
 _CORE_EXCLUDED_MCP_TOOLS = {
     "rebuild_index", "get_communities", "get_community", "call_external_service",
-    "find_dead_code", "query_graph",
+    "find_dead_code", "query_graph", "get_change_context",
 }
 _CORE_MCP_TOOLS = tuple(
     name for name in MCP_TOOL_NAMES if name not in _CORE_EXCLUDED_MCP_TOOLS)
@@ -712,16 +712,15 @@ def _prompt(item: PreparedCase, mode: str, hinted: bool = False) -> str:
 然后使用原生工具定位这些符号的调用方和被调用方。"""
     elif mode == "full_project_core":
         tool_note = """你可以使用原生只读检查工具以及这些 code-review-ai MCP 工具：get_impact、get_test_impact、
-get_change_summary、get_change_context、search_symbol 和 get_symbol_detail。未开放 rebuild_index、query_graph、
+get_change_summary、search_symbol 和 get_symbol_detail。未开放 rebuild_index、query_graph、get_change_context、
 get_communities、get_community、call_external_service、find_dead_code。评审主通道是 get_impact：
 你的第一个工具调用必须是 get_change_summary——在任何其他工具之前（包括所有原生只读工具），必须先调用
 get_change_summary 获取结构化变更符号，然后对每个关键变更符号调用一次 get_impact，获取其直接上下游调用点
 （upstream/downstream，含契约断点 call_site）与受影响业务入口（affected_entries）——这是本模式区别于 grep 的核心价值；
 其 depth 摘要（upstream_max/downstream_max/total）表明影响传播有多深——如果某直接调用方需要继续深挖，对那个
 调用方 qname 再调用一次 get_impact（可传 max_level=0 获取完整传递闭包）。其 uncertainty 已列出解析缺口、coverage
-已给出解析覆盖率。不要在 get_impact 已覆盖的符号上重复调用 get_change_context。
-仅当需要判断某个具体调用点的契约变更（参数、返回值、异常）时，才对那个符号调用 get_change_context
-补齐调用点代码片段（call_site.code）。get_test_impact 仅用于测试影响；search_symbol、get_symbol_detail 仅用于解析
+已给出解析覆盖率。get_impact 的直接调用点 call_site 已含调用行代码（code），足以判断契约变更，
+不需要 get_change_context（已关闭）。get_test_impact 仅用于测试影响；search_symbol、get_symbol_detail 仅用于解析
 不确定的 qname。图索引已同步。不要 grep，也不要重新读取 MCP 响应中已经存在的关系；仅使用原生工具验证缺失证据
 或具体候选问题。"""
     elif mode == "native_full":
