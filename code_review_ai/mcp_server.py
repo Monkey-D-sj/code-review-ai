@@ -93,29 +93,19 @@ def create_server(config: Config):
                    include_signatures: bool = False,
                    include_call_sites: bool = True,
                    max_level: int = 1) -> str:
-        """Impact analysis for changed symbols: the affected business entry
-        points plus upstream callers / downstream callees per flow. Pass
-        explicit `symbols` (e.g. ["auth::login"]) or `files`; if both omitted,
-        changed symbols are derived from git diff (diff_base). Upstream/
-        downstream are the exact transitive callers/callees (sibling branches
-        that never call the symbol are excluded), capped at
-        `max_nodes_per_direction` per flow. Set `include_signatures=true` to
-        add per-node `sig` fields (default off — signatures are ~26% of the
-        payload). Direct upstream/downstream neighbors carry a `call_site`
-        (call_form/line/args/code snippet) by default so a contract change is
-        visible at the exact call points without opening the caller file.
-        Every node has a `level` (BFS hop count). `max_level` bounds how many
-        BFS hops are returned: 1 (default) returns only DIRECT neighbors and a
-        `depth` summary ({upstream_max, downstream_max, upstream_total,
-        downstream_total}) showing how far impact propagates — query a direct
-        neighbor's own get_impact to walk deeper; 0 returns the full transitive
-        closure (transitive hops carry a slim `via` marker instead of a code
-        snippet). Each result
-        also carries `uncertainty` (one-hop
-        non-resolved edges around the symbol — dynamic/unresolved/candidate —
-        capped at 20) and `coverage` (adjacent-edge counts per resolution), so
-        resolution gaps are visible instead of silently dropped. Prefer this
-        over grepping when assessing what a code change breaks."""
+        """Impact for changed symbols: affected business entries plus upstream
+        callers / downstream callees. Query by `symbols` (e.g.
+        ["auth::login"]), `files`, or omit both to derive from git diff.
+        `max_level` bounds BFS hops: 1 (default) = DIRECT neighbors + a depth
+        summary ({upstream_max, downstream_max, upstream_total,
+        downstream_total}); 0 = full transitive closure. Direct neighbors
+        carry a `call_site` code snippet by default — the calling code is
+        already there, so you usually don't need to Read caller files. Pass
+        `include_call_sites=false` for topology-only queries (responses are
+        token-heavy). Each result carries `uncertainty` (resolution gaps) and
+        `coverage`. Query each changed symbol once; to walk deeper, query a
+        specific direct-neighbor qname — never re-request a symbol or file you
+        already have results for."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
         return _emit(_get_impact(
             conn, changed,

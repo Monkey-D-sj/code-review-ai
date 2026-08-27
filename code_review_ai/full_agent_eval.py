@@ -72,14 +72,14 @@ rg/grep），以及明确开放的只读 MCP 工具检查仓库内容。完整�
 
 
 # The task block is deliberately case-independent: it states the deliverable
-# (what broke, which callers / entry points / tests are affected) without naming
-# a single symbol.  Per-case prose lives in ``FullAgentCase.hint`` and reaches
+# (what broke, which callers / entry points are affected) without naming a
+# single symbol.  Per-case prose lives in ``FullAgentCase.hint`` and reaches
 # the model only under ``hinted=True``, because naming the affected callers
 # removes exactly the work the graph tools exist to do: the same text is
 # symmetric input to both arms but asymmetric benefit — it hands the native arm
 # the one hop it would otherwise have to traverse for.
 _BLIND_TASK = """评审下方差异引入的回归。自行判断该变更破坏了什么，并沿调用链确定其影响范围：
-哪些调用方会因此行为异常、哪些对外入口（HTTP 接口 / CLI / 定时任务）受影响、以及应当运行哪些测试。
+哪些调用方会因此行为异常、哪些对外入口（HTTP 接口 / CLI / 定时任务）受影响。
 差异之外的受影响文件必须显式报告。"""
 
 # Gold sets carry one finding per case, so precision is 1/N of whatever the
@@ -687,7 +687,7 @@ def _prompt(item: PreparedCase, mode: str, hinted: bool = False) -> str:
         "findings": [{"file": "path", "line": 1, "title": "...",
                       "description": "..."}],
         "affected_symbols": [], "affected_files": [],
-        "affected_entries": [], "tests": [],
+        "affected_entries": [],
         "files_read": [], "tool_calls": [],
     }
     if mode == "full_project_agent":
