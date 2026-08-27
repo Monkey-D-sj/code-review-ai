@@ -297,7 +297,9 @@ async def _scripted_core(changed_files: list[str]) -> dict:
     calls: list[str] = []
     trace: list[dict] = []
     async with _mcp_session() as session:
-        summary_args: dict[str, object] = {}
+        # toon=False keeps the deterministic harness on JSON (the MCP tools
+        # default to TOON output now).
+        summary_args: dict[str, object] = {"toon": False}
         summary_text = await _session_call(session, "get_change_summary",
                                            summary_args)
         calls.append("mcp__code-review-ai__get_change_summary")
@@ -311,7 +313,8 @@ async def _scripted_core(changed_files: list[str]) -> dict:
                   else (changed_files[0] if changed_files else "src/app.py"))
         if symbol:
             impact_args: dict[str, object] = {
-                "symbols": [symbol], "include_call_sites": True}
+                "symbols": [symbol], "include_call_sites": True,
+                "toon": False}
             impact_text = await _session_call(session, "get_impact",
                                               impact_args)
             calls.append("mcp__code-review-ai__get_impact")

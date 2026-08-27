@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 import pytest
+from toon_format import decode
 from code_review_ai.config import load_config
 from code_review_ai.change_context import build_change_context
 from code_review_ai.db import connect, init_schema
@@ -55,7 +56,7 @@ def test_get_impact_tool(tmp_path):
     server, conn, cfg = _server(tmp_path)
     tools = server._tool_manager._tools
     assert "get_impact" in tools
-    out = tools["get_impact"].fn(symbols=[Q("auth","login")])
+    out = tools["get_impact"].fn(symbols=[Q("auth","login")], toon=False)
     data = json.loads(out)
     assert data[0]["symbol"] == Q("auth","login")
     assert data[0]["found"] is True
@@ -66,6 +67,16 @@ def test_get_impact_tool(tmp_path):
         "dynamic_edges", "unresolved_edges", "truncated"}
     assert data[0]["coverage"]["resolved_edges"] == 1  # app::main -> login
     assert data[0]["coverage"]["truncated"] is False
+
+
+def test_get_impact_tool_defaults_to_toon(tmp_path):
+    # TOON is the default serialization: the response round-trips via
+    # toon_format.decode and matches the toon=False JSON payload exactly.
+    server, conn, cfg = _server(tmp_path)
+    tools = server._tool_manager._tools
+    toon_out = tools["get_impact"].fn(symbols=[Q("auth", "login")])
+    json_out = tools["get_impact"].fn(symbols=[Q("auth", "login")], toon=False)
+    assert decode(toon_out) == json.loads(json_out)
 
 
 def test_search_symbol_tool(tmp_path):
@@ -128,7 +139,8 @@ def test_get_change_summary_tool(tmp_path):
     server, conn, cfg = _server(tmp_path)
     tools = server._tool_manager._tools
     assert "get_change_summary" in tools
-    data = json.loads(tools["get_change_summary"].fn(symbols=[Q("auth", "login")]))
+    data = json.loads(tools["get_change_summary"].fn(
+        symbols=[Q("auth", "login")], toon=False))
     assert set(data) == {"summary", "changed_functions", "uncovered_changes",
                          "delete_change"}
     assert data["summary"]["changed_functions"] == 1
@@ -137,6 +149,17 @@ def test_get_change_summary_tool(tmp_path):
     assert record["file"] == "auth.py"
     assert record["start_line"] == 6
     assert record["end_line"] == 7
+
+
+def test_get_change_summary_tool_defaults_to_toon(tmp_path):
+    # TOON is the default serialization: the response round-trips via
+    # toon_format.decode and matches the toon=False JSON payload exactly.
+    server, conn, cfg = _server(tmp_path)
+    tools = server._tool_manager._tools
+    toon_out = tools["get_change_summary"].fn(symbols=[Q("auth", "login")])
+    json_out = tools["get_change_summary"].fn(
+        symbols=[Q("auth", "login")], toon=False)
+    assert decode(toon_out) == json.loads(json_out)
 
 
 def test_get_change_context_tool_is_compact_and_resolves_symbol_input(tmp_path):

@@ -5,6 +5,8 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+import toon_format
+
 from code_review_ai.changes import build_change_summary, detect_changed_symbols
 from code_review_ai.change_context import build_change_context
 from code_review_ai.community import get_community as _get_community
@@ -68,9 +70,13 @@ def create_server(config: Config):
     conn = _conn(config)
     lock = threading.Lock()
 
-    def _emit(value: object) -> str:
-        """Serialize a tool result with repo-absolute paths relativized."""
-        return json.dumps(_relativize(value, config.repo_path))
+    def _emit(value: object, toon: bool = False) -> str:
+        """Serialize a tool result with repo-absolute paths relativized.
+        ``toon=True`` returns the TOON text encoding instead of JSON."""
+        payload = _relativize(value, config.repo_path)
+        if toon:
+            return toon_format.encode(payload)
+        return json.dumps(payload)
 
     @mcp.tool()
     def rebuild_index() -> str:
@@ -92,7 +98,8 @@ def create_server(config: Config):
                    max_nodes_per_direction: int = 20,
                    include_signatures: bool = False,
                    include_call_sites: bool = True,
-                   max_level: int = 1) -> str:
+                   max_level: int = 1,
+                   toon: bool = True) -> str:
         """Impact for changed symbols: affected business entries plus upstream
         callers / downstream callees. Query by `symbols` (e.g.
         ["auth::login"]), `files`, or omit both to derive from git diff.
@@ -105,14 +112,14 @@ def create_server(config: Config):
         token-heavy). Each result carries `uncertainty` (resolution gaps) and
         `coverage`. Query each changed symbol once; to walk deeper, query a
         specific direct-neighbor qname — never re-request a symbol or file you
-        already have results for."""
+        already have results for. Responses are TOON text by default."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
         return _emit(_get_impact(
             conn, changed,
             max_nodes_per_direction=max_nodes_per_direction,
             include_signatures=include_signatures,
             include_call_sites=include_call_sites,
-            max_level=max_level))
+            max_level=max_level), toon=toon)
 
     @mcp.tool()
     def get_test_impact(symbols: list[str] | None = None,
@@ -142,7 +149,8 @@ def create_server(config: Config):
 
     @mcp.tool()
     def get_change_summary(symbols: list[str] | None = None,
-                           files: list[str] | None = None) -> str:
+                           files: list[str] | None = None,
+                           toon: bool = True) -> str:
         """Change summary: from the git diff (diff_base) compute `summary`
         (diff stats incl. uncovered_changes + delete_change counts) +
         `changed_functions` (changed function/method/class detail) +
@@ -151,9 +159,10 @@ def create_server(config: Config):
         without a tombstone) + `delete_change` (deleted functions/modules with
         their one-hop upstream, from tombstones written at update time). Pass
         explicit `symbols` to resolve those qnames from the graph instead of
-        the diff. Returns a JSON object."""
+        the diff. Returns TOON text by default."""
         return _emit(build_change_summary(config, conn,
-                                          symbols=symbols, files=files))
+                                          symbols=symbols, files=files),
+                     toon=toon)
 
     @mcp.tool()
     def get_change_context(symbols: list[str] | None = None,

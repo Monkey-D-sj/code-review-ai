@@ -11,6 +11,7 @@ dependencies = [
     "tree-sitter-java>=0.23",
     "mcp>=2",
     "watchfiles>=0.21",
+    "toon-format",
 ]
 
 [project.optional-dependencies]
@@ -36,3 +37,6 @@ testpaths = ["tests"]
 markers = [
     "slow: full-repo rebuild / eval runs that take seconds (skip with -m 'not slow')",
 ]
+
+[tool.uv.sources]
+toon-format = { git = "https://github.com/toon-format/toon-python.git" }
