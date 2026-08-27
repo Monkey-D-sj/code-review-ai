@@ -400,8 +400,7 @@ def test_instantiation_to_constructor_internal_call_end_to_end(tmp_path):
     constructor (Foo.Foo), and the constructor's own internal calls must then
     land as resolved edges - and in the entry-point flow - so impact can walk
     instantiation -> constructor -> what the constructor calls. This is the
-    '实例化 → 构造函数 → 构造函数内部调用' chain STATIC_ANALYSIS_COVERAGE §8 #3
-    flagged as needing an end-to-end test."""
+    '实例化 → 构造函数 → 构造函数内部调用' chain (P1 audit gap)."""
     files = _ctor_chain_repo(tmp_path)
     qnames = {n.qualified_name for f in files for n in f.nodes}
     edges = resolve_edges(files, qnames)

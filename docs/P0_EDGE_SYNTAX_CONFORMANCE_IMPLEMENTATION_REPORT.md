@@ -21,7 +21,7 @@
 | `missing` | 0 | 没有遗漏的 catalog 项 |
 | `not_applicable` | 1 | Python 没有独立 implements 语法 |
 
-按语言和边类型的明细见 [P0_EDGE_SYNTAX_CONFORMANCE_REPORT.md](P0_EDGE_SYNTAX_CONFORMANCE_REPORT.md)。机器校验结果为：`validate_syntax_catalog(...) == []`，公共 Query case 共 125 个。
+按语言和边类型的明细以 [tests/p0/syntax-catalog.json](../tests/p0/syntax-catalog.json) 为准（原自动生成的明细表 `P0_EDGE_SYNTAX_CONFORMANCE_REPORT.md` 已删除）。机器校验结果为：`validate_syntax_catalog(...) == []`，公共 Query case 共 125 个。
 
 本轮新增的真实实现包括：Java 声明式返回类型驱动的 `factory.create().run()` 返回链、抽象 receiver、泛型 receiver，以及 TypeScript tagged template 调用。getter/setter、Java method reference、TypeScript union/structural receiver 和 Gradle/JPMS/工作区配置边界没有伪装成 resolved，而是分别登记为 dynamic 或 partial。
 
@@ -96,7 +96,6 @@ tests/p0/typescript/...
 tests/p0/java/...
 tests/p0_conformance.py
 tests/test_p0_syntax_catalog.py
-docs/P0_EDGE_SYNTAX_CONFORMANCE_REPORT.md
 ```
 
 其中：
