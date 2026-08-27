@@ -174,7 +174,7 @@ def run_agent_eval(config: Config, conn: sqlite3.Connection,
                    output_dir: str, modes: tuple[str, ...] = MODES,
                    repetitions: int = 1, timeout_seconds: int = 300,
                    workers: int = 1,
-                   repos_dir: str = ".code-review-ai/external-repos",
+                   repos_dir: str = "eval-results/external-repos",
                    executor: AgentExecutor | None = None) -> dict:
     """Run every case/mode/repetition and return a machine-readable report."""
     _validate_run(cases, command, modes, repetitions, timeout_seconds, workers)
@@ -225,7 +225,7 @@ def run_agent_eval(config: Config, conn: sqlite3.Connection,
 def preflight_agent_eval(config: Config, conn: sqlite3.Connection,
                          cases: list[AgentEvalCase],
                          modes: tuple[str, ...] = MODES,
-                         repos_dir: str = ".code-review-ai/external-repos") -> dict:
+                         repos_dir: str = "eval-results/external-repos") -> dict:
     """Build contexts and validate symbol/budget coverage without an agent call."""
     _validate_run(cases, ["preflight"], modes, 1, 1, 1)
     results: list[dict] = []
@@ -326,7 +326,7 @@ def _execute_jobs(jobs: list[tuple], command: list[str], output_dir: str,
 
 def _create_case_snapshot(config: Config, case: AgentEvalCase,
                           work_root: Path,
-                          repos_dir: str = ".code-review-ai/external-repos"
+                          repos_dir: str = "eval-results/external-repos"
                           ) -> _CaseSnapshot:
     """Materialize a reverse mutation from a historical fix commit."""
     if case.source_commit is None:

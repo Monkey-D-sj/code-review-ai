@@ -469,7 +469,7 @@ code-review-ai agent-eval-analyze `
 # 将大 transcript 压缩为完整、有序、无响应正文的工具执行路线
 code-review-ai eval-trace `
   benchmark-results/case-backend-tiered.json `
-  --transcripts-root .code-review-ai/full-agent-eval/transcripts `
+  --transcripts-root eval-results/full-agent-eval/transcripts `
   -o benchmark-results/case-backend-tiered-routes.md
 ```
 

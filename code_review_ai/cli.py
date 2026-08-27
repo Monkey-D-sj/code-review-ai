@@ -174,15 +174,15 @@ def main(argv: list[str] | None = None) -> int:
     ae.add_argument("--workers", type=int, default=1,
                     help="concurrent agent processes (default: 1)")
     ae.add_argument("--timeout", type=int, default=300)
-    ae.add_argument("--runs-dir", default=".code-review-ai/agent-eval")
-    ae.add_argument("--repos-dir", default=".code-review-ai/external-repos",
+    ae.add_argument("--runs-dir", default="eval-results/agent-eval")
+    ae.add_argument("--repos-dir", default="eval-results/external-repos",
                     help="cache for repositories referenced by canonical cases")
     ae.add_argument("-o", "--out")
     rc = sub.add_parser("agent-eval-route-check")
     _add_common(rc)
     rc.add_argument("--cases", required=True)
     rc.add_argument("--runs-dir", required=True)
-    rc.add_argument("--repos-dir", default=".code-review-ai/external-repos")
+    rc.add_argument("--repos-dir", default="eval-results/external-repos")
     rc.add_argument("-o", "--out")
     aa = sub.add_parser("agent-eval-analyze")
     aa.add_argument("--report", required=True)
@@ -190,12 +190,12 @@ def main(argv: list[str] | None = None) -> int:
     fe = sub.add_parser("full-agent-eval")
     fe.add_argument("--cases", required=True)
     fe.add_argument("--case-ids", nargs="+")
-    fe.add_argument("--repos-dir", default=".code-review-ai/external-repos")
+    fe.add_argument("--repos-dir", default="eval-results/external-repos")
     fe.add_argument("--local-repo",
                     help="single local git repo used as the source for every "
                          "case (cases must have empty repo_url); built by its "
                          "build_repo.py if it has no history yet")
-    fe.add_argument("--work-dir", default=".code-review-ai/full-agent-eval")
+    fe.add_argument("--work-dir", default="eval-results/full-agent-eval")
     fe.add_argument("--agent-command")
     fe.add_argument("--dry-run", action="store_true")
     fe.add_argument("--modes", nargs="+", choices=FULL_EVAL_MODES,
@@ -217,8 +217,8 @@ def main(argv: list[str] | None = None) -> int:
     pe = sub.add_parser("context-plan-eval")
     pe.add_argument("--cases", required=True)
     pe.add_argument("--case-ids", nargs="+")
-    pe.add_argument("--repos-dir", default=".code-review-ai/external-repos")
-    pe.add_argument("--work-dir", default=".code-review-ai/context-plan-eval")
+    pe.add_argument("--repos-dir", default="eval-results/external-repos")
+    pe.add_argument("--work-dir", default="eval-results/context-plan-eval")
     pe.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
     pe.add_argument("-o", "--out")
     xr = sub.add_parser("extract-review")

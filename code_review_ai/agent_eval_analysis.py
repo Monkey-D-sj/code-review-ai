@@ -276,7 +276,7 @@ def analyze_file(report_path: str, output_path: str | None = None) -> dict:
 def route_check_analysis(conn, cases: list[AgentEvalCase], runs_dir: str,
                          config: Config | None = None,
                          work_dir: str | None = None,
-                         repos_dir: str = ".code-review-ai/external-repos") -> dict:
+                         repos_dir: str = "eval-results/external-repos") -> dict:
     """Per-case max risk vs impact-context F1 delta over existing transcripts.
 
     Reads <runs_dir>/<case_id>/<mode>/run-*.json (each record has

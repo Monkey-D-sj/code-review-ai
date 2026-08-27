@@ -15,7 +15,7 @@ deterministic git history that makes that work for a small committed seed:
   module stays fixed in every commit, so cases are isolated.
 
 The built repo lives at ``--target`` (the gitignored eval cache, e.g.
-``.code-review-ai/external-repos/fast-repo``), never inside the seed, so the
+``eval-results/external-repos/fast-repo``), never inside the seed, so the
 parent ``code-review-ai`` repo never sees a nested ``.git``.
 
 Idempotent: a marker hash over the seed sources, the mutation diffs, and this
@@ -25,7 +25,7 @@ rebuilds unconditionally.
 Usage::
 
     python benchmarks/fast-repo/build_repo.py \
-        --seed benchmarks/fast-repo --target .code-review-ai/external-repos/fast-repo
+        --seed benchmarks/fast-repo --target eval-results/external-repos/fast-repo
 """
 
 from __future__ import annotations
