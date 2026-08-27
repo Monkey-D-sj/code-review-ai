@@ -69,14 +69,15 @@ def test_get_impact_tool(tmp_path):
     assert data[0]["coverage"]["truncated"] is False
 
 
-def test_get_impact_tool_defaults_to_toon(tmp_path):
-    # TOON is the default serialization: the response round-trips via
-    # toon_format.decode and matches the toon=False JSON payload exactly.
+def test_get_impact_tool_defaults_to_json(tmp_path):
+    # JSON is the default serialization: the default output parses as JSON
+    # and carries the same payload as the toon=True TOON response.
     server, conn, cfg = _server(tmp_path)
     tools = server._tool_manager._tools
-    toon_out = tools["get_impact"].fn(symbols=[Q("auth", "login")])
-    json_out = tools["get_impact"].fn(symbols=[Q("auth", "login")], toon=False)
-    assert decode(toon_out) == json.loads(json_out)
+    default_out = tools["get_impact"].fn(symbols=[Q("auth", "login")])
+    assert json.loads(default_out)[0]["symbol"] == Q("auth", "login")
+    toon_out = tools["get_impact"].fn(symbols=[Q("auth", "login")], toon=True)
+    assert decode(toon_out) == json.loads(default_out)
 
 
 def test_search_symbol_tool(tmp_path):
@@ -151,15 +152,17 @@ def test_get_change_summary_tool(tmp_path):
     assert record["end_line"] == 7
 
 
-def test_get_change_summary_tool_defaults_to_toon(tmp_path):
-    # TOON is the default serialization: the response round-trips via
-    # toon_format.decode and matches the toon=False JSON payload exactly.
+def test_get_change_summary_tool_defaults_to_json(tmp_path):
+    # JSON is the default serialization: the default output parses as JSON
+    # and carries the same payload as the toon=True TOON response.
     server, conn, cfg = _server(tmp_path)
     tools = server._tool_manager._tools
-    toon_out = tools["get_change_summary"].fn(symbols=[Q("auth", "login")])
-    json_out = tools["get_change_summary"].fn(
-        symbols=[Q("auth", "login")], toon=False)
-    assert decode(toon_out) == json.loads(json_out)
+    default_out = tools["get_change_summary"].fn(symbols=[Q("auth", "login")])
+    assert set(json.loads(default_out)) == {
+        "summary", "changed_functions", "uncovered_changes", "delete_change"}
+    toon_out = tools["get_change_summary"].fn(
+        symbols=[Q("auth", "login")], toon=True)
+    assert decode(toon_out) == json.loads(default_out)
 
 
 def test_get_change_context_tool_is_compact_and_resolves_symbol_input(tmp_path):

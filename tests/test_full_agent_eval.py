@@ -224,7 +224,7 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
             assert "query_graph" not in prompt
             assert env["CRAI_EVAL_MCP_TOOLS"] == "search_symbol"
             calls = ["Read", "mcp__code-review-ai__search_symbol"]
-        elif mode == "full_project_core":
+        elif mode.startswith("full_project_core"):
             assert "get_change_context（已关闭）" in prompt
             assert "get_test_impact（测试选择）是 CI 的职责" in prompt
             assert "get_symbol_detail 的信息已被 get_impact 覆盖" in prompt
@@ -234,6 +234,12 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
             assert "get_impact" in prompt
             assert env["CRAI_EVAL_MCP_TOOLS"] == (
                 "get_impact,get_change_summary,search_symbol")
+            if mode == "full_project_core_json":
+                assert env["CRAI_EVAL_TOON"] == "0"
+            elif mode == "full_project_core_toon":
+                assert env["CRAI_EVAL_TOON"] == "1"
+            else:
+                assert "CRAI_EVAL_TOON" not in env
             calls = ["Read", "mcp__code-review-ai__search_symbol"]
         else:
             calls = ["Read"]
@@ -250,7 +256,7 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
         modes=FULL_EVAL_MODES,
         executor=fake_executor,
     )
-    assert len(report["runs"]) == 7
+    assert len(report["runs"]) == 9
     assert report["aggregate"]["native_agent"]["macro_f1"] == 1.0
     assert report["aggregate"]["native_full"]["mcp_adoption_rate"] == 0.0
     assert report["difficulty_counts"] == {"medium": 1}
@@ -264,6 +270,11 @@ def test_run_full_eval_pairs_native_and_project(monkeypatch, tmp_path):
     assert report["aggregate"]["full_project_core"][
         "mcp_tool_adoption_rate"
     ]["search_symbol"] == 1.0
+    # Serialization ablations keep the same core tool surface + adoption.
+    for json_or_toon in ("full_project_core_json", "full_project_core_toon"):
+        assert report["aggregate"][json_or_toon]["mcp_adoption_rate"] == 1.0
+        assert report["aggregate"][json_or_toon][
+            "mcp_tool_adoption_rate"]["search_symbol"] == 1.0
     # get_change_context and get_test_impact are excluded from the core set.
     assert report["aggregate"]["full_project_core"][
         "mcp_tool_adoption_rate"

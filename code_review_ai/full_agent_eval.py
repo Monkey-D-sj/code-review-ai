@@ -43,7 +43,8 @@ from code_review_ai.indexer import rebuild
 FULL_EVAL_MODES = ("native_agent", "native_full",
                    "full_project_agent",
                    "full_project_querygraph", "full_project_summary",
-                   "full_project_search", "full_project_core")
+                   "full_project_search", "full_project_core",
+                   "full_project_core_json", "full_project_core_toon")
 DEFAULT_FULL_EVAL_MODES = ("native_agent", "full_project_core")
 
 # MCP tool subset each online-ablation mode exposes, fed to the agent via
@@ -62,6 +63,21 @@ _MODE_MCP_TOOLS: dict[str, tuple[str, ...] | None] = {
     "full_project_summary": ("get_change_summary",),
     "full_project_search": ("search_symbol",),
     "full_project_core": _CORE_MCP_TOOLS,
+    "full_project_core_json": _CORE_MCP_TOOLS,
+    "full_project_core_toon": _CORE_MCP_TOOLS,
+}
+
+# Serialization ablation for the core toolset: ``full_project_core_json``
+# forces the MCP server to emit JSON (now the default) and
+# ``full_project_core_toon`` forces TOON text, so the two arms differ only in
+# the tool-response format, not the tool surface or the prompt. Empty (plain
+# ``full_project_core``) = keep the server default (JSON). TOON is disabled by
+# default because 2026-08 measurements showed it saves nothing on deep-nested
+# payloads (see mcp_server._forced_toon). Fed to the agent subprocess as
+# CRAI_EVAL_TOON, which agent_adapter._mcp_config passes to the server.
+_MODE_TOON: dict[str, str] = {
+    "full_project_core_json": "0",
+    "full_project_core_toon": "1",
 }
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -610,6 +626,9 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
         # Ablation: the model sees only this MCP subset (both the agent-side
         # allowedTools filter and the server-side registration filter).
         environment["CRAI_EVAL_MCP_TOOLS"] = ",".join(tools)
+    if _MODE_TOON.get(mode):
+        # Serialization ablation: force the tool-result format server-side.
+        environment["CRAI_EVAL_TOON"] = _MODE_TOON[mode]
     run = executor(command, prompt, item.repo_path, environment, timeout_seconds)
     payload, parse_error = _parse_agent_output(run.stdout)
     score = _score(payload.get("findings", []), item.case.gold_findings)
@@ -709,7 +728,7 @@ def _prompt(item: PreparedCase, mode: str, hinted: bool = False) -> str:
         tool_note = """你可以使用原生只读检查工具以及 search_symbol MCP 工具；该工具可以按名称或 glob 查找符号的限定名称
 （qname）。图索引已同步；不要调用 rebuild_index。从下方的差异中识别变更符号，使用 search_symbol 解析它们的 qname，
 然后使用原生工具定位这些符号的调用方和被调用方。"""
-    elif mode == "full_project_core":
+    elif mode.startswith("full_project_core"):
         tool_note = """你可以使用原生只读检查工具以及这些 code-review-ai MCP 工具：get_impact、
 get_change_summary 和 search_symbol。未开放 rebuild_index、query_graph、get_change_context、get_test_impact、
 get_symbol_detail、get_communities、get_community、call_external_service、find_dead_code。评审主通道是 get_impact：

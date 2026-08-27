@@ -228,6 +228,9 @@ def _mcp_config() -> dict:
         # headless model from seeing/calling every tool the server exposes, so
         # the restriction must happen where the tools are defined.
         "CRAI_MCP_ONLY_TOOLS": os.environ.get("CRAI_EVAL_MCP_TOOLS", ""),
+        # Serialization ablation: force TOON/JSON tool results (CRAI_EVAL_TOON)
+        # so core-json vs core-toon eval arms differ only in output format.
+        "CRAI_EVAL_TOON": os.environ.get("CRAI_EVAL_TOON", ""),
     }
     return {"mcpServers": {"code-review-ai": {
         "type": "stdio", "command": sys.executable,
@@ -298,7 +301,7 @@ async def _scripted_core(changed_files: list[str]) -> dict:
     trace: list[dict] = []
     async with _mcp_session() as session:
         # toon=False keeps the deterministic harness on JSON (the MCP tools
-        # default to TOON output now).
+        # now default to JSON; explicit here for the scripted harness).
         summary_args: dict[str, object] = {"toon": False}
         summary_text = await _session_call(session, "get_change_summary",
                                            summary_args)

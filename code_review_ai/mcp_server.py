@@ -25,6 +25,29 @@ from code_review_ai.update import sync
 _SEARCH_SYMBOL_LIMIT = 30
 
 
+def _forced_toon() -> bool | None:
+    """Eval serialization ablation switch (CRAI_EVAL_TOON): ``0`` forces JSON
+    tool results, ``1`` forces TOON text; unset/empty -> None (use each tool's
+    per-call ``toon`` argument, now defaulting to JSON). Read once per call so
+    the env is what the eval subprocess set, not a stale import-time value.
+
+    TOON is DISABLED by default. 2026-08 measurements (alias case, reps=3)
+    showed it saves essentially nothing on real payloads: get_impact's
+    response nests 4 levels deep (symbol -> upstream -> item -> call_site),
+    and TOON's line-based indentation (~2 spaces per nesting level per line)
+    costs MORE than the JSON syntax it removes — 985 structural chars vs
+    JSON's 816 on the same payload — so TOON came out ~1% LONGER, not shorter.
+    It only wins on small flat payloads (get_change_summary ~7% shorter at
+    ~600 chars), which are too small to matter. The switch is kept solely for
+    the eval serialization ablation; production defaults to JSON."""
+    value = os.environ.get("CRAI_EVAL_TOON", "").strip()
+    if value == "0":
+        return False
+    if value == "1":
+        return True
+    return None
+
+
 def _relativize_path(path: str, repo_root: str) -> str:
     """Rewrite an absolute repo file path to a repo-relative one, so MCP
     results stay compact. The agent's cwd is the repo root, so a relative path
@@ -74,6 +97,11 @@ def create_server(config: Config):
         """Serialize a tool result with repo-absolute paths relativized.
         ``toon=True`` returns the TOON text encoding instead of JSON."""
         payload = _relativize(value, config.repo_path)
+        if _forced_toon() is not None:
+            # Eval serialization ablation (CRAI_EVAL_TOON): force the format
+            # regardless of the caller's toon argument, so core-json vs
+            # core-toon arms differ only in serialization.
+            toon = bool(int(_forced_toon()))
         if toon:
             return toon_format.encode(payload)
         return json.dumps(payload)
@@ -99,7 +127,7 @@ def create_server(config: Config):
                    include_signatures: bool = False,
                    include_call_sites: bool = True,
                    max_level: int = 1,
-                   toon: bool = True) -> str:
+                   toon: bool = False) -> str:
         """Impact for changed symbols: affected business entries plus upstream
         callers / downstream callees. Query by `symbols` (e.g.
         ["auth::login"]), `files`, or omit both to derive from git diff.
@@ -112,7 +140,8 @@ def create_server(config: Config):
         token-heavy). Each result carries `uncertainty` (resolution gaps) and
         `coverage`. Query each changed symbol once; to walk deeper, query a
         specific direct-neighbor qname — never re-request a symbol or file you
-        already have results for. Responses are TOON text by default."""
+        already have results for. Responses are JSON by default; pass
+        `toon=true` for the compact TOON text encoding."""
         changed = detect_changed_symbols(config, symbols=symbols, files=files)
         return _emit(_get_impact(
             conn, changed,
@@ -150,7 +179,7 @@ def create_server(config: Config):
     @mcp.tool()
     def get_change_summary(symbols: list[str] | None = None,
                            files: list[str] | None = None,
-                           toon: bool = True) -> str:
+                           toon: bool = False) -> str:
         """Change summary: from the git diff (diff_base) compute `summary`
         (diff stats incl. uncovered_changes + delete_change counts) +
         `changed_functions` (changed function/method/class detail) +
@@ -159,7 +188,8 @@ def create_server(config: Config):
         without a tombstone) + `delete_change` (deleted functions/modules with
         their one-hop upstream, from tombstones written at update time). Pass
         explicit `symbols` to resolve those qnames from the graph instead of
-        the diff. Returns TOON text by default."""
+        the diff. Returns JSON by default; pass `toon=true` for the compact
+        TOON text encoding."""
         return _emit(build_change_summary(config, conn,
                                           symbols=symbols, files=files),
                      toon=toon)
