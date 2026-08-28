@@ -18,10 +18,10 @@ MAX_NEIGHBORS = 8
 MAX_RESULT_CHARS = 8_000
 _MAX_ARGS = 6
 _MAX_ARG_CHARS = 80
-# Call-site snippet: ±N source lines around the call, so a reviewer can judge
-# a contract change without opening the caller's file (per _attach_call_site's
-# intent). Capped so the snippet never blows the 8 KB response budget.
-_CALL_SITE_RADIUS = 3
+# Call-site snippet: the single source line that invokes the symbol, so a
+# reviewer sees the exact call (callee + arguments) without opening the
+# caller's file. Capped so the snippet never blows the response budget.
+_CALL_SITE_RADIUS = 0
 _MAX_SNIPPET_CHARS = 400
 
 
@@ -238,7 +238,7 @@ def _compact_neighbor(item: dict, repo_root: str, include_signature: bool) -> di
     if isinstance(call_site, dict):
         compact_site = {
             key: call_site[key]
-            for key in ("call_form", "line")
+            for key in ("line",)
             if key in call_site
         }
         args = call_site.get("args")
@@ -268,9 +268,10 @@ def _clip(value: str, limit: int) -> str:
 
 def _call_site_code(file_path: str, line: int,
                     radius: int = _CALL_SITE_RADIUS) -> str | None:
-    """±radius source lines around a call site. None when the file is
-    unreadable, line is absent, or the line is out of range — the neighbor
-    then simply omits the snippet instead of failing the whole payload."""
+    """The single source line of the call site (radius 0) or a ±radius window
+    around it. None when the file is unreadable, line is absent, or the line
+    is out of range — the neighbor then simply omits the snippet instead of
+    failing the whole payload."""
     if not file_path or not isinstance(line, int) or line < 1:
         return None
     try:
