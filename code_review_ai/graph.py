@@ -47,8 +47,6 @@ def _attach_call_site(brief: dict, evidence_json: str | None) -> None:
     if not isinstance(evidence, dict):
         return
     call_site: dict = {}
-    if isinstance(evidence.get("call_form"), str):
-        call_site["call_form"] = evidence["call_form"]
     if isinstance(evidence.get("call_line"), int):
         call_site["line"] = evidence["call_line"]
     if isinstance(evidence.get("args"), list):

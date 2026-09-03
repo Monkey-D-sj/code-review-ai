@@ -25,7 +25,7 @@ DEFAULTS = dict(
     ],
     dependency_markers=["Depends", "Security"],  # FastAPI DI callables become source->provider edges
     di_annotations=["Autowired", "Inject", "Resource", "MockBean"],  # annotation names tagging a Java field as an injection point
-    exclude=["*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
+    exclude=["*/migrations/*", "dist/*", "*/static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*"],
     test_globs=["*/tests/*", "test_*.py", "*_test.py", "*/test/*", "*Test.java", "*Tests.java", "*.test.*", "*.spec.*", "*/__tests__/*"],  # per-language defaults; not */test* — would tag prod files whose name starts with "test" (e.g. testimpact.py)
     test_names=["test_*"],
     test_decorators=["Test", "ParameterizedTest"],  # decorator/annotation names tagging a node as a test (e.g. JUnit 5 @Test), matched like entry_names

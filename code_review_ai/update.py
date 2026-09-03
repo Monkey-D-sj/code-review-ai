@@ -6,6 +6,7 @@ The DB is the source of truth — no in-memory parse cache."""
 
 import json
 import os
+from collections.abc import Callable
 
 from code_review_ai import qname
 from code_review_ai import manifest
@@ -486,18 +487,25 @@ def _meta_changed(config, conn) -> bool:
     return False
 
 
-def sync(config, conn) -> dict:
+def sync(config, conn, progress: Callable[[str, dict[str, object]], None] | None = None) -> dict:
     """Bring the index current: config/version change -> full rebuild;
     otherwise incremental nodes/edges + flows + communities (each skips
     internally when up to date)."""
     if _meta_changed(config, conn):
-        stats = rebuild(config, conn)
+        if progress is not None:
+            progress("full_rebuild_required", {})
+        stats = rebuild(config, conn, progress=progress)
         return {"full_rebuild": True, "nodes": stats.node_count,
                 "edges": stats.edge_count, "flows": stats.flow_count,
                 "communities": stats.community_count}
+    if progress is not None:
+        progress("incremental_sync_started", {})
     node_stats = update_nodes_edges(config, conn)
     flows = update_flows(config, conn)
     communities = update_communities(config, conn)
-    return {"full_rebuild": False, "nodes": node_stats["nodes"],
+    result = {"full_rebuild": False, "nodes": node_stats["nodes"],
             "edges": node_stats["edges"], "flows": flows,
             "communities": communities}
+    if progress is not None:
+        progress("incremental_sync_finished", result)
+    return result

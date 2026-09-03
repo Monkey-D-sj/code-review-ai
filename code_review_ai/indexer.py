@@ -6,6 +6,7 @@ import sqlite3
 import datetime
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from code_review_ai.community import build_communities, inter_community_edges, WeightMode
@@ -45,36 +46,59 @@ def _parse_files(files: list[str], repo: str) -> list[ParsedFile]:
     return parsed
 
 
-def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
+ProgressCallback = Callable[[str, dict[str, object]], None]
+
+
+def _emit_progress(callback: ProgressCallback | None, event: str,
+                   **data: object) -> None:
+    if callback is not None:
+        callback(event, data)
+
+
+def rebuild(config: Config, conn: sqlite3.Connection,
+            progress: ProgressCallback | None = None) -> RebuildStats:
     """Parse the tree, resolve calls, persist everything in one atomic
     transaction. Orchestration only — writing is delegated to the _write_*."""
     t_start = time.perf_counter()
     repo = config.repo_path
+    _emit_progress(progress, "source_scan_started")
     files = filter_excluded(
         list_source_files(repo, SOURCE_GLOBS),
         config.exclude,
     )
     t_files = time.perf_counter()
+    _emit_progress(progress, "source_scan_finished", files=len(files))
 
+    _emit_progress(progress, "parse_started", files=len(files))
     parsed = _parse_files(files, repo)
     t_parse = time.perf_counter()
+    _emit_progress(progress, "parse_finished", nodes=sum(
+        len(item.nodes) for item in parsed), raw_calls=sum(
+        len(item.raw_calls) for item in parsed))
 
     qnames = {n.qualified_name for pf in parsed for n in pf.nodes}
+    _emit_progress(progress, "resolve_started", symbols=len(qnames))
     all_edges = resolve_edges(parsed, qnames, config.path_aliases,
                               config.dependency_markers, config.di_annotations,
                               config.base_url)
     t_resolve = time.perf_counter()
+    _emit_progress(progress, "resolve_finished", edges=len(all_edges))
 
     with transaction(conn):
+        _emit_progress(progress, "clear_previous_index")
         _clear_tables(conn)
+        _emit_progress(progress, "write_graph_started", nodes=len(qnames),
+                       edges=len(all_edges))
         qname_to_id, inserted = _write_nodes(conn, parsed, config)
         index_fts(conn, inserted, qname_to_id)
         _write_edges(conn, all_edges)
         _write_imports(conn, parsed, qnames, config)
         recompute_degrees(conn)
         call_edges = [e for e in all_edges if e.kind == "call"]
+        _emit_progress(progress, "flows_started", call_edges=len(call_edges))
         flow_count = _write_flows(conn, parsed, call_edges, qname_to_id, config)
         t_comm_start = time.perf_counter()
+        _emit_progress(progress, "communities_started")
         community_count = _write_communities(conn, parsed, all_edges, qname_to_id, config)
         t_communities = _ms(time.perf_counter() - t_comm_start)
         built_at = _stamp_meta(config, conn, community_count)
@@ -88,6 +112,8 @@ def rebuild(config: Config, conn: sqlite3.Connection) -> RebuildStats:
         "communities": t_communities,
         "total": _ms(t_db - t_start),
     }
+    _emit_progress(progress, "rebuild_finished", nodes=len(qname_to_id),
+                   edges=len(all_edges), total_ms=timings["total"])
     return RebuildStats(len(qname_to_id), len(all_edges), flow_count,
                         community_count, built_at, timings)
 

@@ -1,4 +1,5 @@
 import json
+import io
 import subprocess
 
 import pytest
@@ -8,6 +9,7 @@ from code_review_ai.agent_adapter import (DENIED_BASH_RULES,
                                           READ_ONLY_BASH_RULES,
                                           READ_ONLY_NATIVE_TOOLS, _error_payload,
                                           _mcp_config, _online_mcp_tools,
+                                          main,
                                           normalize_claude_result,
                                           normalize_claude_stream, run_claude)
 
@@ -25,6 +27,32 @@ def test_normalize_claude_structured_output_and_usage():
         "input_tokens": 10, "cache_read_input_tokens": 20,
         "cache_creation_input_tokens": 5, "output_tokens": 3,
         "total_cost_usd": 0.01, "model": "claude-sonnet-test"}
+
+
+def test_langgraph_adapter_uses_native_registry_subset(monkeypatch, tmp_path,
+                                                        capsys):
+    import code_review_ai.agent_adapter as adapter
+
+    seen = {}
+    monkeypatch.setenv("CRAI_EVAL_MODE", "native_agent")
+    monkeypatch.setenv("CRAI_EVAL_DB_PATH", str(tmp_path / "agent.db"))
+    monkeypatch.setattr(adapter.sys, "stdin", io.StringIO(
+        "TASK\nDIFF\ndiff --git a/app.py b/app.py\n@@ -1 +1 @@"))
+    monkeypatch.setattr(adapter, "detect_changed_symbols_from_patch",
+                        lambda config, diff: ["app::run"])
+
+    def fake_review(config, conn, **kwargs):
+        seen.update(kwargs)
+        return {"findings": [], "affected_symbols": [], "affected_files": [],
+                "affected_entries": [], "tests": [], "files_read": [],
+                "tool_calls": [], "tool_call_count": 0, "tool_trace": [],
+                "usage": {}, "failure_reason": None}
+
+    monkeypatch.setattr("code_review_ai.review_agent.runner.run_review", fake_review)
+    assert main(["langgraph", "--model", "fake-model"]) == 0
+    assert seen["symbols"] == ["app::run"]
+    assert seen["tool_names"] == ["read_file", "search_code", "submit_review"]
+    assert json.loads(capsys.readouterr().out)["failure_reason"] is None
 
 
 def test_normalize_claude_text_result_and_defaults():

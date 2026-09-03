@@ -256,7 +256,7 @@ def _affected_entries(conn: sqlite3.Connection, symbol_node_id: int,
 
 def _direct_call_site(conn: sqlite3.Connection, caller_qname: str,
                       callee_qname: str, with_code: bool = True) -> dict | None:
-    """First resolved call edge caller→callee as {call_form, line, args, code},
+    """First resolved call edge caller→callee as {line, args, code},
     mirroring get_change_context's call_site shape so a contract change
     (params/return/exception) is visible at the exact call point without
     opening the caller file. None when the edge is missing or the snippet is
@@ -278,9 +278,6 @@ def _direct_call_site(conn: sqlite3.Connection, caller_qname: str,
         except ValueError:
             evidence = {}
     call_site: dict = {}
-    call_form = evidence.get("call_form")
-    if call_form:
-        call_site["call_form"] = call_form
     line = evidence.get("call_line")
     if line:
         call_site["line"] = line
@@ -384,7 +381,7 @@ def _attach_aliases(result: dict, conn: sqlite3.Connection,
 def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
                max_nodes_per_direction: int = 20,
                tests: str = "exclude",
-               include_signatures: bool = True,
+               include_signatures: bool = False,
                include_call_sites: bool = True,
                max_level: int = 0) -> list[dict]:
     """Impact analysis for changed symbols. `tests` selects which nodes the
@@ -398,8 +395,9 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
     max_nodes_per_direction. The flow-constrained BFS it replaces was
     equivalent (a symbol's flows together cover every true caller/callee), so
     correctness is unchanged — a sibling branch that never calls the symbol is
-    never reported. `include_signatures=False` drops the `sig` field
-    (signatures are ~26% of payload) for compact tool responses.
+    never reported. `include_signatures=True` adds the `sig` field; signatures
+    are ~26% of payload, so the default (False) omits them for compact
+    responses.
     `max_level` bounds how many BFS hops are returned: 0 (default) keeps the
     full transitive closure; 1 keeps only DIRECT neighbors and attaches a
     `depth` summary ({upstream_max, downstream_max, upstream_total,
@@ -407,10 +405,10 @@ def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
     paying for every transitive node — the propagation path is recoverable by
     querying each direct neighbor's own get_impact. Transitive-only consumers
     (get_test_impact) must keep max_level=0 to preserve reachability.
-    `include_call_sites=True` attaches a `call_site` (call_form/line/args/code,
-    read from the calling file) to DIRECT upstream/downstream neighbors — the
-    call points where a contract change (params/return/exception) actually
-    breaks a caller. Transitive hops instead carry a slim `via` marker
+    `include_call_sites=True` attaches a `call_site` (line/args/code — the
+    call's arguments plus the single calling-file line that invokes the
+    symbol) to DIRECT upstream/downstream neighbors — the call points where a
+    contract change (params/return/exception) actually breaks a caller. Transitive hops instead carry a slim `via` marker
     ({via, line, args} — the parent function the hop hangs off + the connecting
     call's line and arguments, no code snippet), so the propagation path is
     visible without the break-point context the direct sites carry. Every node

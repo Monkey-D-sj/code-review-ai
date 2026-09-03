@@ -1233,5 +1233,78 @@
         }
       }
     }
+  },
+  {
+    "id": "case-backend-storage-config-centralization",
+    "repo_name": "case-backend",
+    "repo_url": "",
+    "source_commit": "",
+    "mutation_paths": [],
+    "source_dir": "full_agent_eval/case-backend",
+    "patch": "diff --git a/app/api/v1/module_storage/file/service.py b/app/api/v1/module_storage/file/service.py\nindex e82ad7b..01d317c 100644\n--- a/app/api/v1/module_storage/file/service.py\n+++ b/app/api/v1/module_storage/file/service.py\n@@ -38,19 +38,7 @@ class StorageFileService:\n     async def _get_source(self, source_id: int | None) -> StorageAdapterConfig:\n         \"\"\"获取存储源并构造适配器配置（密码已解密）。\"\"\"\n         source = await StorageSourceService(self.auth, self.db).get_active_source(source_id)\n-        return StorageAdapterConfig(\n-            protocol=StorageProtocol(source.protocol),\n-            host=source.host,\n-            port=source.port,\n-            username=source.username,\n-            password=decrypt_password(source.password),\n-            bucket=source.bucket,\n-            endpoint=source.endpoint,\n-            region=source.region,\n-            path_prefix=source.path_prefix,\n-            is_secure=source.is_secure,\n-            implicit_tls=source.implicit_tls,\n-        )\n+        return StorageSourceService._build_config(source)\n \n     @staticmethod\n     async def _save_to_temp(file: UploadFile, suffix: str = \"\") -> str:\ndiff --git a/app/api/v1/module_storage/source/service.py b/app/api/v1/module_storage/source/service.py\nindex 2a5363e..dc3f0b0 100644\n--- a/app/api/v1/module_storage/source/service.py\n+++ b/app/api/v1/module_storage/source/service.py\n@@ -50,7 +50,6 @@ class StorageSourceService:\n             bucket=obj.bucket,\n             endpoint=obj.endpoint,\n             region=obj.region,\n-            path_prefix=obj.path_prefix,\n             is_secure=obj.is_secure,\n             implicit_tls=obj.implicit_tls,\n         )\ndiff --git a/app/api/v1/module_storage/transfer/engine.py b/app/api/v1/module_storage/transfer/engine.py\nindex b23ddd5..9fb628c 100644\n--- a/app/api/v1/module_storage/transfer/engine.py\n+++ b/app/api/v1/module_storage/transfer/engine.py\n@@ -18,6 +18,7 @@ from app.api.v1.module_storage.core.constants import StorageProtocol\n from app.api.v1.module_storage.core.encrypt import decrypt_password\n from app.api.v1.module_storage.core.factory import StorageAdapterFactory\n from app.api.v1.module_storage.source.model import StorageSourceModel\n+from app.api.v1.module_storage.source.service import StorageSourceService\n from app.api.v1.module_storage.transfer.registry import transfer_task_registry\n from app.api.v1.module_storage.transfer.ws_manager import transfer_ws_manager\n from app.core.database import async_db_session\n@@ -85,19 +86,7 @@ async def _build_config(db: AsyncSession, source_id: int) -> StorageAdapterConfi\n     source = await db.get(StorageSourceModel, source_id)\n     if source is None or source.status == 1:\n         return None\n-    return StorageAdapterConfig(\n-        protocol=StorageProtocol(source.protocol),\n-        host=source.host,\n-        port=source.port,\n-        username=source.username,\n-        password=decrypt_password(source.password),\n-        bucket=source.bucket,\n-        endpoint=source.endpoint,\n-        region=source.region,\n-        path_prefix=source.path_prefix,\n-        is_secure=source.is_secure,\n-        implicit_tls=source.implicit_tls,\n-    )\n+    return StorageSourceService._build_config(source)\n \n \n async def _resolve_source_size(adapter, source_path: str) -> int:\ndiff --git a/app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py b/app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py\nindex 9f62742..f4bb047 100644\n--- a/app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py\n+++ b/app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py\n@@ -27,6 +27,7 @@ from app.api.v1.module_storage.core.constants import StorageProtocol\n from app.api.v1.module_storage.core.encrypt import decrypt_password as decrypt_storage_password\n from app.api.v1.module_storage.core.factory import StorageAdapterFactory\n from app.api.v1.module_storage.source.crud import StorageSourceCRUD\n+from app.api.v1.module_storage.source.service import StorageSourceService\n from app.api.v1.module_system.notice.crud import NoticeCRUD\n from app.core.base_schema import AuthSchema\n from app.core.database import async_db_session\n@@ -113,19 +114,7 @@ async def _resolve_storage_config(session, source_id: int | None) -> StorageAdap\n             source = await crud.get(status=0)\n         if source is None:\n             raise ValueError(\"未配置可用的存储源，请先在存储源管理中创建\")\n-    return StorageAdapterConfig(\n-        protocol=StorageProtocol(source.protocol),\n-        host=source.host,\n-        port=source.port,\n-        username=source.username,\n-        password=decrypt_storage_password(source.password),\n-        bucket=source.bucket,\n-        endpoint=source.endpoint,\n-        region=source.region,\n-        path_prefix=source.path_prefix,\n-        is_secure=source.is_secure,\n-        implicit_tls=source.implicit_tls,\n-    )\n+    return StorageSourceService._build_config(source)\n \n \n @builtin_node(\n",
+    "hint": "存储源配置了目录前缀后，上传的文件没有落到预期的前缀目录，而是直接落在存储根目录；下载、传输等操作也感知不到前缀。",
+    "difficulty": "medium",
+    "complexity_tags": [
+      "cross-module",
+      "shared-util",
+      "family-storage-config"
+    ],
+    "changed_symbols": [
+      "app.api.v1.module_storage.source.service::StorageSourceService._build_config",
+      "app.api.v1.module_storage.file.service::StorageFileService._get_source",
+      "app.api.v1.module_storage.transfer.engine::_build_config",
+      "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::_resolve_storage_config"
+    ],
+    "gold": {
+      "root_causes": [
+        {
+          "id": "storage-config-centralization-drops-path-prefix",
+          "fix_file": "app/api/v1/module_storage/source/service.py",
+          "alternate_files": [
+            "app/api/v1/module_storage/file/service.py"
+          ],
+          "mechanism_terms": [
+            "_join_key",
+            "full_prefix",
+            "BaseStorageAdapter"
+          ],
+          "min_matches": 2
+        }
+      ],
+      "context": {
+        "symbols": [
+          "app.api.v1.module_storage.source.service::StorageSourceService._build_config",
+          "app.api.v1.module_storage.file.service::StorageFileService._get_source",
+          "app.api.v1.module_storage.transfer.engine::_build_config",
+          "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::_resolve_storage_config",
+          "app.api.v1.module_storage.core.base::StorageAdapterConfig"
+        ],
+        "files": [
+          "app/api/v1/module_storage/source/service.py",
+          "app/api/v1/module_storage/file/service.py",
+          "app/api/v1/module_storage/transfer/engine.py",
+          "app/api/v1/module_task/workflow/flows/handlers/builtin_nodes.py",
+          "app/api/v1/module_storage/core/base.py"
+        ],
+        "entries": [
+          "app.api.v1.module_storage.file.controller::upload_storage_file_controller",
+          "app.api.v1.module_storage.file.controller::download_storage_file_controller",
+          "app.api.v1.module_storage.transfer.controller::create_transfer_task_controller",
+          "app.api.v1.module_storage.transfer.controller::create_local_transfer_task_controller",
+          "app.api.v1.module_task.workflow.flows.handlers.builtin_nodes::storage_upload"
+        ],
+        "tests": [
+          "tests.test_eval_storage_regressions::test_storage_config_keeps_source_path_prefix"
+        ],
+        "hard_negatives": {
+          "symbols": [
+            "app.api.v1.module_storage.source.service::StorageSourceService.test_config"
+          ],
+          "files": [
+            "app/api/v1/module_storage/transfer/registry.py"
+          ]
+        }
+      }
+    }
   }
 ]

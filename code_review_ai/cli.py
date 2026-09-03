@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from code_review_ai.changes import build_change_summary, detect_changed_symbols
@@ -115,6 +116,26 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(s)
     s.add_argument("--symbols", nargs="*")
     s.add_argument("--files", nargs="*")
+    review = sub.add_parser("review",
+                            help="run the built-in read-only LangGraph review agent")
+    _add_common(review)
+    review.add_argument("--symbols", nargs="*")
+    review.add_argument("--files", nargs="*")
+    review.add_argument("--model",
+                        help="OpenAI-compatible model name")
+    review.add_argument("--base-url",
+                        help="OpenAI-compatible API base URL (optional for OpenAI)")
+    review.add_argument("--api-key-env",
+                        help="environment variable holding the API key")
+    review.add_argument("--no-progress", action="store_true",
+                        help="suppress live review progress on stderr")
+    visual_group = review.add_mutually_exclusive_group()
+    visual_group.add_argument("--visual", dest="visual", action="store_true",
+                              help="show an append-only terminal timeline (default when stderr is a terminal)")
+    visual_group.add_argument("--no-visual", dest="visual", action="store_false",
+                              help="use one-line progress messages instead of the dashboard")
+    review.set_defaults(visual=None)
+    review.add_argument("-o", "--out")
     cp = sub.add_parser("context-plan")
     _add_common(cp)
     cp.add_argument("--files", nargs="*")
@@ -374,6 +395,119 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         _write_json(payload, args.out)
         return 0
+
+    if args.cmd == "review":
+        from code_review_ai.review_agent.runner import (resolve_api_key,
+                                                         resolve_setting,
+                                                         run_review)
+        try:
+            model_name = args.model or resolve_setting(
+                cfg.repo_path, "CRAI_REVIEW_MODEL")
+            if not model_name:
+                raise ValueError("--model or CRAI_REVIEW_MODEL is required")
+            base_url = args.base_url or resolve_setting(
+                cfg.repo_path, "CRAI_REVIEW_BASE_URL")
+            # Every built-in agent uses one conventional local key. A caller
+            # may still explicitly select another process/.env variable with
+            # --api-key-env, but no second indirection is needed in .env.
+            api_key_env = args.api_key_env or "OPENAI_API_KEY"
+            resolve_api_key(cfg.repo_path, api_key_env)
+            started_at = time.perf_counter()
+            progress_display = None
+
+            def review_progress(event: str, data: dict[str, object]) -> None:
+                if args.no_progress:
+                    return
+                if progress_display is not None:
+                    progress_display.on_event(event, data)
+                    return
+                if event == "summary_ready":
+                    message = (f"变更摘要就绪：{data['changed_symbols']} 个符号，"
+                               f"{data['uncovered_changes']} 处未归属变更")
+                elif event == "agent_started":
+                    message = "模型开始分析"
+                elif event == "model_request_started":
+                    message = f"模型第 {data['turn']} 轮推理中…"
+                elif event == "model_response_received":
+                    message = (f"模型第 {data['turn']} 轮响应："
+                               f"{data['tool_calls']} 个工具调用")
+                elif event == "full_rebuild_required":
+                    message = "索引版本或配置已变化，开始全量重建"
+                elif event == "source_scan_started":
+                    message = "扫描可索引源文件…"
+                elif event == "source_scan_finished":
+                    message = f"扫描完成：{data['files']} 个源文件"
+                elif event == "parse_started":
+                    message = f"解析源文件：{data['files']} 个"
+                elif event == "parse_finished":
+                    message = (f"解析完成：{data['nodes']} 个符号，"
+                               f"{data['raw_calls']} 个原始调用")
+                elif event == "resolve_started":
+                    message = f"解析调用关系：{data['symbols']} 个符号"
+                elif event == "resolve_finished":
+                    message = f"调用图就绪：{data['edges']} 条边"
+                elif event == "clear_previous_index":
+                    message = "清理并压缩旧索引…"
+                elif event == "write_graph_started":
+                    message = (f"写入图数据库：{data['nodes']} 个节点，"
+                               f"{data['edges']} 条边")
+                elif event == "flows_started":
+                    message = f"构建调用流：{data['call_edges']} 条调用边"
+                elif event == "communities_started":
+                    message = "计算代码社区…"
+                elif event == "rebuild_finished":
+                    message = (f"索引重建完成：{data['nodes']} 个节点，"
+                               f"{data['edges']} 条边，{data['total_ms']} ms")
+                elif event == "incremental_sync_started":
+                    message = "检查增量索引变更…"
+                elif event == "incremental_sync_finished":
+                    message = "增量索引同步完成"
+                elif event == "tool_requests":
+                    message = "请求工具：" + ", ".join(str(name) for name in data["names"])
+                elif event == "tool_completed":
+                    message = (f"工具完成：{data['name']} "
+                               f"({data['response_chars']} 字符)")
+                elif event == "finished":
+                    outcome = "失败" if data["failed"] else "完成"
+                    message = (f"评审{outcome}：{data['findings']} 条发现，"
+                               f"{data['tool_calls']} 次动作工具调用")
+                else:
+                    message = event
+                print(f"[review] {message}", file=sys.stderr, flush=True)
+
+            def execute_review() -> dict:
+                # A review must never query a stale graph. sync performs the
+                # smallest necessary update (or a full rebuild when required).
+                if not args.no_progress and progress_display is None:
+                    print("[review] 正在同步代码索引…", file=sys.stderr, flush=True)
+                sync(cfg, conn, progress=review_progress)
+                if not args.no_progress and progress_display is None:
+                    print("[review] 索引同步完成", file=sys.stderr, flush=True)
+                result = run_review(
+                    cfg, conn, model_name=model_name, base_url=base_url,
+                    api_key_env=api_key_env, symbols=args.symbols,
+                    files=args.files, progress=review_progress)
+                if not args.no_progress and progress_display is None:
+                    elapsed = time.perf_counter() - started_at
+                    print(f"[review] 总耗时：{elapsed:.1f}s", file=sys.stderr, flush=True)
+                return result
+
+            use_visual = (not args.no_progress and
+                          (args.visual if args.visual is not None else sys.stderr.isatty()))
+            if use_visual:
+                from code_review_ai.review_agent.progress import ReviewProgressDisplay
+                with ReviewProgressDisplay(model_name) as progress_display:
+                    payload = execute_review()
+            else:
+                payload = execute_review()
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        except (OSError, RuntimeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_json(payload, args.out)
+        return 0 if payload.get("failure_reason") is None else 1
 
     if args.cmd == "rebuild":
         stats = rebuild(cfg, conn)

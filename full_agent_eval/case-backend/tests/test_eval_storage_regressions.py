@@ -258,3 +258,25 @@ def test_builtin_node_storage_url_is_registered() -> None:
 
     assert node is not None
     assert node.code == "storage_url"
+
+
+# ── 跨文件契约：source.path_prefix → 配置构造 → 适配器 key 拼接 ──────
+
+
+@pytest.mark.asyncio
+async def test_storage_config_keeps_source_path_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """存储源配置必须保留 path_prefix，适配器拼接后 key 带前缀。"""
+    source = _source()
+    source.path_prefix = "uploads"
+
+    async def fake_get_active_source(_self, source_id):
+        return source
+
+    monkeypatch.setattr(
+        StorageSourceService, "get_active_source", fake_get_active_source
+    )
+    config = await StorageFileService(SimpleNamespace(), SimpleNamespace())._get_source(23)
+
+    assert config.path_prefix == "uploads"

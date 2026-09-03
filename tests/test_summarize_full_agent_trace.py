@@ -94,3 +94,11 @@ def test_render_html_shows_full_graph_response_json():
     assert "&quot;app::target&quot;" in html
     assert "40 chars" in html
     assert "response" in html
+
+
+def test_render_marks_rejected_tool_calls_without_treating_them_as_errors():
+    run = _run("case-a", "full_project_core", 1, "read_file")
+    run["tool_trace"][0]["status"] = "rejected_policy"
+
+    assert "REJECTED_POLICY" in render(_report(run))
+    assert "REJECTED_POLICY" in render_html(_report(run))

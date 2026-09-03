@@ -37,6 +37,35 @@ def test_cli_summary(tmp_path, capsys):
     assert data["changed_functions"][0]["qname"] == Q("auth", "login")
 
 
+def test_cli_review_syncs_then_writes_agent_contract(tmp_path, monkeypatch):
+    output = tmp_path / "review.json"
+    calls = {}
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        cli, "sync",
+        lambda config, conn, **kwargs: calls.update(synced=True, **kwargs))
+
+    def fake_review(config, conn, **kwargs):
+        calls.update(kwargs)
+        return {"findings": [], "affected_symbols": [], "affected_files": [],
+                "affected_entries": [], "tests": [], "files_read": [],
+                "tool_calls": [], "tool_call_count": 0, "tool_trace": [],
+                "usage": {}, "failure_reason": None}
+
+    monkeypatch.setattr("code_review_ai.review_agent.runner.run_review", fake_review)
+    code = main(["review", "--repo", FIX, "--db", str(tmp_path / "review.db"),
+                 "--model", "fake-model", "--base-url", "http://provider/v1",
+                 "--symbols", Q("auth", "login"), "--out", str(output)])
+
+    assert code == 0
+    assert calls["synced"] is True
+    assert callable(calls["progress"])
+    assert calls["model_name"] == "fake-model"
+    assert calls["symbols"] == [Q("auth", "login")]
+    assert json.loads(output.read_text(encoding="utf-8"))["failure_reason"] is None
+
+
 def test_cli_query_graph(tmp_path, capsys):
     code = main(["rebuild", "--repo", FIX, "--db", str(tmp_path / "c.db")])
     assert code == 0

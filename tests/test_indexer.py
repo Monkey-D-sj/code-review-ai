@@ -30,6 +30,19 @@ def test_rebuild_writes_all_tables(tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM communities").fetchone()[0] == 0
 
 
+def test_rebuild_emits_progress_stages(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = connect(cfg.db_path)
+    init_schema(conn)
+    events = []
+    rebuild(cfg, conn, progress=lambda event, data: events.append((event, data)))
+    assert [event for event, _ in events] == [
+        "source_scan_started", "source_scan_finished", "parse_started",
+        "parse_finished", "resolve_started", "resolve_finished",
+        "clear_previous_index", "write_graph_started", "flows_started",
+        "communities_started", "rebuild_finished"]
+
+
 def test_rebuild_writes_communities_when_enabled(tmp_path):
     pytest.importorskip("leidenalg")
     cfg = _cfg(tmp_path)

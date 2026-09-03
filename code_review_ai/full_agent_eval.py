@@ -745,11 +745,9 @@ get_symbol_detail 的信息已被 get_impact 覆盖，已删除。search_symbol 
     elif mode == "native_full":
         tool_note = """你可以使用 Claude Code 自带的全部内置工具（Read、Glob、Grep、Bash、Write、Edit、
 WebSearch、WebFetch 等）。未安装任何外部 MCP 工具。这是对 native_agent（仅 Read/Glob/Grep/Bash）的放宽：
-你可以自由选择任何内置工具来获取评审所需的仓库证据；对于涉及签名、返回类型、异常或跨模块调用的任何变更，
-使用 Grep 或 rg 搜索整个代码树，定位并读取所有调用方和被调用方。"""
+你可以自由选择任何内置工具来获取评审所需的仓库证据。"""
     else:
-        tool_note = """你可以使用原生只读检查工具。使用这些工具获取评审策略所需的仓库证据；对于涉及签名、返回类型、异常或
-跨模块调用的任何变更，使用 Grep 或 rg 搜索整个代码树，定位并读取所有调用方和被调用方。"""
+        tool_note = """你可以使用原生只读检查工具。使用这些工具获取评审策略所需的仓库证据。"""
     if _guidance_stripped():
         # Ablation arm: drop the prompt-side tool-usage / review-methodology
         # guidance so the model must derive tool selection and traversal from

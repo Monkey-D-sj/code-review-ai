@@ -14,6 +14,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from code_review_ai.changes import detect_changed_symbols_from_patch
+from code_review_ai.config import load_config
+from code_review_ai.db import connect, init_schema
+
 
 FINDING_SCHEMA = {
     "type": "object",
@@ -930,12 +934,52 @@ def main(argv: list[str] | None = None) -> int:
         help="deterministic agent (no LLM) for wiring/regression tests")
     scripted.add_argument("--scenario", choices=["core", "native"],
                           help="default: derived from CRAI_EVAL_MODE")
+    langgraph = subparsers.add_parser(
+        "langgraph", help="OpenAI-compatible read-only LangGraph agent")
+    langgraph.add_argument("--model",
+                           help="model name (or CRAI_EVAL_MODEL in .env)")
+    langgraph.add_argument("--base-url",
+                           help="OpenAI-compatible API base URL")
+    langgraph.add_argument("--api-key-env",
+                           help="environment variable holding the API key")
     args = parser.parse_args(argv)
     prompt = sys.stdin.read()
     if args.provider == "scripted":
         payload = run_scripted_agent(prompt, scenario=args.scenario)
         print(json.dumps(payload, ensure_ascii=False))
         return 0
+    if args.provider == "langgraph":
+        from code_review_ai.review_agent.runner import resolve_setting, run_review
+        config = load_config()
+        config.repo_path = os.getcwd()
+        config.db_path = os.environ.get(
+            "CRAI_EVAL_DB_PATH", str(Path(config.repo_path) / ".code-review-ai" / "index.db"))
+        conn = connect(config.db_path)
+        init_schema(conn)
+        diff = _diff_from_prompt(prompt)
+        try:
+            model_name = (args.model or resolve_setting(config.repo_path, "CRAI_EVAL_MODEL")
+                          or resolve_setting(config.repo_path, "CRAI_REVIEW_MODEL"))
+            if not model_name:
+                raise ValueError("--model, CRAI_EVAL_MODEL, or CRAI_REVIEW_MODEL is required")
+            base_url = (args.base_url or resolve_setting(config.repo_path, "CRAI_BASE_URL")
+                        or resolve_setting(config.repo_path, "CRAI_REVIEW_BASE_URL"))
+            api_key_env = args.api_key_env or "OPENAI_API_KEY"
+            symbols = detect_changed_symbols_from_patch(config, diff) if diff else []
+            tool_names = (["read_file", "search_code", "submit_review"]
+                          if os.environ.get("CRAI_EVAL_MODE") == "native_agent"
+                          else None)
+            payload = run_review(
+                config, conn, model_name=model_name, base_url=base_url,
+                api_key_env=api_key_env, diff=diff or prompt,
+                symbols=symbols, tool_names=tool_names)
+        except (OSError, RuntimeError, ValueError) as exc:
+            payload = {"findings": [], "affected_symbols": [],
+                       "affected_files": [], "affected_entries": [], "tests": [],
+                       "files_read": [], "tool_calls": [], "tool_call_count": 0,
+                       "tool_trace": [], "usage": {}, "failure_reason": str(exc)}
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0 if payload.get("failure_reason") is None else 1
     profile = None if args.tool_profile == "none" else args.tool_profile
     returncode, payload, error = run_claude(
         prompt, model=args.model, max_budget_usd=args.max_budget_usd,
@@ -947,6 +991,14 @@ def main(argv: list[str] | None = None) -> int:
                          else dict(_EMPTY_CONTRACT), ensure_ascii=False))
         print(error, file=sys.stderr)
     return returncode
+
+
+def _diff_from_prompt(prompt: str) -> str:
+    """Extract the embedded unified diff from either existing eval prompt form."""
+    lines = prompt.splitlines()
+    first = next((index for index, line in enumerate(lines)
+                  if line.startswith("diff --git ")), None)
+    return "\n".join(lines[first:]) if first is not None else ""
 
 
 if __name__ == "__main__":
