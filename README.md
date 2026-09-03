@@ -221,7 +221,16 @@ The local `.env` template also accepts `CRAI_REVIEW_MODEL` and
 agent reads the single `OPENAI_API_KEY` entry by default.
 `CRAI_EVAL_MODEL` and `CRAI_BASE_URL` configure the eval adapter. The process
 environment takes precedence over `.env`, and no CLI option accepts a plaintext
-API key. For the existing full-project evaluator, use the
+API key.
+
+A review run is bounded on four axes, all overridable through the same env/`.env`
+layering: `CRAI_REVIEW_TIMEOUT_SECONDS` (per provider request, default `180`) and
+`CRAI_REVIEW_MAX_RETRIES` (default `3`) bound one model call — LangChain otherwise
+leaves the request untimed entirely — while `CRAI_REVIEW_MAX_TOTAL_TOKENS`
+(default `500000`) and `CRAI_REVIEW_WALL_CLOCK_SECONDS` (default `900`) bound the
+whole run alongside the fixed 50-call action-tool budget. Exhausting any of them
+forces an immediate `submit_review` instead of failing the run, and the payload's
+`budgets` block reports the limits next to what was actually spent. For the existing full-project evaluator, use the
 same runtime through `python -m code_review_ai.agent_adapter langgraph
 --model your-model`; its `native_agent` arm gets `read_file + search_code`,
 and full-project arms also get `get_impact`.

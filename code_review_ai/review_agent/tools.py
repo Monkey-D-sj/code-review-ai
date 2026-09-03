@@ -16,6 +16,12 @@ from code_review_ai.review_agent.registry import RegisteredTool, ToolRegistry
 from code_review_ai.review_agent.schemas import FindingReport, ReviewItemUpdate
 
 _MAX_READ_LINES = 200
+# The line cap alone does not bound cost: 200 lines of minified JavaScript is
+# megabytes of context. These bound what read_file can actually return, and the
+# file-size guard bounds what it will load to produce it.
+_MAX_READ_CHARS = 20_000
+_MAX_READ_LINE_CHARS = 500
+_MAX_READ_FILE_BYTES = 8 * 1024 * 1024
 _MAX_QUERY_CHARS = 200
 _DEFAULT_SEARCH_RESULTS = 30
 _MAX_SEARCH_RESULTS = 50
@@ -60,6 +66,8 @@ def read_file(repo_path: str, path: str, start_line: int, end_line: int) -> str:
         target = _inside_repo(root, path)
         if not target.is_file():
             raise ValueError("path must be a file")
+        if target.stat().st_size > _MAX_READ_FILE_BYTES:
+            raise ValueError(f"file is larger than {_MAX_READ_FILE_BYTES} bytes")
         raw = target.read_bytes()
         if b"\0" in raw:
             raise ValueError("binary files cannot be read")
@@ -75,10 +83,32 @@ def read_file(repo_path: str, path: str, start_line: int, end_line: int) -> str:
         lines = raw.decode("utf-8", errors="strict").splitlines()
     except UnicodeDecodeError as exc:
         return _tool_error(exc, status="rejected_policy")
-    rendered = "\n".join(
-        f"{number}: {line}" for number, line in
-        enumerate(lines[start_line - 1:end_line], start_line))
+    rendered = _render_lines(lines[start_line - 1:end_line], start_line)
     return rendered or "(no lines in requested range)"
+
+
+def _clip_line(line: str) -> str:
+    """One source line, truncated to a length a reviewer can actually use."""
+    if len(line) <= _MAX_READ_LINE_CHARS:
+        return line
+    dropped = len(line) - _MAX_READ_LINE_CHARS
+    return f"{line[:_MAX_READ_LINE_CHARS]}... (+{dropped} chars truncated)"
+
+
+def _render_lines(lines: list[str], first_number: int) -> str:
+    """Line-numbered rendering bounded per line and in total."""
+    rendered: list[str] = []
+    used = 0
+    for number, line in enumerate(lines, first_number):
+        entry = f"{number}: {_clip_line(line)}"
+        if used + len(entry) > _MAX_READ_CHARS:
+            rendered.append(
+                f"... (output truncated at {_MAX_READ_CHARS} characters; "
+                f"re-read from line {number} for the rest)")
+            break
+        rendered.append(entry)
+        used += len(entry) + 1
+    return "\n".join(rendered)
 
 
 def _matches_glob(path: Path, root: Path, pattern: str) -> bool:

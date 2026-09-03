@@ -431,6 +431,10 @@ def main(argv: list[str] | None = None) -> int:
                 elif event == "model_response_received":
                     message = (f"模型第 {data['turn']} 轮响应："
                                f"{data['tool_calls']} 个工具调用")
+                elif event == "budget_exhausted":
+                    message = (f"评审预算耗尽（{data['limit']}）："
+                               f"{data['tool_requests']} 次工具调用、"
+                               f"{data['total_tokens']} tokens，要求立即提交")
                 elif event == "full_rebuild_required":
                     message = "索引版本或配置已变化，开始全量重建"
                 elif event == "source_scan_started":

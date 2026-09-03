@@ -7,6 +7,7 @@ import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -17,10 +18,19 @@ from code_review_ai.changes import build_change_summary
 from code_review_ai.review_agent.graph import build_review_graph
 from code_review_ai.review_agent.schemas import (
     GRAPH_RECURSION_LIMIT,
+    MAX_TOTAL_TOKENS,
+    MAX_WALL_CLOCK_SECONDS,
     FindingReport,
     ReviewItem,
 )
 from code_review_ai.review_agent.tools import create_tool_registry
+
+# Per-request bound on one provider call, and how many times a failed call is
+# retried. LangChain defaults ``request_timeout`` to None, which *overrides* the
+# OpenAI SDK's own 600s default and leaves a stalled socket hanging the review
+# forever; both values are therefore stated explicitly here.
+_DEFAULT_REQUEST_TIMEOUT_SECONDS = 180.0
+_DEFAULT_MAX_RETRIES = 3
 
 _SYSTEM_PROMPT = f"""你是一个只读代码评审 Agent。{SHARED_REVIEW_POLICY}
 
@@ -30,8 +40,9 @@ get_impact；它已含直接调用点，不要重复读取这些证据。缺少�
 调用图覆盖不到字符串、配置键或动态关系时才调用 search_code，且不要宽泛搜索整个仓库。
 证据不足时少报，不要猜测。每个 change_summary qname 已由系统创建为 candidate。调用 read_file、search_code、get_impact
 查证某项时传入 for_qname，系统会自动记录成功工具证据。使用 update_review_item 将 qname 标记为
-confirmed（提供 finding 和此前成功工具的 evidence_refs）或 dismissed（提供 reason）。完成后必须
-单独调用 submit_review。"""
+confirmed（提供 finding；证据由系统记录，evidence_refs 无需手填）或 dismissed（提供 reason）。
+标记 confirmed 前必须先带 for_qname=<该 qname> 成功调用过 read_file/search_code/get_impact，
+否则该次 confirmed 会被拒绝。完成后必须单独调用 submit_review。"""
 
 _REVIEW_EXCLUDE_PATHS = (":(exclude)uv.lock",)
 
@@ -82,6 +93,31 @@ def resolve_api_key(repo_path: str, api_key_env: str) -> str:
     return api_key
 
 
+def _numeric_setting(repo_path: str, name: str, default: float,
+                     cast: Callable[[str], Any]) -> Any:
+    """One positive numeric override from the process env or a repo-local .env."""
+    raw = resolve_setting(repo_path, name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = cast(raw.strip())
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number, got {raw!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than zero, got {raw!r}")
+    return value
+
+
+def _resolve_budgets(repo_path: str) -> dict[str, Any]:
+    """Spend limits for one review run, overridable via env or a repo-local .env."""
+    return {
+        "max_total_tokens": _numeric_setting(
+            repo_path, "CRAI_REVIEW_MAX_TOTAL_TOKENS", MAX_TOTAL_TOKENS, int),
+        "wall_clock_seconds": _numeric_setting(
+            repo_path, "CRAI_REVIEW_WALL_CLOCK_SECONDS", MAX_WALL_CLOCK_SECONDS, float),
+    }
+
+
 def _create_model(model_name: str, base_url: str | None,
                   api_key_env: str, repo_path: str):
     api_key = resolve_api_key(repo_path, api_key_env)
@@ -89,8 +125,13 @@ def _create_model(model_name: str, base_url: str | None,
         from langchain_openai import ChatOpenAI
     except ImportError as exc:
         raise RuntimeError("langchain-openai is not installed") from exc
-    options: dict[str, Any] = {"model": model_name, "temperature": 0,
-                               "api_key": api_key}
+    options: dict[str, Any] = {
+        "model": model_name, "temperature": 0, "api_key": api_key,
+        "timeout": _numeric_setting(repo_path, "CRAI_REVIEW_TIMEOUT_SECONDS",
+                                    _DEFAULT_REQUEST_TIMEOUT_SECONDS, float),
+        "max_retries": _numeric_setting(repo_path, "CRAI_REVIEW_MAX_RETRIES",
+                                        _DEFAULT_MAX_RETRIES, int),
+    }
     if base_url:
         options["base_url"] = base_url
     return ChatOpenAI(**options)
@@ -180,6 +221,44 @@ def _emit(callback: Callable[[str, dict[str, object]], None] | None,
         callback(event, data)
 
 
+def _build_payload(state: dict, *, budgets: dict[str, Any], diff: str,
+                   summary: dict[str, object]) -> dict:
+    """Turn the final (or partially failed) graph state into the eval payload."""
+    messages = list(state.get("messages", []))
+    trace = list(state.get("tool_trace", []))
+    calls, files_read = _tool_call_records(messages, trace)
+    report = state.get("final_report")
+    payload = (report if isinstance(report, FindingReport)
+               else FindingReport(findings=[])).model_dump()
+    review_items = state.get("review_items", {})
+    confirmed_findings = [item.finding.model_dump() for item in review_items.values()
+                          if item.state == "confirmed" and item.finding is not None]
+    review_complete = bool(review_items) and all(
+        item.state != "candidate" for item in review_items.values())
+    if review_complete:
+        payload["findings"] = confirmed_findings
+    payload.update({
+        "files_read": files_read,
+        "tool_calls": calls,
+        "tool_call_count": state.get("tool_call_count", 0),
+        "tool_request_count": state.get("tool_request_count", 0),
+        "tool_trace": trace,
+        "review_items": {qname: item.model_dump() for qname, item in review_items.items()},
+        "confirmed_findings": confirmed_findings,
+        "review_complete": review_complete,
+        "usage": _usage(messages),
+        # The limits this run was actually held to, next to what it spent, so a
+        # truncated review is distinguishable from a genuinely finished one.
+        "budgets": {**budgets, "total_tokens": state.get("total_tokens", 0)},
+        "failure_reason": state.get("failure_reason"),
+        "initial_context": {
+            "diff_chars": len(diff),
+            "change_summary_chars": len(json.dumps(summary, ensure_ascii=False)),
+        },
+    })
+    return payload
+
+
 def run_review(config, conn, *, model=None, model_name: str | None = None,
                base_url: str | None = None, api_key_env: str = "OPENAI_API_KEY",
                diff: str | None = None, symbols: list[str] | None = None,
@@ -203,14 +282,17 @@ def run_review(config, conn, *, model=None, model_name: str | None = None,
     registry = create_tool_registry(config, conn)
     if tool_names is not None:
         registry = registry.subset(tool_names)
-    graph = build_review_graph(model, registry, progress=progress)
+    budgets = _resolve_budgets(config.repo_path)
+    graph = build_review_graph(model, registry, progress=progress,
+                               max_total_tokens=budgets["max_total_tokens"])
     base_messages = _initial_messages(effective_diff, summary)
     review_items = _review_items(summary)
     initial = {
         "messages": base_messages, "base_messages": base_messages,
         "repo_path": str(Path(config.repo_path).resolve()), "diff": effective_diff,
         "change_summary": summary, "tool_request_count": 0, "tool_call_count": 0,
-        "retry_count": 0,
+        "retry_count": 0, "total_tokens": 0,
+        "deadline_at": monotonic() + budgets["wall_clock_seconds"],
         "tool_trace": [], "final_report": None,
         "review_items": review_items, "failure_reason": None, "force_submit": False,
     }
@@ -235,39 +317,13 @@ def run_review(config, conn, *, model=None, model_name: str | None = None,
             observed_messages = len(messages)
     except Exception as exc:
         # LangGraph's recursion error and provider failures are both represented
-        # in the public contract rather than leaking a partial model result.
-        state = {**initial, "failure_reason": str(exc)}
-    messages = list(state.get("messages", []))
-    trace = list(state.get("tool_trace", []))
-    calls, files_read = _tool_call_records(messages, trace)
-    report = state.get("final_report")
-    if isinstance(report, FindingReport):
-        payload = report.model_dump()
-    else:
-        payload = FindingReport(findings=[]).model_dump()
-    review_items = state.get("review_items", {})
-    confirmed_findings = [item.finding.model_dump() for item in review_items.values()
-                          if item.state == "confirmed" and item.finding is not None]
-    review_complete = bool(review_items) and all(
-        item.state != "candidate" for item in review_items.values())
-    if review_complete:
-        payload["findings"] = confirmed_findings
-    payload.update({
-        "files_read": files_read,
-        "tool_calls": calls,
-        "tool_call_count": state.get("tool_call_count", 0),
-        "tool_request_count": state.get("tool_request_count", 0),
-        "tool_trace": trace,
-        "review_items": {qname: item.model_dump() for qname, item in review_items.items()},
-        "confirmed_findings": confirmed_findings,
-        "review_complete": review_complete,
-        "usage": _usage(messages),
-        "failure_reason": state.get("failure_reason"),
-        "initial_context": {
-            "diff_chars": len(effective_diff),
-            "change_summary_chars": len(json.dumps(summary, ensure_ascii=False)),
-        },
-    })
+        # in the public contract rather than raised. Merge into the last streamed
+        # state, not ``initial``: the trace, the review items already resolved and
+        # the tokens already paid for are exactly what a post-mortem needs, and
+        # discarding them would hide the run that failed.
+        state = {**state, "failure_reason": str(exc)}
+    payload = _build_payload(state, budgets=budgets, diff=effective_diff,
+                             summary=summary)
     _emit(progress, "finished", findings=len(payload["findings"]),
           tool_calls=payload["tool_call_count"],
           failed=payload["failure_reason"] is not None)

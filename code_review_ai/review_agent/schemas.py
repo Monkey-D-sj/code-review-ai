@@ -14,6 +14,12 @@ MAX_TOOL_CALLS = 50
 # In the worst case every action consumes an agent node and a tool node, then
 # the graph needs one rejected request, force-submit, final agent, and finish.
 GRAPH_RECURSION_LIMIT = MAX_TOOL_CALLS * 2 + 6
+# The action-tool budget bounds how many times the model may act, but not what
+# each turn costs: one read of a minified file or a very large diff can dwarf
+# fifty small calls. These two bound spend directly and are enforced in
+# ``route_after_agent`` alongside the call budget.
+MAX_TOTAL_TOKENS = 500_000
+MAX_WALL_CLOCK_SECONDS = 900.0
 ToolKind = Literal["action", "terminal"]
 ToolCallStatus = Literal[
     "executed",
@@ -106,6 +112,11 @@ class ReviewState(TypedDict, total=False):
     # so an uncooperative model cannot loop around the execution counter.
     tool_request_count: Annotated[int, add]
     tool_call_count: Annotated[int, add]
+    # Provider-reported tokens for every completed model turn, and the monotonic
+    # instant this run must stop by. Both are state rather than closure values so
+    # the budget survives a resume and stays visible in the streamed state.
+    total_tokens: Annotated[int, add]
+    deadline_at: float
     # Unlike messages, this is an auditable account of what happened to each
     # requested tool call. A rejected request still gets a ToolMessage (the
     # provider protocol requires it), but is never represented as executed.

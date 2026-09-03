@@ -11,6 +11,13 @@ from rich.rule import Rule
 from rich.text import Text
 
 
+_BUDGET_LABELS = {
+    "action_tool_calls": "工具调用数",
+    "total_tokens": "token 总量",
+    "wall_clock": "运行时长",
+}
+
+
 @dataclass
 class ReviewProgressDisplay:
     """Print permanent phase and model-turn entries instead of redrawing a panel."""
@@ -110,5 +117,8 @@ class ReviewProgressDisplay:
             "incremental_sync_finished": "增量索引同步完成",
             "summary_ready": f"变更摘要：{data.get('changed_symbols', '?')} 个符号",
             "agent_started": "准备发送评审上下文",
+            "budget_exhausted": ("预算耗尽（"
+                                 f"{_BUDGET_LABELS.get(str(data.get('limit')), '未知')}"
+                                 "），要求立即提交评审"),
         }
         return labels.get(event)
