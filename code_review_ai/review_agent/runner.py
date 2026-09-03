@@ -15,7 +15,11 @@ from dotenv import dotenv_values
 from code_review_ai.agent_eval import SHARED_REVIEW_POLICY
 from code_review_ai.changes import build_change_summary
 from code_review_ai.review_agent.graph import build_review_graph
-from code_review_ai.review_agent.schemas import GRAPH_RECURSION_LIMIT, FindingReport
+from code_review_ai.review_agent.schemas import (
+    GRAPH_RECURSION_LIMIT,
+    FindingReport,
+    ReviewItem,
+)
 from code_review_ai.review_agent.tools import create_tool_registry
 
 _SYSTEM_PROMPT = f"""你是一个只读代码评审 Agent。{SHARED_REVIEW_POLICY}
@@ -24,7 +28,10 @@ _SYSTEM_PROMPT = f"""你是一个只读代码评审 Agent。{SHARED_REVIEW_POLIC
 提供了确定性 change summary，不要尝试重新生成它。只有需要调用方、入口证据时调用
 get_impact；它已含直接调用点，不要重复读取这些证据。缺少具体代码时才调用 read_file。
 调用图覆盖不到字符串、配置键或动态关系时才调用 search_code，且不要宽泛搜索整个仓库。
-证据不足时少报，不要猜测。完成后必须单独调用 submit_review。"""
+证据不足时少报，不要猜测。每个 change_summary qname 已由系统创建为 candidate。调用 read_file、search_code、get_impact
+查证某项时传入 for_qname，系统会自动记录成功工具证据。使用 update_review_item 将 qname 标记为
+confirmed（提供 finding 和此前成功工具的 evidence_refs）或 dismissed（提供 reason）。完成后必须
+单独调用 submit_review。"""
 
 _REVIEW_EXCLUDE_PATHS = (":(exclude)uv.lock",)
 
@@ -109,14 +116,26 @@ CHANGE SUMMARY (deterministic)
     return [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=user)]
 
 
-def _tool_call_records(messages: list) -> tuple[list[str], list[dict], list[str]]:
-    """Derive telemetry from observed AI/Tool messages, never model report fields."""
+def _review_items(summary: dict[str, object]) -> dict[str, ReviewItem]:
+    items: dict[str, ReviewItem] = {}
+    for collection in ("changed_functions", "delete_change"):
+        records = summary.get(collection, [])
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict) or not isinstance(record.get("qname"), str):
+                continue
+            qname = record["qname"]
+            items[qname] = ReviewItem(qname=qname, file=record.get("file"),
+                                      start_line=record.get("start_line"),
+                                      end_line=record.get("end_line"))
+    return items
+
+
+def _tool_call_records(messages: list, trace: list[dict]) -> tuple[list[str], list[str]]:
+    """Derive compatibility telemetry from explicit graph-owned tool traces."""
     calls: list[str] = []
-    traces: list[dict] = []
     reads: list[str] = []
-    tool_results: dict[str, ToolMessage] = {
-        message.tool_call_id: message for message in messages
-        if isinstance(message, ToolMessage) and isinstance(message.tool_call_id, str)}
     for message in messages:
         if not isinstance(message, AIMessage):
             continue
@@ -126,26 +145,15 @@ def _tool_call_records(messages: list) -> tuple[list[str], list[dict], list[str]
             if not isinstance(name, str):
                 continue
             calls.append(name)
-            if name == "submit_review":
-                continue
-            result = tool_results.get(call_id) if isinstance(call_id, str) else None
-            content = str(result.content) if result is not None else ""
-            record = {"sequence": len(traces) + 1, "tool": name,
-                      "input": call.get("args", {}),
-                      "response_chars": len(content)}
-            if result is not None and getattr(result, "status", "success") == "error":
-                record["is_error"] = True
-            traces.append(record)
-            if name == "read_file" and not content.lstrip().startswith('{"error"'):
-                path = call.get("args", {}).get("path") if isinstance(call.get("args"), dict) else None
-                if isinstance(path, str):
-                    reads.append(path)
-            elif name == "search_code" and not content.lstrip().startswith('{"error"'):
-                for line in content.splitlines():
-                    parts = line.split(":", 2)
-                    if len(parts) == 3 and parts[0] and parts[0] != "(no matches)":
-                        reads.append(parts[0])
-    return calls, traces, list(dict.fromkeys(reads))
+    for record in trace:
+        if record.get("status") != "executed":
+            continue
+        name, args = record.get("tool"), record.get("input")
+        if name == "read_file" and isinstance(args, dict):
+            path = args.get("path")
+            if isinstance(path, str):
+                reads.append(path)
+    return calls, list(dict.fromkeys(reads))
 
 
 def _usage(messages: list) -> dict:
@@ -196,11 +204,15 @@ def run_review(config, conn, *, model=None, model_name: str | None = None,
     if tool_names is not None:
         registry = registry.subset(tool_names)
     graph = build_review_graph(model, registry, progress=progress)
+    base_messages = _initial_messages(effective_diff, summary)
+    review_items = _review_items(summary)
     initial = {
-        "messages": _initial_messages(effective_diff, summary),
+        "messages": base_messages, "base_messages": base_messages,
         "repo_path": str(Path(config.repo_path).resolve()), "diff": effective_diff,
-        "change_summary": summary, "tool_call_count": 0, "retry_count": 0,
-        "final_report": None, "failure_reason": None, "force_submit": False,
+        "change_summary": summary, "tool_request_count": 0, "tool_call_count": 0,
+        "retry_count": 0,
+        "tool_trace": [], "final_report": None,
+        "review_items": review_items, "failure_reason": None, "force_submit": False,
     }
     state = initial
     observed_messages = 0
@@ -226,17 +238,29 @@ def run_review(config, conn, *, model=None, model_name: str | None = None,
         # in the public contract rather than leaking a partial model result.
         state = {**initial, "failure_reason": str(exc)}
     messages = list(state.get("messages", []))
-    calls, trace, files_read = _tool_call_records(messages)
+    trace = list(state.get("tool_trace", []))
+    calls, files_read = _tool_call_records(messages, trace)
     report = state.get("final_report")
     if isinstance(report, FindingReport):
         payload = report.model_dump()
     else:
         payload = FindingReport(findings=[]).model_dump()
+    review_items = state.get("review_items", {})
+    confirmed_findings = [item.finding.model_dump() for item in review_items.values()
+                          if item.state == "confirmed" and item.finding is not None]
+    review_complete = bool(review_items) and all(
+        item.state != "candidate" for item in review_items.values())
+    if review_complete:
+        payload["findings"] = confirmed_findings
     payload.update({
         "files_read": files_read,
         "tool_calls": calls,
         "tool_call_count": state.get("tool_call_count", 0),
+        "tool_request_count": state.get("tool_request_count", 0),
         "tool_trace": trace,
+        "review_items": {qname: item.model_dump() for qname, item in review_items.items()},
+        "confirmed_findings": confirmed_findings,
+        "review_complete": review_complete,
         "usage": _usage(messages),
         "failure_reason": state.get("failure_reason"),
         "initial_context": {

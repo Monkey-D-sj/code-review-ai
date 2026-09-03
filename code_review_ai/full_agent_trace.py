@@ -75,7 +75,10 @@ def _step(record: dict, repo_path: str | None) -> str:
     else:
         detail = _json(data)
     suffix = f"response={record.get('response_chars', 0)} chars"
-    if record.get("is_error") is True:
+    status = record.get("status")
+    if status and status != "executed":
+        suffix += f", {str(status).upper()}"
+    elif record.get("is_error") is True:
         suffix += ", ERROR"
     return f"{int(record.get('sequence', 0)):02d}. {tool} | {detail} | {suffix}"
 
@@ -276,8 +279,10 @@ def _html_step(record: dict, repo_path: str | None) -> str:
         badge, badge_cls = tool.upper(), ""
         arg = _json(data)
     chars = record.get("response_chars", 0)
-    err = record.get("is_error") is True
-    chars_html = f'{chars} chars' + (" · ERROR" if err else "")
+    status = record.get("status")
+    err = record.get("is_error") is True or (status is not None and status != "executed")
+    status_text = f" · {str(status).upper()}" if status and status != "executed" else ""
+    chars_html = f'{chars} chars' + (status_text or (" · ERROR" if err else ""))
     response = record.get("response")
     is_graph = tool.startswith("mcp__code-review-ai__")
     if is_graph and isinstance(response, str) and response:

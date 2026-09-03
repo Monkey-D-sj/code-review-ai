@@ -19,9 +19,15 @@ def test_read_file_is_bounded_line_numbered_and_contained(tmp_path):
     source.write_text("one\ntwo\nthree\n", encoding="utf-8")
 
     assert tools.read_file(str(tmp_path), "src/app.py", 2, 3) == "2: two\n3: three"
-    assert "error" in tools.read_file(str(tmp_path), "../outside.py", 1, 1)
+    outside = json.loads(tools.read_file(str(tmp_path), "../outside.py", 1, 1))
+    assert outside["status"] == "rejected_policy"
     assert "error" in tools.read_file(str(tmp_path), "src", 1, 1)
     assert "exceed" in tools.read_file(str(tmp_path), "src/app.py", 1, 201)
+
+
+def test_search_code_marks_invalid_scope_as_policy_rejection(tmp_path):
+    result = json.loads(tools.search_code(str(tmp_path), "needle", "../outside"))
+    assert result["status"] == "rejected_policy"
 
 
 def test_search_code_uses_fixed_non_shell_argv_and_normalizes_hits(tmp_path, monkeypatch):
@@ -55,3 +61,14 @@ def test_search_code_treats_no_matches_as_success(tmp_path, monkeypatch):
         "Completed", (), {"returncode": 1, "stdout": "", "stderr": ""})())
     assert tools.search_code(str(tmp_path), "missing") == "(no matches)"
     assert json.loads(tools.search_code(str(tmp_path), "", "."))["error"]
+
+
+def test_search_code_uses_bounded_python_fallback_when_rg_is_unavailable(tmp_path,
+                                                                           monkeypatch):
+    source = tmp_path / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("TOKEN = 1\n", encoding="utf-8")
+    monkeypatch.setattr(tools.shutil, "which", lambda name: None)
+
+    assert tools.search_code(str(tmp_path), "TOKEN", ".", "*.py") == (
+        "src/app.py:1:TOKEN = 1")
