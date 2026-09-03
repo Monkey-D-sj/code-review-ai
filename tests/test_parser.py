@@ -146,6 +146,8 @@ def test_filter_excluded_nested_directory_patterns():
                                                    "app/alembic/versions/x.py", "app/main.py"]
     # top-level dist/ still excluded via the bare pattern
     assert filter_excluded(["dist/b.js", "app/main.py"], ["dist/*"]) == ["app/main.py"]
+    assert filter_excluded(["static/a.js", "pkg/static/vendor.js", "app/main.py"],
+                           ["*/static/*"]) == ["app/main.py"]
 
 
 def test_list_source_files_single_git_call(tmp_path, monkeypatch):

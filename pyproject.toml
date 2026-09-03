@@ -12,6 +12,12 @@ dependencies = [
     "mcp>=2",
     "watchfiles>=0.21",
     "toon-format",
+    "langgraph>=1.0",
+    "langchain-core>=1.0",
+    "langchain-openai>=1.0",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+    "rich>=14.0",
 ]
 
 [project.optional-dependencies]
@@ -30,7 +36,7 @@ build-backend = "hatchling.build"
 community_detection = true
 community_weight = "hub_pruned"
 diff_base = "origin/master"
-exclude = ["*/migrations/*", "dist/*", "static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*", "*/alembic/*", "*/hmg-ai-agent-platform-backend/*", "full_agent_eval/*"]
+exclude = ["*/migrations/*", "dist/*", "*/static/*", ".venv/*", ".claude/*", "assets/*", "node_modules/*", "*/alembic/*", "*/hmg-ai-agent-platform-backend/*", "full_agent_eval/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -200,6 +200,39 @@ code-review-ai agent-eval-analyze \
 
 ### Full-project tool-use eval
 
+### Built-in LangGraph review agent
+
+The package also includes a provider-neutral, read-only review loop. It talks
+to an OpenAI-compatible endpoint directly, builds the change summary before
+the first model request, and exposes only bounded `get_impact`, `read_file`,
+and literal `search_code` tools. The model must finish by submitting a
+structured report.
+
+```bash
+# .env (kept out of Git): OPENAI_API_KEY=...
+code-review-ai review --repo . --db .code-review-ai/index.db \
+  --model your-model --base-url https://your-provider.example/v1 \
+  -o .code-review-ai/review.json
+```
+
+The local `.env` template also accepts `CRAI_REVIEW_MODEL` and
+`CRAI_REVIEW_BASE_URL`, so a fully configured file lets
+`code-review-ai review --repo .` run without model/key flags. Every built-in
+agent reads the single `OPENAI_API_KEY` entry by default.
+`CRAI_EVAL_MODEL` and `CRAI_BASE_URL` configure the eval adapter. The process
+environment takes precedence over `.env`, and no CLI option accepts a plaintext
+API key. For the existing full-project evaluator, use the
+same runtime through `python -m code_review_ai.agent_adapter langgraph
+--model your-model`; its `native_agent` arm gets `read_file + search_code`,
+and full-project arms also get `get_impact`.
+
+`review` writes live index/model/tool progress and elapsed time to stderr while
+reserving stdout for the final JSON payload. In an interactive terminal it now
+uses an append-only timeline: index/context phases and each model round remain
+visible with their tool requests and completions. Pass `--visual` to force this
+timeline (for terminals where TTY detection is unavailable), `--no-visual` for
+the simpler one-line event log, or `--no-progress` for a quiet automation run.
+
 `full-agent-eval` tests the installed product on isolated real repositories.
 It checks out a real fix commit, restores selected production files to the
 parent revision, keeps the fixed tests available, and pairs a Native Agent
