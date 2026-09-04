@@ -215,16 +215,26 @@ def build_review_graph(model, registry: ToolRegistry, *,
                 if item is None or item.state != "candidate":
                     reject_event(call, "qname must reference an active review-item candidate")
                     continue
-                if (transition.state == "confirmed"
-                        and not set(transition.evidence_refs).issubset(evidence_call_ids)):
-                    reject_event(call,
-                                 "evidence_refs must name previously executed evidence tools")
-                    continue
                 if transition.state == "confirmed":
+                    # Confirmation is gated on evidence the graph itself recorded
+                    # (an executed read_file/search_code/get_impact with for_qname),
+                    # not on ids the model invents. Reject only when the item has no
+                    # recorded evidence; drop model-supplied refs that do not name a
+                    # real executed evidence call instead of rejecting the confirm.
+                    if not item.evidence_refs:
+                        reject_event(
+                            call,
+                            "confirming requires evidence already recorded for this "
+                            "item; call read_file/search_code/get_impact with "
+                            "for_qname first")
+                        continue
                     review_items[transition.qname] = item.model_copy(update={
                         "state": "confirmed", "finding": transition.finding,
                         "evidence_refs": list(dict.fromkeys([
-                            *item.evidence_refs, *transition.evidence_refs])), "reason": None})
+                            *item.evidence_refs,
+                            *[ref for ref in transition.evidence_refs
+                              if ref in evidence_call_ids]])),
+                        "reason": None})
                 else:
                     review_items[transition.qname] = item.model_copy(update={
                         "state": "dismissed", "reason": transition.reason})

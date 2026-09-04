@@ -339,3 +339,109 @@ def test_system_created_qname_candidate_can_be_confirmed(tmp_path):
     assert result["confirmed_findings"] == [item["finding"]]
     assert result["findings"] == result["confirmed_findings"]
     assert result["review_complete"] is True
+
+
+class InventedEvidenceModel:
+    """Confirms with fabricated file:line evidence_refs after real evidence."""
+
+    def __init__(self):
+        self.turn = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        if self.turn == 0:
+            response = AIMessage(content="", tool_calls=[{
+                "name": "get_impact", "id": "impact-real",
+                "args": {"symbols": [Q("auth", "login")],
+                         "for_qname": Q("auth", "login")}}])
+        elif self.turn == 1:
+            # The model invents file:line refs instead of tool call ids.
+            response = AIMessage(content="", tool_calls=[{
+                "name": "update_review_item", "id": "resolve-invented", "args": {
+                    "qname": Q("auth", "login"), "state": "confirmed",
+                    "finding": {"file": "auth.py", "line": 1,
+                                "title": "Resolved by manifest",
+                                "description": "Uses impact evidence."},
+                    "evidence_refs": ["auth.py:1", "not-a-call-id"],
+                }}])
+        else:
+            response = AIMessage(content="", tool_calls=[{
+                "name": "submit_review", "id": "submit-invented", "args": {
+                    "findings": [], "affected_symbols": [], "affected_files": [],
+                    "affected_entries": [], "tests": [],
+                }}])
+        self.turn += 1
+        return response
+
+
+def test_confirm_ignores_invented_evidence_refs(tmp_path):
+    """Real auto-recorded evidence is what counts; junk refs are dropped, not fatal."""
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    result = run_review(config, conn, model=InventedEvidenceModel(),
+                        diff="diff --git a/auth.py b/auth.py",
+                        symbols=[Q("auth", "login")])
+
+    item = result["review_items"][Q("auth", "login")]
+    assert item["state"] == "confirmed"
+    assert item["evidence_refs"] == ["impact-real"]
+    assert result["review_complete"] is True
+
+
+class NoEvidenceModel:
+    """Confirms a candidate without ever recording evidence via for_qname."""
+
+    def __init__(self):
+        self.turn = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        tool_messages = [message for message in messages
+                         if isinstance(message, ToolMessage)]
+        if tool_messages and self.turn == 1:
+            assert '"status": "rejected_policy"' in str(tool_messages[-1].content)
+        if self.turn == 0:
+            response = AIMessage(content="", tool_calls=[{
+                "name": "update_review_item", "id": "resolve-no-evidence", "args": {
+                    "qname": Q("auth", "login"), "state": "confirmed",
+                    "finding": {"file": "auth.py", "line": 1,
+                                "title": "No evidence",
+                                "description": "Never investigated."},
+                }}])
+        else:
+            response = AIMessage(content="", tool_calls=[{
+                "name": "submit_review", "id": "submit-no-evidence", "args": {
+                    "findings": [], "affected_symbols": [], "affected_files": [],
+                    "affected_entries": [], "tests": [],
+                }}])
+        self.turn += 1
+        return response
+
+
+def test_confirm_without_recorded_evidence_is_rejected(tmp_path):
+    """A confirmed item must have graph-recorded evidence, or it is rejected."""
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    result = run_review(config, conn, model=NoEvidenceModel(),
+                        diff="diff --git a/auth.py b/auth.py",
+                        symbols=[Q("auth", "login")])
+
+    item = result["review_items"][Q("auth", "login")]
+    assert item["state"] == "candidate"
+    statuses = [t["status"] for t in result["tool_trace"]]
+    assert "rejected_policy" in statuses
+    assert result["review_complete"] is False

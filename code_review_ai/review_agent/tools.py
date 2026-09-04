@@ -218,7 +218,13 @@ def create_tool_registry(config, conn) -> ToolRegistry:
         return json.dumps(report, ensure_ascii=False)
 
     def update_review_item_handler(**update: object) -> str:
-        """Confirm or dismiss one system-created changed-symbol review item."""
+        """Confirm or dismiss one system-created changed-symbol review item.
+
+        Evidence is recorded automatically: to confirm a candidate you must first
+        have called read_file/search_code/get_impact with ``for_qname`` set to its
+        qname. Do not fabricate ``evidence_refs`` — leave them empty; the graph
+        keeps the real evidence trail itself.
+        """
         resolution = ReviewItemUpdate.model_validate(update)
         return json.dumps({"accepted": True, "qname": resolution.qname}, ensure_ascii=False)
 

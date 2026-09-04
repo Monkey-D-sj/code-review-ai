@@ -30,7 +30,7 @@ get_impact；它已含直接调用点，不要重复读取这些证据。缺少�
 调用图覆盖不到字符串、配置键或动态关系时才调用 search_code，且不要宽泛搜索整个仓库。
 证据不足时少报，不要猜测。每个 change_summary qname 已由系统创建为 candidate。调用 read_file、search_code、get_impact
 查证某项时传入 for_qname，系统会自动记录成功工具证据。使用 update_review_item 将 qname 标记为
-confirmed（提供 finding 和此前成功工具的 evidence_refs）或 dismissed（提供 reason）。完成后必须
+confirmed（提供 finding；勿手写 evidence_refs，证据会自动记录）或 dismissed（提供 reason）。完成后必须
 单独调用 submit_review。"""
 
 _REVIEW_EXCLUDE_PATHS = (":(exclude)uv.lock",)
@@ -150,7 +150,12 @@ def _tool_call_records(messages: list, trace: list[dict]) -> tuple[list[str], li
 
 
 def _usage(messages: list) -> dict:
-    """Keep only stable LangChain/OpenAI usage fields when the provider supplies them."""
+    """Keep only stable LangChain/OpenAI usage fields when the provider supplies them.
+
+    Providers put cached-prefix and reasoning split under the nested
+    ``input_token_details`` / ``output_token_details`` keys; surface the two
+    cache counts under the same names the eval harness already reads.
+    """
     totals: dict[str, int] = {}
     for message in messages:
         if not isinstance(message, AIMessage):
@@ -158,10 +163,16 @@ def _usage(messages: list) -> dict:
         metadata = getattr(message, "usage_metadata", None)
         if not isinstance(metadata, dict):
             continue
-        for source, destination in (("input_tokens", "input_tokens"),
-                                    ("output_tokens", "output_tokens"),
-                                    ("total_tokens", "total_tokens")):
-            value = metadata.get(source)
+        input_details = metadata.get("input_token_details")
+        if not isinstance(input_details, dict):
+            input_details = {}
+        for source, destination, holder in (
+                ("input_tokens", "input_tokens", metadata),
+                ("output_tokens", "output_tokens", metadata),
+                ("total_tokens", "total_tokens", metadata),
+                ("cache_read", "cache_read_input_tokens", input_details),
+                ("cache_creation", "cache_creation_input_tokens", input_details)):
+            value = holder.get(source)
             if isinstance(value, int):
                 totals[destination] = totals.get(destination, 0) + value
     return totals

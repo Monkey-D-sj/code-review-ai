@@ -82,7 +82,11 @@ class ReviewItemUpdate(BaseModel):
     qname: str = Field(min_length=1)
     state: Literal["confirmed", "dismissed"]
     finding: Finding | None = None
-    evidence_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(
+        default_factory=list,
+        description=("Optional. Leave empty: evidence is recorded automatically "
+                     "when read_file/search_code/get_impact is called with "
+                     "for_qname. Ignored when not a real executed tool call."))
     reason: str | None = None
 
     @model_validator(mode="after")
