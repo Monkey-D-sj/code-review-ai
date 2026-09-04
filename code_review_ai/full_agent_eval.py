@@ -617,6 +617,12 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
         "CRAI_EVAL_MODE": mode, "CRAI_EVAL_CASE": item.case.case_id,
         "CRAI_EVAL_TOOL_PROFILE": profile,
         "CRAI_EVAL_DB_PATH": str(db_path),
+        # The in-process langgraph adapter diffs against config.diff_base, which
+        # in an eval worktree (a root commit with the mutation left uncommitted)
+        # resolves nowhere: no @{upstream} and no HEAD^. Point it at HEAD so the
+        # get_impact/change-summary tools see the working-tree change. The claude
+        # adapter's MCP server already receives this via _mcp_config.
+        "CRAI_DIFF_BASE": "HEAD",
     }
     if os.environ.get("CRAI_EVAL_MODEL"):
         # Lock every arm to the same model so cost/token comparisons are fair.
