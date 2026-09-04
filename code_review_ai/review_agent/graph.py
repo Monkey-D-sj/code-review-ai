@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import functools
 import json
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -97,6 +98,101 @@ def _tool_result_status(message: ToolMessage | None) -> ToolCallStatus:
     return "executed"
 
 
+def _trace_records(state: ReviewState, calls: list[dict], status: ToolCallStatus,
+                   results: dict[str, ToolMessage] | None = None) -> list[ToolTrace]:
+    """Build ordered records at the decision point, not by reverse parsing."""
+    start = len(state.get("tool_trace", []))
+    records: list[ToolTrace] = []
+    for offset, call in enumerate(calls, start=1):
+        call_id = str(call.get("id", "unknown-call"))
+        result = results.get(call_id) if results is not None else None
+        record: ToolTrace = {
+            "sequence": start + offset,
+            "tool_call_id": call_id,
+            "tool": str(call.get("name", "unknown")),
+            "input": call.get("args", {}),
+            "status": _tool_result_status(result) if result is not None else status,
+            "response_chars": len(str(result.content)) if result is not None else 0,
+        }
+        records.append(record)
+    return records
+
+
+def _route_after_agent(state: ReviewState, registry: ToolRegistry,
+                       action_names: set[str], max_tool_calls: int) -> str:
+    """Pick the next node after a model turn from the requested tool calls."""
+    calls = _tool_calls(_last_ai(state))
+    terminal = [call for call in calls if registry.is_terminal(call.get("name", ""))]
+    actions = [call for call in calls if call.get("name") in action_names]
+    unknown = len(calls) != len(terminal) + len(actions)
+    if terminal:
+        if len(terminal) == 1 and len(calls) == 1:
+            return "finish"
+        return "nudge"
+    if not calls:
+        return "fail" if state.get("retry_count", 0) >= 1 else "nudge"
+    if unknown:
+        return "fail" if state.get("retry_count", 0) >= 1 else "nudge"
+    if state.get("force_submit"):
+        return "fail"
+    if not _candidate_qnames(state):
+        return "fail"
+    if state.get("tool_request_count", 0) + len(actions) > max_tool_calls:
+        return "force_submit"
+    return "tools"
+
+
+def _nudge(state: ReviewState) -> dict:
+    # OpenAI-compatible providers require one ToolMessage for *every* tool
+    # call before another assistant turn. This path covers malformed calls
+    # (unknown tools or submit_review mixed with action tools), which must
+    # not be handed to ToolNode because the terminal tool is intentionally
+    # never executable.
+    rejected = [ToolMessage(
+        content=("Tool call rejected. Do not combine tools: use action tools "
+                 "alone, or call submit_review alone as the final action."),
+        tool_call_id=str(call.get("id", "unknown-call")),
+        name=str(call.get("name", "unknown")),
+    ) for call in _tool_calls(_last_ai(state))]
+    calls = _tool_calls(_last_ai(state))
+    return {"messages": [*rejected, HumanMessage(content=(
+                "Your last response was not a valid final submission. "
+                "Use action tools alone, or call submit_review alone with a valid report."))],
+            "retry_count": 1,
+            "tool_trace": _trace_records(state, calls, "rejected_protocol")}
+
+
+def _force_submit(state: ReviewState) -> dict:
+    # As with nudge(), the provider protocol must be completed before the
+    # agent can be told to stop using action tools.
+    rejected = [ToolMessage(
+        content=("Tool call rejected because the action-tool budget is exhausted. "
+                 "Submit the final review now."),
+        tool_call_id=str(call.get("id", "unknown-call")),
+        name=str(call.get("name", "unknown")),
+    ) for call in _tool_calls(_last_ai(state))]
+    calls = _tool_calls(_last_ai(state))
+    return {"messages": [*rejected, HumanMessage(content=(
+                "The action-tool budget is exhausted. Call submit_review now; "
+                "no other tool is available."))],
+            "force_submit": True,
+            "tool_trace": _trace_records(state, calls, "rejected_budget")}
+
+
+def _finish(state: ReviewState) -> dict:
+    call = _tool_calls(_last_ai(state))[0]
+    try:
+        return {"final_report": FindingReport.model_validate(call.get("args", {})),
+                "tool_trace": _trace_records(state, [call], "executed")}
+    except Exception as exc:  # Pydantic details are safe model-visible diagnostics.
+        return {"failure_reason": f"invalid submit_review payload: {exc}",
+                "tool_trace": _trace_records(state, [call], "error")}
+
+
+def _fail(state: ReviewState) -> dict:
+    return {"failure_reason": "agent did not make a valid submit_review call"}
+
+
 def build_review_graph(model, registry: ToolRegistry, *,
                        max_tool_calls: int = MAX_TOOL_CALLS,
                        progress: Callable[[str, dict[str, object]], None] | None = None):
@@ -114,25 +210,6 @@ def build_review_graph(model, registry: ToolRegistry, *,
         if progress is not None:
             progress(event, data)
 
-    def traces(state: ReviewState, calls: list[dict], status: ToolCallStatus,
-               results: dict[str, ToolMessage] | None = None) -> list[ToolTrace]:
-        """Build ordered records at the decision point, not by reverse parsing."""
-        start = len(state.get("tool_trace", []))
-        records: list[ToolTrace] = []
-        for offset, call in enumerate(calls, start=1):
-            call_id = str(call.get("id", "unknown-call"))
-            result = results.get(call_id) if results is not None else None
-            record: ToolTrace = {
-                "sequence": start + offset,
-                "tool_call_id": call_id,
-                "tool": str(call.get("name", "unknown")),
-                "input": call.get("args", {}),
-                "status": _tool_result_status(result) if result is not None else status,
-                "response_chars": len(str(result.content)) if result is not None else 0,
-            }
-            records.append(record)
-        return records
-
     def agent(state: ReviewState) -> dict:
         nonlocal model_turn
         model_turn += 1
@@ -147,27 +224,6 @@ def build_review_graph(model, registry: ToolRegistry, *,
              tool_calls=len(response.tool_calls),
              context_messages=len(model_messages))
         return {"messages": [response]}
-
-    def route_after_agent(state: ReviewState) -> str:
-        calls = _tool_calls(_last_ai(state))
-        terminal = [call for call in calls if registry.is_terminal(call.get("name", ""))]
-        actions = [call for call in calls if call.get("name") in action_names]
-        unknown = len(calls) != len(terminal) + len(actions)
-        if terminal:
-            if len(terminal) == 1 and len(calls) == 1:
-                return "finish"
-            return "nudge"
-        if not calls:
-            return "fail" if state.get("retry_count", 0) >= 1 else "nudge"
-        if unknown:
-            return "fail" if state.get("retry_count", 0) >= 1 else "nudge"
-        if state.get("force_submit"):
-            return "fail"
-        if not _candidate_qnames(state):
-            return "fail"
-        if state.get("tool_request_count", 0) + len(actions) > max_tool_calls:
-            return "force_submit"
-        return "tools"
 
     def run_tools(state: ReviewState, config: RunnableConfig) -> dict:
         actions = [call for call in _tool_calls(_last_ai(state))
@@ -240,7 +296,7 @@ def build_review_graph(model, registry: ToolRegistry, *,
                         "state": "dismissed", "reason": transition.reason})
             else:
                 continue
-        records = traces(state, actions, "executed", results)
+        records = _trace_records(state, actions, "executed", results)
         update["tool_trace"] = records
         update["tool_request_count"] = len(actions)
         update["tool_call_count"] = sum(
@@ -248,64 +304,20 @@ def build_review_graph(model, registry: ToolRegistry, *,
         update["review_items"] = review_items
         return update
 
-    def nudge(state: ReviewState) -> dict:
-        # OpenAI-compatible providers require one ToolMessage for *every* tool
-        # call before another assistant turn. This path covers malformed calls
-        # (unknown tools or submit_review mixed with action tools), which must
-        # not be handed to ToolNode because the terminal tool is intentionally
-        # never executable.
-        rejected = [ToolMessage(
-            content=("Tool call rejected. Do not combine tools: use action tools "
-                     "alone, or call submit_review alone as the final action."),
-            tool_call_id=str(call.get("id", "unknown-call")),
-            name=str(call.get("name", "unknown")),
-        ) for call in _tool_calls(_last_ai(state))]
-        calls = _tool_calls(_last_ai(state))
-        return {"messages": [*rejected, HumanMessage(content=(
-                    "Your last response was not a valid final submission. "
-                    "Use action tools alone, or call submit_review alone with a valid report."))],
-                "retry_count": 1,
-                "tool_trace": traces(state, calls, "rejected_protocol")}
-
-    def force_submit(state: ReviewState) -> dict:
-        # As with nudge(), the provider protocol must be completed before the
-        # agent can be told to stop using action tools.
-        rejected = [ToolMessage(
-            content=("Tool call rejected because the action-tool budget is exhausted. "
-                     "Submit the final review now."),
-            tool_call_id=str(call.get("id", "unknown-call")),
-            name=str(call.get("name", "unknown")),
-        ) for call in _tool_calls(_last_ai(state))]
-        calls = _tool_calls(_last_ai(state))
-        return {"messages": [*rejected, HumanMessage(content=(
-                    "The action-tool budget is exhausted. Call submit_review now; "
-                    "no other tool is available."))],
-                "force_submit": True,
-                "tool_trace": traces(state, calls, "rejected_budget")}
-
-    def finish(state: ReviewState) -> dict:
-        call = _tool_calls(_last_ai(state))[0]
-        try:
-            return {"final_report": FindingReport.model_validate(call.get("args", {})),
-                    "tool_trace": traces(state, [call], "executed")}
-        except Exception as exc:  # Pydantic details are safe model-visible diagnostics.
-            return {"failure_reason": f"invalid submit_review payload: {exc}",
-                    "tool_trace": traces(state, [call], "error")}
-
-    def fail(state: ReviewState) -> dict:
-        return {"failure_reason": "agent did not make a valid submit_review call"}
-
     graph = StateGraph(ReviewState)
     graph.add_node("agent", agent)
     graph.add_node("tools", run_tools)
-    graph.add_node("nudge", nudge)
-    graph.add_node("force_submit", force_submit)
-    graph.add_node("finish", finish)
-    graph.add_node("fail", fail)
+    graph.add_node("nudge", _nudge)
+    graph.add_node("force_submit", _force_submit)
+    graph.add_node("finish", _finish)
+    graph.add_node("fail", _fail)
     graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", route_after_agent, {
-        "tools": "tools", "nudge": "nudge", "force_submit": "force_submit",
-        "finish": "finish", "fail": "fail"})
+    graph.add_conditional_edges(
+        "agent",
+        functools.partial(_route_after_agent, registry=registry,
+                          action_names=action_names, max_tool_calls=max_tool_calls),
+        {"tools": "tools", "nudge": "nudge", "force_submit": "force_submit",
+         "finish": "finish", "fail": "fail"})
     graph.add_edge("tools", "agent")
     graph.add_edge("nudge", "agent")
     graph.add_edge("force_submit", "agent")
