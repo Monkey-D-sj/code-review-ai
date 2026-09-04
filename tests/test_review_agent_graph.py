@@ -4,7 +4,9 @@ from conftest import FIXTURES as FIX, Q
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.indexer import rebuild
+from code_review_ai.review_agent.graph import _record_evidence, _resolve_review_item
 from code_review_ai.review_agent.runner import _review_paths, run_review
+from code_review_ai.review_agent.schemas import ReviewItem
 
 
 class ScriptedModel:
@@ -445,3 +447,105 @@ def test_confirm_without_recorded_evidence_is_rejected(tmp_path):
     statuses = [t["status"] for t in result["tool_trace"]]
     assert "rejected_policy" in statuses
     assert result["review_complete"] is False
+
+
+class InvalidToolCallModel:
+    """First assistant reply carries a tool call whose arguments are bad JSON.
+
+    langchain keeps such calls in ``invalid_tool_calls`` with ``tool_calls``
+    empty, yet the outbound serializer still emits them as ``tool_calls``. The
+    graph must pair a rejection ToolMessage for the id before calling the model
+    again, or the provider rejects the follow-up request.
+    """
+
+    def __init__(self):
+        self.turns = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        self.turns += 1
+        if self.turns == 1:
+            return AIMessage(content="", invalid_tool_calls=[{
+                "id": "call-malformed-1", "name": "submit_review",
+                "args": '{"findings": [', "error": "not valid JSON"}])
+        paired = [message for message in messages
+                  if isinstance(message, ToolMessage)
+                  and message.tool_call_id == "call-malformed-1"]
+        assert paired, "the malformed tool call must be paired with a ToolMessage"
+        return AIMessage(content="", tool_calls=[{
+            "name": "submit_review", "id": "submit-clean", "args": {
+                "findings": [], "affected_symbols": [], "affected_files": [],
+                "affected_entries": [], "tests": []}}])
+
+
+def test_malformed_tool_call_arguments_are_paired_with_rejection(tmp_path):
+    """A call left in invalid_tool_calls gets a ToolMessage so retries stay valid."""
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    result = run_review(config, conn, model=InvalidToolCallModel(),
+                        diff="diff --git a/auth.py b/auth.py",
+                        symbols=[Q("auth", "login")])
+
+    assert result["failure_reason"] is None
+
+
+def _review_item(state: str = "candidate", refs: tuple[str, ...] = ()) -> ReviewItem:
+    return ReviewItem(qname=Q("auth", "login"), file="auth.py", state=state,
+                      evidence_refs=list(refs))
+
+
+def test_record_evidence_guards_for_qname():
+    """A for_qname evidence call records its id, guarded by an active candidate."""
+    items = {Q("auth", "login"): _review_item()}
+    recorded, reason = _record_evidence(
+        {"args": {"for_qname": Q("auth", "login")}}, items, "call-ev")
+    assert reason is None
+    assert recorded[Q("auth", "login")].evidence_refs == ["call-ev"]
+    # an inactive or unknown item is rejected, never recorded
+    recorded, reason = _record_evidence(
+        {"args": {"for_qname": Q("auth", "missing")}}, items, "call-ev")
+    assert reason and reason.startswith("for_qname")
+    # no for_qname is a no-op
+    recorded, reason = _record_evidence({"args": {}}, items, "call-ev")
+    assert reason is None and recorded[Q("auth", "login")].evidence_refs == []
+
+
+def test_resolve_review_item_confirm_gate_and_dismiss():
+    """Confirm is gated on recorded evidence; dismiss records its reason."""
+    finding = {"file": "auth.py", "line": 1, "title": "T", "description": "D"}
+    # confirming without recorded evidence is rejected with guidance
+    items = {Q("auth", "login"): _review_item(state="candidate", refs=())}
+    resolved, reason = _resolve_review_item(
+        {"args": {"qname": Q("auth", "login"), "state": "confirmed",
+                  "finding": finding}},
+        items, {"call-ev"})
+    assert reason and "evidence" in reason
+    # confirming with recorded evidence drops invented refs but confirms the item
+    items = {Q("auth", "login"): _review_item(state="candidate", refs=["call-ev"])}
+    resolved, reason = _resolve_review_item(
+        {"args": {"qname": Q("auth", "login"), "state": "confirmed",
+                  "finding": finding, "evidence_refs": ["auth.py:1", "bogus"]}},
+        items, {"call-ev"})
+    assert reason is None
+    assert resolved[Q("auth", "login")].state == "confirmed"
+    assert resolved[Q("auth", "login")].evidence_refs == ["call-ev"]
+    # dismissing records the reason
+    items = {Q("auth", "login"): _review_item(state="candidate")}
+    resolved, reason = _resolve_review_item(
+        {"args": {"qname": Q("auth", "login"), "state": "dismissed",
+                  "reason": "wontfix"}},
+        items, set())
+    assert reason is None and resolved[Q("auth", "login")].state == "dismissed"
+    # an unknown qname cannot be resolved
+    resolved, reason = _resolve_review_item(
+        {"args": {"qname": Q("auth", "missing"), "state": "dismissed",
+                  "reason": "x"}},
+        items, set())
+    assert reason and reason.startswith("qname")

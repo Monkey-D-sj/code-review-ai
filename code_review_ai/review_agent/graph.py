@@ -15,6 +15,7 @@ from code_review_ai.review_agent.registry import ToolRegistry
 from code_review_ai.review_agent.schemas import (
     MAX_TOOL_CALLS,
     FindingReport,
+    ReviewItem,
     ReviewItemUpdate,
     ReviewState,
     ToolCallStatus,
@@ -31,6 +32,30 @@ def _last_ai(state: ReviewState) -> AIMessage | None:
 
 def _tool_calls(message: AIMessage | None) -> list[dict]:
     return list(message.tool_calls) if message is not None else []
+
+
+def _invalid_tool_calls(message: AIMessage | None) -> list[dict]:
+    """Malformed tool calls the outbound serializer will still emit as ``tool_calls``.
+
+    When a provider returns a call whose ``arguments`` are not valid JSON,
+    langchain keeps it in ``message.invalid_tool_calls`` and leaves
+    ``message.tool_calls`` empty, so routing treats the turn as a plain reply.
+    But the request serializer re-emits ``invalid_tool_calls`` as real
+    ``tool_calls``; if the graph did not pair a tool message for the id, the
+    provider rejects the follow-up request. Routing and the nudge node account
+    for these ids so every emitted call gets a response.
+    """
+    if message is None:
+        return []
+    entries = []
+    for call in message.invalid_tool_calls:
+        if isinstance(call, dict):
+            call_id, name = call.get("id"), call.get("name")
+        else:
+            call_id, name = getattr(call, "id", None), getattr(call, "name", None)
+        if call_id:
+            entries.append({"id": call_id, "name": name})
+    return entries
 
 
 def _utf8_safe(value):
@@ -125,6 +150,11 @@ def _route_after_agent(state: ReviewState, registry: ToolRegistry,
     terminal = [call for call in calls if registry.is_terminal(call.get("name", ""))]
     actions = [call for call in calls if call.get("name") in action_names]
     unknown = len(calls) != len(terminal) + len(actions)
+    if _invalid_tool_calls(_last_ai(state)):
+        # Malformed tool calls are re-emitted as tool_calls by the serializer but
+        # never executed; nudge pairs them with rejection tool messages so the
+        # provider protocol stays closed while the model retries clean JSON.
+        return "fail" if state.get("retry_count", 0) >= 1 else "nudge"
     if terminal:
         if len(terminal) == 1 and len(calls) == 1:
             return "finish"
@@ -145,16 +175,17 @@ def _route_after_agent(state: ReviewState, registry: ToolRegistry,
 def _nudge(state: ReviewState) -> dict:
     # OpenAI-compatible providers require one ToolMessage for *every* tool
     # call before another assistant turn. This path covers malformed calls
-    # (unknown tools or submit_review mixed with action tools), which must
-    # not be handed to ToolNode because the terminal tool is intentionally
-    # never executable.
+    # (unknown tools, unparseable tool-call arguments, or submit_review mixed
+    # with action tools), which must not be handed to ToolNode because the
+    # terminal tool is intentionally never executable.
+    last_ai = _last_ai(state)
+    calls = [*_tool_calls(last_ai), *_invalid_tool_calls(last_ai)]
     rejected = [ToolMessage(
         content=("Tool call rejected. Do not combine tools: use action tools "
                  "alone, or call submit_review alone as the final action."),
         tool_call_id=str(call.get("id", "unknown-call")),
         name=str(call.get("name", "unknown")),
-    ) for call in _tool_calls(_last_ai(state))]
-    calls = _tool_calls(_last_ai(state))
+    ) for call in calls]
     return {"messages": [*rejected, HumanMessage(content=(
                 "Your last response was not a valid final submission. "
                 "Use action tools alone, or call submit_review alone with a valid report."))],
@@ -165,13 +196,14 @@ def _nudge(state: ReviewState) -> dict:
 def _force_submit(state: ReviewState) -> dict:
     # As with nudge(), the provider protocol must be completed before the
     # agent can be told to stop using action tools.
+    last_ai = _last_ai(state)
+    calls = [*_tool_calls(last_ai), *_invalid_tool_calls(last_ai)]
     rejected = [ToolMessage(
         content=("Tool call rejected because the action-tool budget is exhausted. "
                  "Submit the final review now."),
         tool_call_id=str(call.get("id", "unknown-call")),
         name=str(call.get("name", "unknown")),
-    ) for call in _tool_calls(_last_ai(state))]
-    calls = _tool_calls(_last_ai(state))
+    ) for call in calls]
     return {"messages": [*rejected, HumanMessage(content=(
                 "The action-tool budget is exhausted. Call submit_review now; "
                 "no other tool is available."))],
@@ -191,6 +223,65 @@ def _finish(state: ReviewState) -> dict:
 
 def _fail(state: ReviewState) -> dict:
     return {"failure_reason": "agent did not make a valid submit_review call"}
+
+
+def _record_evidence(call: dict, review_items: dict[str, ReviewItem],
+                     call_id: str) -> tuple[dict[str, ReviewItem], str | None]:
+    """Record an executed read/search/get_impact ``for_qname`` as item evidence.
+
+    A ``for_qname`` on those tools must reference an active candidate item; the
+    executed call id is then appended to that item's evidence trail. An absent
+    or inactive item returns a rejection reason so the caller stamps the tool's
+    ToolMessage ``rejected_policy`` (the call already ran, so a response exists).
+    """
+    args = call.get("args", {})
+    qname = args.get("for_qname") if isinstance(args, dict) else None
+    if qname is None:
+        return review_items, None
+    item = review_items.get(qname) if isinstance(qname, str) else None
+    if item is None or item.state != "candidate":
+        return review_items, "for_qname must reference an active review-item candidate"
+    updated = item.model_copy(update={"evidence_refs": list(dict.fromkeys(
+        [*item.evidence_refs, call_id]))})
+    return {**review_items, qname: updated}, None
+
+
+def _resolve_review_item(call: dict, review_items: dict[str, ReviewItem],
+                         evidence_call_ids: set[str]
+                         ) -> tuple[dict[str, ReviewItem], str | None]:
+    """Apply one confirm/dismiss transition to a candidate review item.
+
+    Confirmation is gated on evidence the graph itself recorded (an executed
+    read_file/search_code/get_impact with ``for_qname``), never on ids the model
+    invents: a candidate with no recorded evidence is rejected with guidance,
+    and model-supplied refs that name no executed evidence call are dropped
+    rather than failing the confirm. Returns a rejection reason when the
+    transition cannot apply, else the updated items. Arguments that fail schema
+    validation are skipped without rejection (the tool node already answered).
+    """
+    try:
+        transition = ReviewItemUpdate.model_validate(call.get("args", {}))
+    except Exception:
+        return review_items, None
+    item = review_items.get(transition.qname)
+    if item is None or item.state != "candidate":
+        return review_items, "qname must reference an active review-item candidate"
+    if transition.state == "confirmed":
+        if not item.evidence_refs:
+            return review_items, (
+                "confirming requires evidence already recorded for this item; "
+                "call read_file/search_code/get_impact with for_qname first")
+        updated = item.model_copy(update={
+            "state": "confirmed", "finding": transition.finding,
+            "evidence_refs": list(dict.fromkeys([
+                *item.evidence_refs,
+                *[ref for ref in transition.evidence_refs
+                  if ref in evidence_call_ids]])),
+            "reason": None})
+    else:
+        updated = item.model_copy(update={
+            "state": "dismissed", "reason": transition.reason})
+    return {**review_items, transition.qname: updated}, None
 
 
 def build_review_graph(model, registry: ToolRegistry, *,
@@ -240,62 +331,23 @@ def build_review_graph(model, registry: ToolRegistry, *,
             record["tool_call_id"] for record in state.get("tool_trace", [])
             if record["status"] == "executed"
             and record["tool"] in {"read_file", "search_code", "get_impact"}}
-
-        def reject_event(call: dict, reason: str) -> None:
-            result = results.get(str(call.get("id", "unknown-call")))
-            if result is not None:
-                result.content = json.dumps({"status": "rejected_policy", "error": reason})
-
         for call in actions:
             call_id = str(call.get("id", "unknown-call"))
             result = results.get(call_id)
             if _tool_result_status(result) != "executed":
                 continue
-            if call.get("name") in {"read_file", "search_code", "get_impact"}:
-                args = call.get("args", {})
-                qname = args.get("for_qname") if isinstance(args, dict) else None
-                if qname is not None:
-                    item = review_items.get(qname) if isinstance(qname, str) else None
-                    if item is None or item.state != "candidate":
-                        reject_event(call, "for_qname must reference an active review-item candidate")
-                        continue
-                    review_items[qname] = item.model_copy(update={
-                        "evidence_refs": list(dict.fromkeys([
-                            *item.evidence_refs, call_id]))})
-            if call.get("name") == review_item_update_name:
-                try:
-                    transition = ReviewItemUpdate.model_validate(call.get("args", {}))
-                except Exception:
-                    continue
-                item = review_items.get(transition.qname)
-                if item is None or item.state != "candidate":
-                    reject_event(call, "qname must reference an active review-item candidate")
-                    continue
-                if transition.state == "confirmed":
-                    # Confirmation is gated on evidence the graph itself recorded
-                    # (an executed read_file/search_code/get_impact with for_qname),
-                    # not on ids the model invents. Reject only when the item has no
-                    # recorded evidence; drop model-supplied refs that do not name a
-                    # real executed evidence call instead of rejecting the confirm.
-                    if not item.evidence_refs:
-                        reject_event(
-                            call,
-                            "confirming requires evidence already recorded for this "
-                            "item; call read_file/search_code/get_impact with "
-                            "for_qname first")
-                        continue
-                    review_items[transition.qname] = item.model_copy(update={
-                        "state": "confirmed", "finding": transition.finding,
-                        "evidence_refs": list(dict.fromkeys([
-                            *item.evidence_refs,
-                            *[ref for ref in transition.evidence_refs
-                              if ref in evidence_call_ids]])),
-                        "reason": None})
-                else:
-                    review_items[transition.qname] = item.model_copy(update={
-                        "state": "dismissed", "reason": transition.reason})
+            name = str(call.get("name", "unknown"))
+            if name in {"read_file", "search_code", "get_impact"}:
+                review_items, reason = _record_evidence(
+                    call, review_items, call_id)
+            elif name == review_item_update_name:
+                review_items, reason = _resolve_review_item(
+                    call, review_items, evidence_call_ids)
             else:
                 continue
+            if reason is not None and result is not None:
+                result.content = json.dumps(
+                    {"status": "rejected_policy", "error": reason})
         records = _trace_records(state, actions, "executed", results)
         update["tool_trace"] = records
         update["tool_request_count"] = len(actions)
