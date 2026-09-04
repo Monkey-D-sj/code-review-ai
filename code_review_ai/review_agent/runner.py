@@ -85,15 +85,8 @@ def resolve_api_key(repo_path: str, api_key_env: str) -> str:
 def _create_model(model_name: str, base_url: str | None,
                   api_key_env: str, repo_path: str):
     api_key = resolve_api_key(repo_path, api_key_env)
-    try:
-        from langchain_openai import ChatOpenAI
-    except ImportError as exc:
-        raise RuntimeError("langchain-openai is not installed") from exc
-    options: dict[str, Any] = {"model": model_name, "temperature": 0,
-                               "api_key": api_key}
-    if base_url:
-        options["base_url"] = base_url
-    return ChatOpenAI(**options)
+    from code_review_ai.review_agent.providers import build_review_model
+    return build_review_model(model_name, base_url, api_key)
 
 
 def _initial_messages(diff: str, summary: dict[str, object]) -> list:
