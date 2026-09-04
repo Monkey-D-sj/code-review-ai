@@ -549,3 +549,36 @@ def test_resolve_review_item_confirm_gate_and_dismiss():
                   "reason": "x"}},
         items, set())
     assert reason and reason.startswith("qname")
+
+
+class FabricatedEntriesModel:
+    """Submits a report whose affected_entries the runner must override."""
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        return AIMessage(content="", tool_calls=[{
+            "name": "submit_review", "id": "submit-entries", "args": {
+                "findings": [], "affected_symbols": [], "affected_files": [],
+                "affected_entries": ["model-fabricated-entry"], "tests": []}}])
+
+
+def test_affected_entries_are_filled_deterministically(tmp_path):
+    """affected_entries come from the graph, overriding what the model authors."""
+    from code_review_ai.impact import affected_entries as graph_entries
+
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    result = run_review(config, conn, model=FabricatedEntriesModel(),
+                        diff="diff --git a/auth.py b/auth.py",
+                        symbols=[Q("auth", "login")])
+
+    expected = sorted(graph_entries(conn, Q("auth", "login")))
+    assert result["affected_entries"] == expected
+    assert "model-fabricated-entry" not in result["affected_entries"]

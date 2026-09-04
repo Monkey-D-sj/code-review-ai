@@ -254,6 +254,26 @@ def _affected_entries(conn: sqlite3.Connection, symbol_node_id: int,
     return entries
 
 
+def affected_entries(conn: sqlite3.Connection, qname: str,
+                     tests: str = "exclude") -> list[str]:
+    """Deterministic business entry points of the flows containing one symbol.
+
+    Public, BFS-free counterpart to the per-symbol ``affected_entries`` inside
+    get_impact: resolves the qname to a node and returns the sorted entry
+    points of the flows it sits in, honoring the same ``tests`` filter. Absent
+    symbols return an empty list. Consumers such as the review runner use this
+    to fill a report's affected-entries deterministically instead of asking the
+    model to author them.
+    """
+    if tests not in _TEST_FILTER:
+        raise ValueError(f"tests must be one of {list(_TEST_FILTER)}, got {tests!r}")
+    node = conn.execute(
+        "SELECT id FROM nodes WHERE qualified_name=?", (qname,)).fetchone()
+    if node is None:
+        return []
+    return sorted(_affected_entries(conn, node["id"], _TEST_FILTER[tests]))
+
+
 def _direct_call_site(conn: sqlite3.Connection, caller_qname: str,
                       callee_qname: str, with_code: bool = True) -> dict | None:
     """First resolved call edge caller→callee as {line, args, code},

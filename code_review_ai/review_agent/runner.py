@@ -14,6 +14,7 @@ from dotenv import dotenv_values
 
 from code_review_ai.agent_eval import SHARED_REVIEW_POLICY
 from code_review_ai.changes import build_change_summary
+from code_review_ai.impact import affected_entries
 from code_review_ai.review_agent.graph import build_review_graph
 from code_review_ai.review_agent.schemas import (
     GRAPH_RECURSION_LIMIT,
@@ -31,7 +32,7 @@ get_impact；它已含直接调用点，不要重复读取这些证据。缺少�
 证据不足时少报，不要猜测。每个 change_summary qname 已由系统创建为 candidate。调用 read_file、search_code、get_impact
 查证某项时传入 for_qname，系统会自动记录成功工具证据。使用 update_review_item 将 qname 标记为
 confirmed（提供 finding；勿手写 evidence_refs，证据会自动记录）或 dismissed（提供 reason）。完成后必须
-单独调用 submit_review。"""
+单独调用 submit_review。受影响入口 affected_entries 由系统根据调用图确定性填充，submit_review 无需填写。"""
 
 _REVIEW_EXCLUDE_PATHS = (":(exclude)uv.lock",)
 
@@ -210,6 +211,11 @@ def run_review(config, conn, *, model=None, model_name: str | None = None,
     graph = build_review_graph(model, registry, progress=progress)
     base_messages = _initial_messages(effective_diff, summary)
     review_items = _review_items(summary)
+    # The changed symbols' business entry points are a deterministic graph query
+    # (flows the symbol sits in), not something the model should author. Compute
+    # once here and override whatever the model put on the report.
+    affected_entries_list = sorted({entry for qname in review_items
+                                    for entry in affected_entries(conn, qname)})
     initial = {
         "messages": base_messages, "base_messages": base_messages,
         "repo_path": str(Path(config.repo_path).resolve()), "diff": effective_diff,
@@ -257,6 +263,7 @@ def run_review(config, conn, *, model=None, model_name: str | None = None,
     if review_complete:
         payload["findings"] = confirmed_findings
     payload.update({
+        "affected_entries": affected_entries_list,
         "files_read": files_read,
         "tool_calls": calls,
         "tool_call_count": state.get("tool_call_count", 0),
