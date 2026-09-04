@@ -38,8 +38,7 @@ class ReviewProgressDisplay:
         if event == "model_request_started":
             self.model_turn = int(data["turn"])
             self.active_model_call = True
-            suffix = "（只允许提交报告）" if data.get("final_only") else ""
-            self._console.print(Rule(f"模型第 {self.model_turn} 轮{suffix}", style="blue"))
+            self._console.print(Rule(f"模型第 {self.model_turn} 轮", style="blue"))
             self._console.print(f"  [blue]→ 请求 {self.model_name} 推理[/]")
             return
         if event == "model_response_received":

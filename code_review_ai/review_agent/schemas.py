@@ -18,7 +18,6 @@ ToolKind = Literal["action", "terminal"]
 ToolCallStatus = Literal[
     "executed",
     "rejected_policy",
-    "rejected_budget",
     "rejected_protocol",
     "error",
 ]
@@ -118,4 +117,3 @@ class ReviewState(TypedDict, total=False):
     final_report: FindingReport | None
     failure_reason: str | None
     retry_count: Annotated[int, add]
-    force_submit: bool

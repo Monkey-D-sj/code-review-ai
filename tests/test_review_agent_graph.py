@@ -7,28 +7,12 @@ from code_review_ai.indexer import rebuild
 from code_review_ai.review_agent.graph import _record_evidence, _resolve_review_item
 from code_review_ai.review_agent.runner import _review_paths, run_review
 from code_review_ai.review_agent.schemas import ReviewItem
+from code_review_ai.review_agent.tools import create_tool_registry
 
 
-class ScriptedModel:
-    """Small bind_tools-compatible fake model; no network access."""
-
-    def bind_tools(self, tools):
-        self.names = {tool.name for tool in tools}
-        return self
-
-    def invoke(self, messages):
-        if any(isinstance(message, ToolMessage) for message in messages):
-            return AIMessage(content="", tool_calls=[{
-                "name": "submit_review", "id": "submit-1", "args": {
-                    "findings": [{"file": "auth.py", "line": 1,
-                                  "title": "Scripted finding",
-                                  "description": "Evidence-backed fake result."}],
-                    "affected_symbols": [Q("auth", "login")],
-                    "affected_files": ["auth.py"], "affected_entries": [], "tests": [],
-                }}])
-        return AIMessage(content="", tool_calls=[{
-            "name": "get_impact", "id": "impact-1",
-            "args": {"symbols": [Q("auth", "login")]}}])
+def _finding(file: str = "auth.py", line: int = 1) -> dict:
+    return {"file": file, "line": line, "title": "Resolved by manifest",
+            "description": "Uses impact evidence."}
 
 
 def test_review_paths_always_exclude_uv_lock():
@@ -37,62 +21,183 @@ def test_review_paths_always_exclude_uv_lock():
         "code_review_ai", ":(exclude)uv.lock"]
 
 
-class MixedToolCallModel:
-    """Models a provider response that combines an action and final tool."""
+class ConfirmingModel:
+    """Gathers real impact evidence, then confirms the single candidate."""
 
     def bind_tools(self, tools):
+        self.names = {tool.name for tool in tools}
         return self
 
     def invoke(self, messages):
-        tool_messages = [message for message in messages
-                         if isinstance(message, ToolMessage)]
-        if tool_messages:
-            assert {message.tool_call_id for message in tool_messages} == {
-                "impact-1", "submit-1"}
+        if any(isinstance(message, ToolMessage) for message in messages):
             return AIMessage(content="", tool_calls=[{
-                "name": "submit_review", "id": "submit-2", "args": {
-                    "findings": [], "affected_symbols": [], "affected_files": [],
-                    "affected_entries": [], "tests": [],
-                }}])
-        return AIMessage(content="", tool_calls=[
-            {"name": "get_impact", "id": "impact-1",
-             "args": {"symbols": [Q("auth", "login")]}},
-            {"name": "submit_review", "id": "submit-1", "args": {
-                "findings": [], "affected_symbols": [], "affected_files": [],
-                "affected_entries": [], "tests": [],
-            }},
-        ])
+                "name": "update_review_item", "id": "confirm-1", "args": {
+                    "qname": Q("auth", "login"), "state": "confirmed",
+                    "finding": _finding()}}])
+        return AIMessage(content="", tool_calls=[{
+            "name": "get_impact", "id": "impact-1",
+            "args": {"symbols": [Q("auth", "login")],
+                     "for_qname": Q("auth", "login")}}])
 
 
-class BudgetLimitedModel:
-    """Uses more action calls than allowed, then checks the rejection replies."""
+def test_graph_resolves_candidate_then_auto_finishes(tmp_path):
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    events = []
+    result = run_review(config, conn, model=ConfirmingModel(),
+                        diff="diff --git a/auth.py b/auth.py",
+                        symbols=[Q("auth", "login")],
+                        progress=lambda event, data: events.append((event, data)))
+
+    assert result["failure_reason"] is None
+    assert result["findings"] == [_finding()]
+    assert result["findings"] == result["confirmed_findings"]
+    assert result["review_complete"] is True
+    # The candidate flow offers no terminal tool and never needs submit_review.
+    assert result["tool_calls"] == ["get_impact", "update_review_item"]
+    assert result["tool_call_count"] == 2
+    assert [item["status"] for item in result["tool_trace"]] == ["executed", "executed"]
+    assert result["tool_trace"][0]["tool_call_id"] == "impact-1"
+    assert result["review_items"][Q("auth", "login")]["state"] == "confirmed"
+    assert result["review_items"][Q("auth", "login")]["evidence_refs"] == ["impact-1"]
+    assert result["initial_context"]["change_summary_chars"] > 0
+    assert [event for event, _ in events] == [
+        "summary_ready", "agent_started", "model_request_started",
+        "model_response_received", "tool_requests", "tool_completed",
+        "model_request_started", "model_response_received", "tool_requests",
+        "tool_completed", "finished"]
+    tool_event = next(data for event, data in events if event == "tool_requests")
+    assert tool_event["calls"] == [{
+        "name": "get_impact", "args": {"symbols": [Q("auth", "login")],
+                                       "for_qname": Q("auth", "login")}}]
+
+
+def test_dismissing_the_last_candidate_also_finishes_empty(tmp_path):
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    class DismissAllModel:
+        def bind_tools(self, tools):
+            return self
+
+        def invoke(self, messages):
+            return AIMessage(content="", tool_calls=[{
+                "name": "update_review_item", "id": "dismiss-1", "args": {
+                    "qname": Q("auth", "login"), "state": "dismissed",
+                    "reason": "no regression introduced by this change"}}])
+
+    result = run_review(config, conn, model=DismissAllModel(),
+                        diff="diff --git a/auth.py b/auth.py",
+                        symbols=[Q("auth", "login")])
+
+    assert result["failure_reason"] is None
+    assert result["review_complete"] is True
+    assert result["findings"] == []
+    assert result["confirmed_findings"] == []
+    assert result["review_items"][Q("auth", "login")]["state"] == "dismissed"
+
+
+class UnknownToolRecoveryModel:
+    """Mixes a valid action with an unknown tool, then recovers and resolves."""
 
     def __init__(self):
-        self.requested_actions = 0
+        self.turn = 0
 
     def bind_tools(self, tools):
         return self
 
     def invoke(self, messages):
-        tool_messages = [message for message in messages
-                         if isinstance(message, ToolMessage)]
-        rejected = [message for message in tool_messages
-                    if "budget is exhausted" in str(message.content)]
-        if rejected:
-            assert {message.tool_call_id for message in rejected} == {"impact-51", "impact-52"}
-            return AIMessage(content="", tool_calls=[{
-                "name": "submit_review", "id": "submit-final", "args": {
-                    "findings": [], "affected_symbols": [], "affected_files": [],
-                    "affected_entries": [], "tests": [],
-                }}])
-        action_count = self.requested_actions
-        self.requested_actions += 2
+        if self.turn == 0:
+            response = AIMessage(content="", tool_calls=[
+                {"name": "get_impact", "id": "impact-mixed",
+                 "args": {"symbols": [Q("auth", "login")]}},
+                {"name": "not_a_tool", "id": "unknown-1", "args": {}}])
+        elif self.turn == 1:
+            # The nudge node answered both mixed calls with rejections.
+            response = AIMessage(content="", tool_calls=[{
+                "name": "get_impact", "id": "impact-recovered",
+                "args": {"symbols": [Q("auth", "login")],
+                         "for_qname": Q("auth", "login")}}])
+        else:
+            response = AIMessage(content="", tool_calls=[{
+                "name": "update_review_item", "id": "confirm-recovered", "args": {
+                    "qname": Q("auth", "login"), "state": "confirmed",
+                    "finding": _finding()}}])
+        self.turn += 1
+        return response
+
+
+def test_graph_replies_to_every_unusable_tool_call_before_retrying(tmp_path):
+    """A turn mixing an action with an unknown tool is nudged, never partially run."""
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    result = run_review(config, conn, model=UnknownToolRecoveryModel(),
+                        diff="diff --git a/auth.py b/auth.py",
+                        symbols=[Q("auth", "login")])
+
+    assert result["failure_reason"] is None
+    assert result["review_complete"] is True
+    assert result["tool_calls"] == [
+        "get_impact", "not_a_tool", "get_impact", "update_review_item"]
+    assert [item["status"] for item in result["tool_trace"]] == [
+        "rejected_protocol", "rejected_protocol", "executed", "executed"]
+
+
+class BudgetExhaustedModel:
+    """Requests two read-only calls every turn until the action budget ends."""
+
+    def __init__(self):
+        self.turn = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        first = self.turn * 2 + 1
+        self.turn += 1
         return AIMessage(content="", tool_calls=[
-            {"name": "get_impact", "id": f"impact-{action_count + 1}",
+            {"name": "get_impact", "id": f"impact-{first}",
              "args": {"symbols": [Q("auth", "login")]}},
-            {"name": "get_impact", "id": f"impact-{action_count + 2}",
-             "args": {"symbols": [Q("auth", "login")]}},
-        ])
+            {"name": "get_impact", "id": f"impact-{first + 1}",
+             "args": {"symbols": [Q("auth", "login")]}}])
+
+
+def test_budget_exhaustion_with_open_candidates_is_a_failure(tmp_path):
+    """No terminal handshake remains: exceeding the budget with items unresolved fails."""
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    result = run_review(config, conn, model=BudgetExhaustedModel(),
+                        diff="diff --git a/auth.py b/auth.py",
+                        symbols=[Q("auth", "login")])
+
+    assert result["failure_reason"] is not None
+    assert "unresolved" in result["failure_reason"]
+    assert Q("auth", "login") in result["failure_reason"]
+    assert result["tool_call_count"] == 50
+    assert result["tool_request_count"] == 50
+    assert all(item["status"] == "executed"
+               for item in result["tool_trace"][:50])
+    assert result["review_complete"] is False
+    assert result["findings"] == []
 
 
 class Utf8CheckingModel:
@@ -106,32 +211,79 @@ class Utf8CheckingModel:
 
         json.dumps([message.model_dump() for message in messages],
                    ensure_ascii=False).encode("utf-8")
+        if any(isinstance(message, ToolMessage) for message in messages):
+            return AIMessage(content="", tool_calls=[{
+                "name": "update_review_item", "id": "confirm-utf8", "args": {
+                    "qname": Q("auth", "login"), "state": "confirmed",
+                    "finding": _finding()}}])
         return AIMessage(content="", tool_calls=[{
-            "name": "submit_review", "id": "submit-utf8", "args": {
-                "findings": [], "affected_symbols": [], "affected_files": [],
-                "affected_entries": [], "tests": [],
-            }}])
+            "name": "get_impact", "id": "impact-utf8",
+            "args": {"symbols": [Q("auth", "login")],
+                     "for_qname": Q("auth", "login")}}])
+
+
+def test_graph_sanitizes_lone_surrogates_before_model_invocation(tmp_path):
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    result = run_review(config, conn, model=Utf8CheckingModel(),
+                        diff="diff --git a/auth.py b/auth.py\n+\udcaf",
+                        symbols=[Q("auth", "login")])
+
+    assert result["failure_reason"] is None
+    assert result["review_complete"] is True
 
 
 class ForbiddenReadModel:
-    """Attempts a protected read, then submits after receiving its denial."""
+    """Attempts a protected read, then gathers evidence and confirms."""
+
+    def __init__(self):
+        self.turn = 0
 
     def bind_tools(self, tools):
         return self
 
     def invoke(self, messages):
-        tool_messages = [message for message in messages
-                         if isinstance(message, ToolMessage)]
-        if tool_messages:
-            assert '"status": "rejected_policy"' in str(tool_messages[-1].content)
-            return AIMessage(content="", tool_calls=[{
-                "name": "submit_review", "id": "submit-policy", "args": {
-                    "findings": [], "affected_symbols": [], "affected_files": [],
-                    "affected_entries": [], "tests": [],
-                }}])
-        return AIMessage(content="", tool_calls=[{
-            "name": "read_file", "id": "protected-read",
-            "args": {"path": ".env", "start_line": 1, "end_line": 1}}])
+        if self.turn == 0:
+            response = AIMessage(content="", tool_calls=[{
+                "name": "read_file", "id": "protected-read",
+                "args": {"path": ".env", "start_line": 1, "end_line": 1}}])
+        elif self.turn == 1:
+            response = AIMessage(content="", tool_calls=[{
+                "name": "get_impact", "id": "impact-safe",
+                "args": {"symbols": [Q("auth", "login")],
+                         "for_qname": Q("auth", "login")}}])
+        else:
+            response = AIMessage(content="", tool_calls=[{
+                "name": "update_review_item", "id": "confirm-safe", "args": {
+                    "qname": Q("auth", "login"), "state": "confirmed",
+                    "finding": _finding()}}])
+        self.turn += 1
+        return response
+
+
+def test_toolnode_policy_denial_is_traced_without_counting_as_execution(tmp_path):
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    result = run_review(config, conn, model=ForbiddenReadModel(),
+                        diff="diff --git a/auth.py b/auth.py",
+                        symbols=[Q("auth", "login")])
+
+    assert result["failure_reason"] is None
+    assert result["tool_request_count"] == 3
+    assert result["tool_call_count"] == 2
+    assert [item["status"] for item in result["tool_trace"]] == [
+        "rejected_policy", "executed", "executed"]
+    assert result["files_read"] == []
 
 
 class ContextCompactingModel:
@@ -150,161 +302,22 @@ class ContextCompactingModel:
             assert tool_ids == set()
             response = AIMessage(content="", tool_calls=[{
                 "name": "get_impact", "id": "impact-first",
-                "args": {"symbols": [Q("auth", "login")]}}])
+                "args": {"symbols": [Q("auth", "login")],
+                         "for_qname": Q("auth", "login")}}])
         elif self.turn == 1:
             assert tool_ids == {"impact-first"}
             response = AIMessage(content="", tool_calls=[{
                 "name": "get_impact", "id": "impact-second",
-                "args": {"symbols": [Q("auth", "login")]}}])
+                "args": {"symbols": [Q("auth", "login")],
+                         "for_qname": Q("auth", "login")}}])
         else:
             assert tool_ids == {"impact-second"}
             response = AIMessage(content="", tool_calls=[{
-                "name": "submit_review", "id": "submit-compacted", "args": {
-                    "findings": [], "affected_symbols": [], "affected_files": [],
-                    "affected_entries": [], "tests": [],
-                }}])
-        self.turn += 1
-        return response
-
-
-class ReviewItemModel:
-    """Resolves the system-created qname candidate using real evidence."""
-
-    def __init__(self):
-        self.turn = 0
-
-    def bind_tools(self, tools):
-        return self
-
-    def invoke(self, messages):
-        if self.turn == 0:
-            response = AIMessage(content="", tool_calls=[{
-                "name": "get_impact", "id": "impact-review-item",
-                "args": {"symbols": [Q("auth", "login")],
-                         "for_qname": Q("auth", "login")}}])
-        elif self.turn == 1:
-            response = AIMessage(content="", tool_calls=[{
-                "name": "update_review_item", "id": "resolve-review-item", "args": {
+                "name": "update_review_item", "id": "confirm-compacted", "args": {
                     "qname": Q("auth", "login"), "state": "confirmed",
-                    "finding": {"file": "auth.py", "line": 1,
-                                "title": "Resolved by manifest",
-                                "description": "Uses impact evidence."},
-                }}])
-        else:
-            response = AIMessage(content="", tool_calls=[{
-                "name": "submit_review", "id": "submit-review-item", "args": {
-                    "findings": [{"file": "auth.py", "line": 2,
-                                  "title": "Unconfirmed model output",
-                                  "description": "Must be filtered."}],
-                    "affected_symbols": [], "affected_files": [],
-                    "affected_entries": [], "tests": [],
-                }}])
+                    "finding": _finding()}}])
         self.turn += 1
         return response
-
-
-def test_graph_runs_impact_then_terminal_submission(tmp_path):
-    config = load_config(FIX)
-    config.repo_path = FIX
-    config.db_path = str(tmp_path / "index.db")
-    conn = connect(config.db_path)
-    init_schema(conn)
-    rebuild(config, conn)
-
-    events = []
-    result = run_review(config, conn, model=ScriptedModel(), diff="diff --git a/auth.py b/auth.py",
-                        symbols=[Q("auth", "login")],
-                        progress=lambda event, data: events.append((event, data)))
-
-    assert result["failure_reason"] is None
-    assert result["findings"][0]["title"] == "Scripted finding"
-    assert result["tool_calls"] == ["get_impact", "submit_review"]
-    assert result["tool_call_count"] == 1
-    assert result["tool_trace"][0]["tool"] == "get_impact"
-    assert result["tool_trace"][0]["tool_call_id"] == "impact-1"
-    assert [item["status"] for item in result["tool_trace"]] == ["executed", "executed"]
-    assert result["initial_context"]["change_summary_chars"] > 0
-    assert [event for event, _ in events] == [
-        "summary_ready", "agent_started", "model_request_started",
-        "model_response_received", "tool_requests", "tool_completed",
-        "model_request_started", "model_response_received", "tool_requests", "finished"]
-    tool_event = next(data for event, data in events if event == "tool_requests")
-    assert tool_event["calls"] == [{
-        "name": "get_impact", "args": {"symbols": [Q("auth", "login")]}}]
-
-
-def test_graph_replies_to_every_mixed_tool_call_before_retrying(tmp_path):
-    config = load_config(FIX)
-    config.repo_path = FIX
-    config.db_path = str(tmp_path / "index.db")
-    conn = connect(config.db_path)
-    init_schema(conn)
-    rebuild(config, conn)
-
-    result = run_review(config, conn, model=MixedToolCallModel(),
-                        diff="diff --git a/auth.py b/auth.py",
-                        symbols=[Q("auth", "login")])
-
-    assert result["failure_reason"] is None
-    assert result["tool_calls"] == ["get_impact", "submit_review", "submit_review"]
-    assert [item["status"] for item in result["tool_trace"]] == [
-        "rejected_protocol", "rejected_protocol", "executed"]
-
-
-def test_graph_replies_to_budget_rejected_tool_calls_before_final_submission(tmp_path):
-    config = load_config(FIX)
-    config.repo_path = FIX
-    config.db_path = str(tmp_path / "index.db")
-    conn = connect(config.db_path)
-    init_schema(conn)
-    rebuild(config, conn)
-
-    result = run_review(config, conn, model=BudgetLimitedModel(),
-                        diff="diff --git a/auth.py b/auth.py",
-                        symbols=[Q("auth", "login")])
-
-    assert result["failure_reason"] is None
-    assert result["tool_call_count"] == 50
-    assert result["tool_request_count"] == 50
-    assert result["tool_calls"][-1] == "submit_review"
-    assert all(item["status"] == "executed" for item in result["tool_trace"][:50])
-    assert [item["status"] for item in result["tool_trace"][50:]] == [
-        "rejected_budget", "rejected_budget", "executed"]
-
-
-def test_graph_sanitizes_lone_surrogates_before_model_invocation(tmp_path):
-    config = load_config(FIX)
-    config.repo_path = FIX
-    config.db_path = str(tmp_path / "index.db")
-    conn = connect(config.db_path)
-    init_schema(conn)
-    rebuild(config, conn)
-
-    result = run_review(config, conn, model=Utf8CheckingModel(),
-                        diff="diff --git a/auth.py b/auth.py\n+\udcaf",
-                        symbols=[Q("auth", "login")])
-
-    assert result["failure_reason"] is None
-
-
-def test_toolnode_policy_denial_is_traced_without_counting_as_execution(tmp_path):
-    config = load_config(FIX)
-    config.repo_path = FIX
-    config.db_path = str(tmp_path / "index.db")
-    conn = connect(config.db_path)
-    init_schema(conn)
-    rebuild(config, conn)
-
-    result = run_review(config, conn, model=ForbiddenReadModel(),
-                        diff="diff --git a/auth.py b/auth.py",
-                        symbols=[Q("auth", "login")])
-
-    assert result["failure_reason"] is None
-    assert result["tool_request_count"] == 1
-    assert result["tool_call_count"] == 0
-    assert [item["status"] for item in result["tool_trace"]] == [
-        "rejected_policy", "executed"]
-    assert result["files_read"] == []
 
 
 def test_model_context_keeps_only_the_latest_completed_tool_exchange(tmp_path):
@@ -320,7 +333,8 @@ def test_model_context_keeps_only_the_latest_completed_tool_exchange(tmp_path):
                         symbols=[Q("auth", "login")])
 
     assert result["failure_reason"] is None
-    assert result["tool_call_count"] == 2
+    assert result["tool_call_count"] == 3
+    assert result["review_complete"] is True
 
 
 def test_system_created_qname_candidate_can_be_confirmed(tmp_path):
@@ -331,20 +345,20 @@ def test_system_created_qname_candidate_can_be_confirmed(tmp_path):
     init_schema(conn)
     rebuild(config, conn)
 
-    result = run_review(config, conn, model=ReviewItemModel(),
+    result = run_review(config, conn, model=ConfirmingModel(),
                         diff="diff --git a/auth.py b/auth.py",
                         symbols=[Q("auth", "login")])
 
     item = result["review_items"][Q("auth", "login")]
     assert item["state"] == "confirmed"
-    assert item["evidence_refs"] == ["impact-review-item"]
+    assert item["evidence_refs"] == ["impact-1"]
     assert result["confirmed_findings"] == [item["finding"]]
     assert result["findings"] == result["confirmed_findings"]
     assert result["review_complete"] is True
 
 
 class InventedEvidenceModel:
-    """Confirms with fabricated file:line evidence_refs after real evidence."""
+    """Confirms with fabricated evidence_refs after real evidence."""
 
     def __init__(self):
         self.turn = 0
@@ -358,22 +372,13 @@ class InventedEvidenceModel:
                 "name": "get_impact", "id": "impact-real",
                 "args": {"symbols": [Q("auth", "login")],
                          "for_qname": Q("auth", "login")}}])
-        elif self.turn == 1:
+        else:
             # The model invents file:line refs instead of tool call ids.
             response = AIMessage(content="", tool_calls=[{
                 "name": "update_review_item", "id": "resolve-invented", "args": {
                     "qname": Q("auth", "login"), "state": "confirmed",
-                    "finding": {"file": "auth.py", "line": 1,
-                                "title": "Resolved by manifest",
-                                "description": "Uses impact evidence."},
-                    "evidence_refs": ["auth.py:1", "not-a-call-id"],
-                }}])
-        else:
-            response = AIMessage(content="", tool_calls=[{
-                "name": "submit_review", "id": "submit-invented", "args": {
-                    "findings": [], "affected_symbols": [], "affected_files": [],
-                    "affected_entries": [], "tests": [],
-                }}])
+                    "finding": _finding(),
+                    "evidence_refs": ["auth.py:1", "not-a-call-id"]}}])
         self.turn += 1
         return response
 
@@ -398,7 +403,7 @@ def test_confirm_ignores_invented_evidence_refs(tmp_path):
 
 
 class NoEvidenceModel:
-    """Confirms a candidate without ever recording evidence via for_qname."""
+    """Confirms without recorded evidence, then dismisses when rejected."""
 
     def __init__(self):
         self.turn = 0
@@ -407,24 +412,16 @@ class NoEvidenceModel:
         return self
 
     def invoke(self, messages):
-        tool_messages = [message for message in messages
-                         if isinstance(message, ToolMessage)]
-        if tool_messages and self.turn == 1:
-            assert '"status": "rejected_policy"' in str(tool_messages[-1].content)
         if self.turn == 0:
             response = AIMessage(content="", tool_calls=[{
                 "name": "update_review_item", "id": "resolve-no-evidence", "args": {
                     "qname": Q("auth", "login"), "state": "confirmed",
-                    "finding": {"file": "auth.py", "line": 1,
-                                "title": "No evidence",
-                                "description": "Never investigated."},
-                }}])
+                    "finding": _finding()}}])
         else:
             response = AIMessage(content="", tool_calls=[{
-                "name": "submit_review", "id": "submit-no-evidence", "args": {
-                    "findings": [], "affected_symbols": [], "affected_files": [],
-                    "affected_entries": [], "tests": [],
-                }}])
+                "name": "update_review_item", "id": "dismiss-no-evidence", "args": {
+                    "qname": Q("auth", "login"), "state": "dismissed",
+                    "reason": "cannot verify without evidence"}}])
         self.turn += 1
         return response
 
@@ -443,10 +440,13 @@ def test_confirm_without_recorded_evidence_is_rejected(tmp_path):
                         symbols=[Q("auth", "login")])
 
     item = result["review_items"][Q("auth", "login")]
-    assert item["state"] == "candidate"
+    # The evidence-less confirm was rejected; only the later dismiss took effect.
+    assert item["state"] == "dismissed"
     statuses = [t["status"] for t in result["tool_trace"]]
     assert "rejected_policy" in statuses
-    assert result["review_complete"] is False
+    assert result["confirmed_findings"] == []
+    assert result["findings"] == []
+    assert result["review_complete"] is True
 
 
 class InvalidToolCallModel:
@@ -468,16 +468,21 @@ class InvalidToolCallModel:
         self.turns += 1
         if self.turns == 1:
             return AIMessage(content="", invalid_tool_calls=[{
-                "id": "call-malformed-1", "name": "submit_review",
-                "args": '{"findings": [', "error": "not valid JSON"}])
-        paired = [message for message in messages
-                  if isinstance(message, ToolMessage)
-                  and message.tool_call_id == "call-malformed-1"]
-        assert paired, "the malformed tool call must be paired with a ToolMessage"
+                "id": "call-malformed-1", "name": "get_impact",
+                "args": '{"symbols": [', "error": "not valid JSON"}])
+        if self.turns == 2:
+            paired = [message for message in messages
+                      if isinstance(message, ToolMessage)
+                      and message.tool_call_id == "call-malformed-1"]
+            assert paired, "the malformed tool call must be paired with a ToolMessage"
+            return AIMessage(content="", tool_calls=[{
+                "name": "get_impact", "id": "impact-clean",
+                "args": {"symbols": [Q("auth", "login")],
+                         "for_qname": Q("auth", "login")}}])
         return AIMessage(content="", tool_calls=[{
-            "name": "submit_review", "id": "submit-clean", "args": {
-                "findings": [], "affected_symbols": [], "affected_files": [],
-                "affected_entries": [], "tests": []}}])
+            "name": "update_review_item", "id": "confirm-clean", "args": {
+                "qname": Q("auth", "login"), "state": "confirmed",
+                "finding": _finding()}}])
 
 
 def test_malformed_tool_call_arguments_are_paired_with_rejection(tmp_path):
@@ -494,6 +499,7 @@ def test_malformed_tool_call_arguments_are_paired_with_rejection(tmp_path):
                         symbols=[Q("auth", "login")])
 
     assert result["failure_reason"] is None
+    assert result["review_complete"] is True
 
 
 def _review_item(state: str = "candidate", refs: tuple[str, ...] = ()) -> ReviewItem:
@@ -551,21 +557,8 @@ def test_resolve_review_item_confirm_gate_and_dismiss():
     assert reason and reason.startswith("qname")
 
 
-class FabricatedEntriesModel:
-    """Submits a report whose affected_entries the runner must override."""
-
-    def bind_tools(self, tools):
-        return self
-
-    def invoke(self, messages):
-        return AIMessage(content="", tool_calls=[{
-            "name": "submit_review", "id": "submit-entries", "args": {
-                "findings": [], "affected_symbols": [], "affected_files": [],
-                "affected_entries": ["model-fabricated-entry"], "tests": []}}])
-
-
 def test_affected_entries_are_filled_deterministically(tmp_path):
-    """affected_entries come from the graph, overriding what the model authors."""
+    """affected_entries come from the graph, not from anything the model authors."""
     from code_review_ai.impact import affected_entries as graph_entries
 
     config = load_config(FIX)
@@ -575,10 +568,71 @@ def test_affected_entries_are_filled_deterministically(tmp_path):
     init_schema(conn)
     rebuild(config, conn)
 
-    result = run_review(config, conn, model=FabricatedEntriesModel(),
+    result = run_review(config, conn, model=ConfirmingModel(),
                         diff="diff --git a/auth.py b/auth.py",
                         symbols=[Q("auth", "login")])
 
     expected = sorted(graph_entries(conn, Q("auth", "login")))
     assert result["affected_entries"] == expected
-    assert "model-fabricated-entry" not in result["affected_entries"]
+
+
+class TerminalSubmitModel:
+    """The native_agent profile keeps a terminal tool; a lone call ends the run."""
+
+    def __init__(self):
+        self.turn = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        if self.turn == 0:
+            response = AIMessage(content="", tool_calls=[{
+                "name": "read_file", "id": "native-read",
+                "args": {"path": "auth.py", "start_line": 1, "end_line": 5}}])
+        else:
+            response = AIMessage(content="", tool_calls=[{
+                "name": "submit_review", "id": "native-submit", "args": {
+                    "findings": [_finding(line=2)], "affected_symbols": [],
+                    "affected_files": [], "affected_entries": [], "tests": []}}])
+        self.turn += 1
+        return response
+
+
+def test_terminal_submit_still_ends_when_a_profile_offers_it(tmp_path):
+    """Profiles without a candidate-resolving tool (native_agent) keep submit_review."""
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+
+    result = run_review(config, conn, model=TerminalSubmitModel(),
+                        diff="diff --git a/auth.py b/auth.py",
+                        symbols=[Q("auth", "login")],
+                        tool_names=["read_file", "search_code", "submit_review"])
+
+    assert result["failure_reason"] is None
+    # No candidate tool exists in this profile, so the report is the model's.
+    assert result["findings"] == [_finding(line=2)]
+    assert result["tool_calls"] == ["read_file", "submit_review"]
+    assert result["tool_trace"][-1]["tool"] == "submit_review"
+
+
+def test_agent_get_impact_tool_omits_affected_entries(tmp_path):
+    """The review agent's get_impact carries callers/callees, not flow entries."""
+    config = load_config(FIX)
+    config.repo_path = FIX
+    config.db_path = str(tmp_path / "index.db")
+    conn = connect(config.db_path)
+    init_schema(conn)
+    rebuild(config, conn)
+    registry = create_tool_registry(config, conn)
+    tool = next(item for item in registry.action_tools()
+                if item.name == "get_impact")
+    output = tool.invoke({"symbols": [Q("auth", "login")]})
+    assert isinstance(output, str)
+    assert '"affected_entries"' not in output
+    assert '"upstream"' in output
+    conn.close()

@@ -6,7 +6,7 @@ def test_progress_display_tracks_model_rounds_and_final_result():
     display.on_event("incremental_sync_finished", {})
     display.on_event("summary_ready", {"changed_symbols": 2,
                                        "uncovered_changes": 1})
-    display.on_event("model_request_started", {"turn": 1, "final_only": False})
+    display.on_event("model_request_started", {"turn": 1})
     assert display.active_model_call is True
     display.on_event("model_response_received", {"turn": 1,
                                                    "response_chars": 42,

@@ -192,11 +192,16 @@ def create_tool_registry(config, conn) -> ToolRegistry:
     def impact_handler(symbols: list[str] | None = None,
                        files: list[str] | None = None,
                        for_qname: str | None = None) -> str:
-        """Return one-hop callers, callees and affected entries for changed symbols."""
+        """Return one-hop callers and callees for changed symbols."""
         try:
             changed = detect_changed_symbols(config, symbols=symbols, files=files)
             result = get_impact(conn, changed, max_nodes_per_direction=10,
                                 include_call_sites=True, max_level=1)
+            # The report's affected_entries are filled deterministically by the
+            # runner, so the model does not need the (broad, flow-derived) entry
+            # list back from this tool; dropping it trims context.
+            for symbol_result in result:
+                symbol_result.pop("affected_entries", None)
             return json.dumps(result, ensure_ascii=False)
         except (RuntimeError, ValueError) as exc:
             return _tool_error(exc)

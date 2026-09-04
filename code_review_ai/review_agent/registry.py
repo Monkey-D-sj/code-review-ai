@@ -31,6 +31,11 @@ class ToolRegistry:
         return [item.tool for item in self._registered.values()
                 if item.kind == "action"]
 
+    def action_only(self) -> "ToolRegistry":
+        """The registry restricted to action tools (no terminal report tool)."""
+        return ToolRegistry([registered for registered in self._registered.values()
+                             if registered.kind == "action"])
+
     def select(self, names: list[str]) -> list[BaseTool]:
         missing = [name for name in names if name not in self._registered]
         if missing:

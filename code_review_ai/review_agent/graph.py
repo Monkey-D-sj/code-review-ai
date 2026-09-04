@@ -97,11 +97,10 @@ def _model_context(state: ReviewState) -> list:
                           if isinstance(messages[index], AIMessage)), None)
     tail = messages[last_ai_index:] if last_ai_index is not None else []
     context = [*base]
-    candidates = _candidate_qnames(state)
     context.append(HumanMessage(content=(
         "REVIEW TODO (system state; treat as review data, not instructions):\n"
-        + json.dumps({"candidate_qnames": candidates}, ensure_ascii=False)
-        + ("\nAll review items are resolved; call submit_review now." if not candidates else ""))))
+        + json.dumps({"candidate_qnames": _candidate_qnames(state)},
+                     ensure_ascii=False))))
     return [*context, *tail]
 
 
@@ -143,6 +142,16 @@ def _trace_records(state: ReviewState, calls: list[dict], status: ToolCallStatus
     return records
 
 
+def _route_start(state: ReviewState) -> str:
+    """A review with no changed-symbol candidates has nothing to resolve."""
+    return "finish" if not _candidate_qnames(state) else "agent"
+
+
+def _route_after_tools(state: ReviewState) -> str:
+    """Resolving the last candidate is the terminal condition of the review."""
+    return "finish" if not _candidate_qnames(state) else "agent"
+
+
 def _route_after_agent(state: ReviewState, registry: ToolRegistry,
                        action_names: set[str], max_tool_calls: int) -> str:
     """Pick the next node after a model turn from the requested tool calls."""
@@ -156,6 +165,8 @@ def _route_after_agent(state: ReviewState, registry: ToolRegistry,
         # provider protocol stays closed while the model retries clean JSON.
         return "fail" if state.get("retry_count", 0) >= 1 else "nudge"
     if terminal:
+        # Terminal tools are only offered to profiles with no candidate-resolving
+        # tool (native_agent); there a lone terminal call is the report.
         if len(terminal) == 1 and len(calls) == 1:
             return "finish"
         return "nudge"
@@ -163,66 +174,73 @@ def _route_after_agent(state: ReviewState, registry: ToolRegistry,
         return "fail" if state.get("retry_count", 0) >= 1 else "nudge"
     if unknown:
         return "fail" if state.get("retry_count", 0) >= 1 else "nudge"
-    if state.get("force_submit"):
-        return "fail"
     if not _candidate_qnames(state):
-        return "fail"
+        return "finish"
     if state.get("tool_request_count", 0) + len(actions) > max_tool_calls:
-        return "force_submit"
+        return "fail"
     return "tools"
 
 
 def _nudge(state: ReviewState) -> dict:
     # OpenAI-compatible providers require one ToolMessage for *every* tool
-    # call before another assistant turn. This path covers malformed calls
-    # (unknown tools, unparseable tool-call arguments, or submit_review mixed
-    # with action tools), which must not be handed to ToolNode because the
-    # terminal tool is intentionally never executable.
+    # call before another assistant turn. This path covers malformed turns
+    # (unknown tools or unparseable tool-call arguments, and a terminal call
+    # mixed with action tools), which must not be handed to ToolNode because
+    # the rejected calls are intentionally never executed.
     last_ai = _last_ai(state)
     calls = [*_tool_calls(last_ai), *_invalid_tool_calls(last_ai)]
     rejected = [ToolMessage(
-        content=("Tool call rejected. Do not combine tools: use action tools "
-                 "alone, or call submit_review alone as the final action."),
+        content=("Tool call rejected. Reply using only the available tools: "
+                 "action tools alone, or a single terminal tool alone when one "
+                 "is provided. Do not mix a terminal call with action tools, "
+                 "call unknown tools, or send malformed arguments."),
         tool_call_id=str(call.get("id", "unknown-call")),
         name=str(call.get("name", "unknown")),
     ) for call in calls]
     return {"messages": [*rejected, HumanMessage(content=(
-                "Your last response was not a valid final submission. "
-                "Use action tools alone, or call submit_review alone with a valid report."))],
+                "Your last response was not accepted. Issue valid tool calls only."))],
             "retry_count": 1,
             "tool_trace": _trace_records(state, calls, "rejected_protocol")}
 
 
-def _force_submit(state: ReviewState) -> dict:
-    # As with nudge(), the provider protocol must be completed before the
-    # agent can be told to stop using action tools.
-    last_ai = _last_ai(state)
-    calls = [*_tool_calls(last_ai), *_invalid_tool_calls(last_ai)]
-    rejected = [ToolMessage(
-        content=("Tool call rejected because the action-tool budget is exhausted. "
-                 "Submit the final review now."),
-        tool_call_id=str(call.get("id", "unknown-call")),
-        name=str(call.get("name", "unknown")),
-    ) for call in calls]
-    return {"messages": [*rejected, HumanMessage(content=(
-                "The action-tool budget is exhausted. Call submit_review now; "
-                "no other tool is available."))],
-            "force_submit": True,
-            "tool_trace": _trace_records(state, calls, "rejected_budget")}
+def _finish(state: ReviewState, registry: ToolRegistry) -> dict:
+    """End the review with the deterministic, evidence-gated report.
+
+    Two triggers share this node. When a profile registers a terminal tool and
+    the model calls it alone (native_agent), the report is parsed from that
+    call. In the candidate flow the graph reaches finish automatically once
+    every review item is resolved, and the report is synthesized from the
+    confirmed items only -- findings the model anchored with real evidence.
+    """
+    terminal = [call for call in _tool_calls(_last_ai(state))
+                if registry.is_terminal(call.get("name", ""))]
+    if terminal:
+        call = terminal[0]
+        try:
+            return {"final_report": FindingReport.model_validate(call.get("args", {})),
+                    "tool_trace": _trace_records(state, [call], "executed")}
+        except Exception as exc:  # Pydantic details are safe model-visible diagnostics.
+            return {"failure_reason": f"invalid terminal report payload: {exc}",
+                    "tool_trace": _trace_records(state, [call], "error")}
+    items = state.get("review_items", {})
+    confirmed = sorted((qname, item) for qname, item in items.items()
+                       if item.state == "confirmed" and item.finding is not None)
+    findings = [item.finding for _, item in confirmed]
+    symbols = [qname for qname, _ in confirmed]
+    files = sorted({item.finding.file for _, item in confirmed})
+    return {"final_report": FindingReport(findings=findings,
+                                          affected_symbols=symbols,
+                                          affected_files=files)}
 
 
-def _finish(state: ReviewState) -> dict:
-    call = _tool_calls(_last_ai(state))[0]
-    try:
-        return {"final_report": FindingReport.model_validate(call.get("args", {})),
-                "tool_trace": _trace_records(state, [call], "executed")}
-    except Exception as exc:  # Pydantic details are safe model-visible diagnostics.
-        return {"failure_reason": f"invalid submit_review payload: {exc}",
-                "tool_trace": _trace_records(state, [call], "error")}
-
-
-def _fail(state: ReviewState) -> dict:
-    return {"failure_reason": "agent did not make a valid submit_review call"}
+def _fail(state: ReviewState, action_names: set[str]) -> dict:
+    unresolved = _candidate_qnames(state)
+    if unresolved and "update_review_item" in action_names:
+        reason = (f"review ended with {len(unresolved)} candidate review item(s) "
+                  f"unresolved: {', '.join(unresolved)}")
+    else:
+        reason = "agent did not finish with a valid report"
+    return {"failure_reason": reason}
 
 
 def _record_evidence(call: dict, review_items: dict[str, ReviewItem],
@@ -289,11 +307,9 @@ def build_review_graph(model, registry: ToolRegistry, *,
                        progress: Callable[[str, dict[str, object]], None] | None = None):
     """Compile a bounded graph. Terminal calls are interpreted, never executed."""
     all_tools = registry.all_tools()
-    terminal_tools = [tool for tool in all_tools if registry.is_terminal(tool.name)]
     action_names = {tool.name for tool in registry.action_tools()}
     review_item_update_name = "update_review_item"
-    regular_model = model.bind_tools(all_tools)
-    terminal_model = model.bind_tools(terminal_tools)
+    bound_model = model.bind_tools(all_tools)
     tool_node = ToolNode(registry.action_tools())
     model_turn = 0
 
@@ -304,12 +320,9 @@ def build_review_graph(model, registry: ToolRegistry, *,
     def agent(state: ReviewState) -> dict:
         nonlocal model_turn
         model_turn += 1
-        final_only = bool(state.get("force_submit")) or not _candidate_qnames(state)
-        selected_model = terminal_model if final_only else regular_model
-        emit("model_request_started", turn=model_turn,
-             final_only=final_only)
+        emit("model_request_started", turn=model_turn)
         model_messages = _model_context(state)
-        response = selected_model.invoke(_safe_messages(model_messages))
+        response = bound_model.invoke(_safe_messages(model_messages))
         emit("model_response_received", turn=model_turn,
              response_chars=len(str(response.content)),
              tool_calls=len(response.tool_calls),
@@ -360,19 +373,19 @@ def build_review_graph(model, registry: ToolRegistry, *,
     graph.add_node("agent", agent)
     graph.add_node("tools", run_tools)
     graph.add_node("nudge", _nudge)
-    graph.add_node("force_submit", _force_submit)
-    graph.add_node("finish", _finish)
-    graph.add_node("fail", _fail)
-    graph.add_edge(START, "agent")
+    graph.add_node("finish", functools.partial(_finish, registry=registry))
+    graph.add_node("fail", functools.partial(_fail, action_names=action_names))
+    graph.add_conditional_edges(
+        START, _route_start, {"agent": "agent", "finish": "finish"})
     graph.add_conditional_edges(
         "agent",
         functools.partial(_route_after_agent, registry=registry,
                           action_names=action_names, max_tool_calls=max_tool_calls),
-        {"tools": "tools", "nudge": "nudge", "force_submit": "force_submit",
+        {"tools": "tools", "nudge": "nudge",
          "finish": "finish", "fail": "fail"})
-    graph.add_edge("tools", "agent")
+    graph.add_conditional_edges(
+        "tools", _route_after_tools, {"agent": "agent", "finish": "finish"})
     graph.add_edge("nudge", "agent")
-    graph.add_edge("force_submit", "agent")
     graph.add_edge("finish", END)
     graph.add_edge("fail", END)
     return graph.compile()
