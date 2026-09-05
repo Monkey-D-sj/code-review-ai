@@ -18,7 +18,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, ToolCall, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolCall,
+    ToolMessage,
+)
 from langchain_core.runnables import Runnable
 from pydantic import ValidationError
 
@@ -42,6 +48,9 @@ from code_review_ai.review_loop.schemas import (
 
 # A sentinel bound on model turns so the loop always terminates.
 MAX_TURNS = 50
+# How many consecutive empty (no tool_calls) turns with unresolved rows are
+# tolerated before the run fails; each one before the cap is nudged instead.
+MAX_EMPTY_TURNS = 2
 
 
 @dataclass
@@ -55,6 +64,8 @@ class _LoopState:
     result: LoopResult
     hooks: Hooks = field(default_factory=Hooks)
     max_turns: int = MAX_TURNS
+    max_empty_turns: int = MAX_EMPTY_TURNS
+    empty_turns: int = 0  # consecutive empty turns with rows still unresolved
     turn: int = 0
 
     def emit(self, point: str, **context: object) -> None:
@@ -179,6 +190,20 @@ def _all_resolved(candidates: dict[str, ReviewItem]) -> bool:
     return all(item.state != "candidate" for item in candidates.values())
 
 
+def _unresolved_qnames(candidates: dict[str, ReviewItem]) -> list[str]:
+    return [item.qname for item in candidates.values() if item.state == "candidate"]
+
+
+def _nudge_message(candidates: dict[str, ReviewItem]) -> HumanMessage:
+    """One user turn pushing an empty-turn stop back to finish the worksheet."""
+    remaining = _unresolved_qnames(candidates)
+    content = ("尚有 candidate 未决。请对以下每一行调用 update_review_item 给出决定"
+               "（confirmed 附 finding / dismissed 附 reason）："
+               + ", ".join(remaining)
+               + "。全部行决完前不要以空轮结束。")
+    return HumanMessage(content=content)
+
+
 def _apply_update(state: _LoopState, call: ToolCall) -> None:
     """Resolve one candidate row from an ``update_review_item`` call.
 
@@ -248,16 +273,19 @@ def run_loop(
     hooks: Hooks | None = None,
     max_turns: int = MAX_TURNS,
     max_total_tokens: int | None = None,
+    max_empty_turns: int = MAX_EMPTY_TURNS,
 ) -> LoopResult:
     """Run the review loop until every candidate row is resolved.
 
     Each model turn may read code with the tools or call ``update_review_item``
-    to confirm/dismiss a candidate. The run ends when all candidates are
-    resolved (``review_complete``), or when the model stops requesting tools
-    while some rows remain unresolved (incomplete), or at ``max_turns`` / on a
-    provider failure / past ``max_total_tokens`` (``failure_reason`` -- the
-    token cap is checked right after each model turn, against the accumulated
-    provider-reported ``total_tokens``). The resolved worksheet is the result.
+    to confirm/dismiss a candidate. An empty turn (no tool calls) with rows
+    still unresolved is not a finish: it is nudged back with the pending rows,
+    and only ``max_empty_turns`` consecutive such turns fail the run. The run
+    otherwise ends when all candidates are resolved (``review_complete``), or at
+    ``max_turns`` / on a provider failure / past ``max_total_tokens``
+    (``failure_reason`` -- the token cap is checked right after each model turn,
+    against the accumulated provider-reported ``total_tokens``). The resolved
+    worksheet is the result.
     """
     tool_map = {spec.name: spec for spec in tools}
     state = _LoopState(
@@ -268,6 +296,7 @@ def run_loop(
         result=LoopResult(),
         hooks=hooks if hooks is not None else Hooks(),
         max_turns=max_turns,
+        max_empty_turns=max_empty_turns,
     )
     while True:
         if state.turn >= state.max_turns:
@@ -294,7 +323,19 @@ def run_loop(
         # that carries tool_calls from the tool replies that follow it.
         calls = response.tool_calls  # already a list[ToolCall]
         if not calls:
-            break  # the model stopped without resolving every row
+            if _all_resolved(state.candidates):
+                state.result.review_complete = True
+                break  # every row decided; the model's closing turn is fine
+            state.empty_turns += 1
+            if state.empty_turns > state.max_empty_turns:
+                state.result.failure_reason = (
+                    "agent stopped without resolving the worksheet: "
+                    f"{len(_unresolved_qnames(state.candidates))} candidate(s) "
+                    f"unresolved after {state.empty_turns} empty turn(s)")
+                break
+            state.messages.append(_nudge_message(state.candidates))
+            continue
+        state.empty_turns = 0  # the model acted; a later empty turn restarts
         for call in calls:
             _execute_call(state, call)
         if _all_resolved(state.candidates):

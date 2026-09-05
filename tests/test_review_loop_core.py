@@ -177,29 +177,45 @@ def test_dismissed_only_run_has_no_findings():
     assert result.items["app::run"].state == "dismissed"
 
 
-def test_model_stops_before_all_resolved_is_incomplete_not_a_report():
-    model = FakeModel([("no issues to flag.", [])])
+def test_unresolved_empty_turns_fail_after_the_nudge_cap():
+    # three consecutive empty turns, none resolving the row -> explicit failure,
+    # never a silent "incomplete with no reason"
+    model = FakeModel([("no issues to flag.", []),
+                       ("", []),
+                       ("", [])])
 
-    result = _run(model, _candidates("app::run"))
+    result = _run(model, _candidates("app::run"), max_empty_turns=2)
 
     assert result.review_complete is False
-    assert result.failure_reason is None
+    assert result.failure_reason is not None
+    assert "unresolved" in result.failure_reason
+    assert "1 candidate(s)" in result.failure_reason
     assert result.items["app::run"].state == "candidate"
     assert result.findings == []
+    assert result.tool_request_count == 0
 
 
-def test_stop_between_updates_leaves_remaining_rows_candidate():
+def test_empty_stop_between_updates_is_nudged_back_to_finish():
+    # an empty turn while rows remain unresolved is nudged (not finished), and
+    # the model comes back to resolve the leftover row
     model = FakeModel([("", [_confirm_update("app::a")]),
                        ("", [_dismiss_update("app::b")]),
-                       ("nothing else.", [])])
+                       ("clean up.", []),
+                       ("", [_dismiss_update("app::c")])])
 
     result = _run(model, _candidates("app::a", "app::b", "app::c"))
 
-    assert result.review_complete is False
+    assert result.review_complete is True
+    assert result.failure_reason is None
     assert result.items["app::a"].state == "confirmed"
     assert result.items["app::b"].state == "dismissed"
-    assert result.items["app::c"].state == "candidate"
+    assert result.items["app::c"].state == "dismissed"
     assert len(result.findings) == 1
+    # the nudge named the pending row so the model knew what to finish
+    nudges = [str(message.content) for batch in model.invoked
+              for message in batch
+              if message.type == "human" and "app::c" in str(message.content)]
+    assert nudges
 
 
 def test_invalid_update_payload_is_rejected_and_worksheet_untouched():

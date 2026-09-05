@@ -28,7 +28,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from code_review_ai.config import Config
 from code_review_ai.impact import affected_entries
-from code_review_ai.review_loop.loop import MAX_TURNS, run_loop
+from code_review_ai.review_loop.loop import MAX_EMPTY_TURNS, MAX_TURNS, run_loop
 from code_review_ai.review_loop.pricing import compute_cost
 from code_review_ai.review_loop.providers import build_review_model
 from code_review_ai.review_loop.schemas import (
@@ -169,28 +169,34 @@ def run_review(
     api_key_env: str = _API_KEY_ENV,
     max_turns: int | None = None,
     max_total_tokens: int | None = None,
+    max_empty_turns: int | None = None,
 ) -> LoopResult:
     """Run one structured code review from a change summary.
 
     ``summary`` is ``changes.build_change_summary`` output; its changed symbols
     become the worksheet. ``model`` may be injected (tests); otherwise one is
     built from env / ``.env``. ``max_total_tokens`` (``None`` = uncapped) stops
-    the loop once the provider-reported total exceeds it. Returns the resolved
-    worksheet (``items``, ``findings``, ``affected_entries``,
-    ``review_complete``), plus ``usage`` and the yuan ``cost`` computed from it
-    at the DeepSeek per-million rates (see ``compute_cost``).
+    the loop once the provider-reported total exceeds it; ``max_empty_turns``
+    bounds the nudges an unresolved empty-turn stop receives before failing.
+    Returns the resolved worksheet (``items``, ``findings``,
+    ``affected_entries``, ``review_complete``), plus ``usage`` and the yuan
+    ``cost`` computed from it at the DeepSeek per-million rates (see
+    ``compute_cost``).
     """
     if model is None:
         model = create_model(config, model_name=model_name, base_url=base_url,
                              api_key_env=api_key_env)
     if max_turns is None:
         max_turns = MAX_TURNS
+    if max_empty_turns is None:
+        max_empty_turns = MAX_EMPTY_TURNS
     items = worksheet_from_summary(summary)
     messages = build_initial_messages(prompt, summary, items, diff=diff)
     tools = [*make_tools(config, conn), update_review_tool()]
     result = run_loop(model, tools, candidates=items, initial_messages=messages,
                       hooks=hooks, max_turns=max_turns,
-                      max_total_tokens=max_total_tokens)
+                      max_total_tokens=max_total_tokens,
+                      max_empty_turns=max_empty_turns)
     if items:
         result.affected_entries = sorted({
             entry for item in items for entry in affected_entries(conn, item.qname)})
