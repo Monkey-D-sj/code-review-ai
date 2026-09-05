@@ -61,8 +61,15 @@ def test_read_file_returns_numbered_lines(repo):
 def test_read_file_blocks_escaping_sensitive_and_big_ranges(repo):
     assert _is_error(repo["read_file"].run(path="../secret", start_line=1, end_line=1))
     assert _is_error(repo["read_file"].run(path=".env", start_line=1, end_line=1))
-    assert _is_error(repo["read_file"].run(path="app.py", start_line=1, end_line=999))
+    assert _is_error(repo["read_file"].run(path="app.py", start_line=1, end_line=5000))
     assert _is_error(repo["read_file"].run(path="sub", start_line=1, end_line=1))
+
+
+def test_read_file_allows_wide_ranges_up_to_the_cap(repo):
+    # well past the old 200-line cap; returns the file's actual (short) lines
+    text = repo["read_file"].run(path="app.py", start_line=1, end_line=400)
+    assert not _is_error(text)
+    assert text.startswith("1: def login(user):")
 
 
 def test_search_code_finds_hits_and_no_matches(repo):
@@ -70,6 +77,16 @@ def test_search_code_finds_hits_and_no_matches(repo):
     assert "app.py:4:" in hits and "app.py:6:" in hits
 
     missed = repo["search_code"].run(query="no_such_thing", path=".")
+    assert missed == "(no matches)"
+
+
+def test_search_code_matches_any_of_pipe_separated_terms(repo):
+    # one call, several literal names across files (the rg "a|b|c" idiom)
+    hits = repo["search_code"].run(query="login|VALUE")
+    assert "app.py:" in hits and "sub/x.py:1:VALUE = 1" in hits
+
+    # neither term exists under sub/ -> no matches
+    missed = repo["search_code"].run(query="login|ghost_xyz", path="sub")
     assert missed == "(no matches)"
 
 

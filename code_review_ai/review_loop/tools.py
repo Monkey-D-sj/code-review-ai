@@ -14,6 +14,7 @@ classifies as ``error``; usable output returns plain text/JSON (``success``).
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from fnmatch import fnmatch
@@ -30,8 +31,8 @@ from code_review_ai.review_loop.schemas import (
     ToolSpec,
 )
 
-_MAX_READ_LINES = 200
-_MAX_READ_CHARS = 20_000
+_MAX_READ_LINES = 1_000
+_MAX_READ_CHARS = 60_000
 _MAX_READ_LINE_CHARS = 500
 _MAX_READ_FILE_BYTES = 8 * 1024 * 1024
 _MAX_QUERY_CHARS = 200
@@ -43,9 +44,10 @@ _MAX_FALLBACK_BYTES = 5 * 1024 * 1024
 _SENSITIVE_PARTS = {".git", ".code-review-ai"}
 
 _README = ("Read a bounded, line-numbered range of a text file inside the "
-           "repository (max 200 lines / 20k chars, single files only).")
-_SEARCH_DESC = ("Literal text search (ripgrep, regex unsupported) in a bounded "
-                "repo path; returns file:line:text hits.")
+           "repository (max 1000 lines / 60k chars, single files only).")
+_SEARCH_DESC = ("Literal text search (ripgrep) in a bounded repo path; separate "
+                "terms with '|' to match any of them (e.g. 'decrypt|encrypt'); "
+                "returns file:line:text hits.")
 _IMPACT_DESC = ("One-hop callers/callees and affected entries for the changed "
                 "symbols (or the files' diff symbols) you name, with call-site "
                 "evidence on direct neighbors.")
@@ -149,9 +151,21 @@ def _matches_glob(path: Path, root: Path, pattern: str) -> bool:
     return fnmatch(relative, pattern) or fnmatch(path.name, pattern)
 
 
+def _split_terms(query: str) -> list[str]:
+    """Split a '|'-separated query into literal terms (empty parts dropped).
+
+    The query stays a single string so the model can ask for several names in
+    one call (native reviewers do ``rg "a|b|c"``); each term is matched
+    literally, not as a regex.
+    """
+    terms = [term for term in (part.strip() for part in query.split("|")) if term]
+    return terms or [query]
+
+
 def _python_fallback_search(root: Path, target: Path, query: str, glob: str | None,
                             max_results: int, excluded: list[str]) -> str:
     """Bounded literal search when the optional rg executable is absent."""
+    terms = _split_terms(query)
     candidates = [target] if target.is_file() else target.rglob("*")
     matches: list[str] = []
     files_seen = total_bytes = 0
@@ -178,7 +192,7 @@ def _python_fallback_search(root: Path, target: Path, query: str, glob: str | No
             continue
         relative = safe.relative_to(root).as_posix()
         for line_number, line in enumerate(raw.decode("utf-8", errors="replace").splitlines(), 1):
-            if query in line:
+            if any(term in line for term in terms):
                 matches.append(f"{relative}:{line_number}:{line[:_MAX_MATCH_LINE_CHARS]}")
                 if len(matches) >= max_results:
                     break
@@ -195,15 +209,22 @@ def _run_search(repo_path: str, query: str, path: str, glob: str | None,
         return _error_json(str(exc))
     if not executable:
         return _python_fallback_search(root, target, query, glob, max_results, excluded)
+    terms = _split_terms(query)
+    multi = len(terms) > 1
     args = [executable, "--line-number", "--no-heading", "--color", "never",
-            "--fixed-strings", "--glob", "!.git/**", "--glob", "!.git",
+            "--glob", "!.git/**", "--glob", "!.git",
             "--glob", "!.code-review-ai/**", "--glob", "!.code-review-ai",
             "--glob", "!.env", "--glob", "!.env/**"]
+    # single term stays a fixed-string search; several terms become an escaped
+    # alternation (still literal per term, never user regex).
+    if not multi:
+        args.append("--fixed-strings")
     for pattern in excluded:
         args.extend(["--glob", "!" + pattern.lstrip("!")])
     if glob:
         args.extend(["--glob", glob])
-    args.extend(["--", query, str(target)])
+    pattern = f"({'|'.join(re.escape(term) for term in terms)})" if multi else query
+    args.extend(["--", pattern, str(target)])
     try:
         completed = subprocess.run(args, cwd=root, shell=False, capture_output=True,
                                    text=True, encoding="utf-8", errors="replace",
