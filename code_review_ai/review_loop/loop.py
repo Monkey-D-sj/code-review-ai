@@ -37,9 +37,11 @@ from code_review_ai.review_loop.hooks import (
     POINT_RUN_FINISHED,
 )
 from code_review_ai.review_loop.schemas import (
+    FINISH_REVIEW_TOOL,
     LoopResult,
     ReviewItem,
     ReviewItemUpdate,
+    ReviewSubmission,
     ToolCallStatus,
     ToolSpec,
     ToolTrace,
@@ -264,6 +266,108 @@ def _execute_call(state: _LoopState, call: ToolCall) -> None:
     _reply_call(state, call, name, content, status)
 
 
+def _settle_result(state: _LoopState, *, derive_findings: bool) -> None:
+    """Shared tail: derive trace counts, snapshot items, emit run_finished."""
+    trace = state.result.tool_trace
+    state.result.tool_request_count = len(trace)
+    state.result.tool_call_count = sum(
+        record["status"] == "success" for record in trace)
+    state.result.tool_calls = [record["tool"] for record in trace]
+    state.result.items = {qname: item.model_copy()
+                          for qname, item in state.candidates.items()}
+    if derive_findings:  # worksheet: findings come from confirmed rows
+        state.result.findings = [
+            item.finding for item in state.result.items.values()
+            if item.state == "confirmed" and item.finding is not None]
+    state.emit(POINT_RUN_FINISHED,
+               failure_reason=state.result.failure_reason,
+               finding_count=len(state.result.findings))
+
+
+def _apply_finish(state: _LoopState, call: ToolCall) -> bool:
+    """Validate a ``finish_review`` submission and stop the run on success.
+
+    Returns True only when the submission was accepted (the review is done);
+    an invalid payload is answered as an error and the run continues so the
+    model can retry.
+    """
+    try:
+        submission = ReviewSubmission.model_validate(call["args"])
+    except ValidationError as exc:
+        _reply_call(state, call, FINISH_REVIEW_TOOL,
+                    _error_content("error", f"invalid finish_review payload: {exc}"),
+                    "error")
+        return False
+    state.result.findings = list(submission.findings)
+    state.result.review_complete = True
+    _reply_call(state, call, FINISH_REVIEW_TOOL,
+                json.dumps({"accepted": True, "findings": len(submission.findings)},
+                           ensure_ascii=False), "success")
+    return True
+
+
+def run_free_loop(
+    model: BaseChatModel,
+    tools: Sequence[ToolSpec],
+    *,
+    initial_messages: list[BaseMessage],
+    hooks: Hooks | None = None,
+    max_turns: int = MAX_TURNS,
+    max_total_tokens: int | None = None,
+) -> LoopResult:
+    """Free-form review: no worksheet, the model owns the report.
+
+    Input is only what the caller put in ``initial_messages`` (e.g. a diff plus
+    a policy) -- there are no candidate rows to resolve. The model researches
+    with the tools and ends by calling ``finish_review`` with its structured
+    findings (empty is a valid "no regression" verdict); an empty turn before
+    that is a failure (the model stopped without submitting). This mirrors how a
+    no-graph native reviewer consumes the same change, for comparison runs.
+    """
+    state = _LoopState(
+        tool_map={spec.name: spec for spec in tools},
+        bound=model.bind_tools([_bound_schema(spec) for spec in tools]),
+        messages=list(initial_messages),
+        candidates={},
+        result=LoopResult(),
+        hooks=hooks if hooks is not None else Hooks(),
+        max_turns=max_turns,
+        max_empty_turns=0,  # no worksheet rows, so no empty-turn nudging
+    )
+    while True:
+        if state.turn >= state.max_turns:
+            state.result.failure_reason = (
+                f"agent kept requesting tools for {state.max_turns} turns")
+            break
+        response = _model_turn(state)
+        if response is None:
+            break
+        spent_tokens = state.result.usage.get("total_tokens", 0)
+        if max_total_tokens is not None and spent_tokens > max_total_tokens:
+            state.result.failure_reason = (
+                f"token budget exceeded: spent {spent_tokens} total_tokens, "
+                f"limit {max_total_tokens}")
+            break
+        state.messages.append(response)
+        calls = response.tool_calls  # already a list[ToolCall]
+        if not calls:
+            state.result.failure_reason = (
+                "agent stopped without submitting finish_review")
+            break
+        submitted = False
+        for call in calls:
+            if call["name"] == FINISH_REVIEW_TOOL:
+                if _apply_finish(state, call):
+                    submitted = True
+                    break
+                continue  # invalid payload: answered as error, keep going
+            _execute_call(state, call)
+        if submitted:
+            break
+    _settle_result(state, derive_findings=False)
+    return state.result
+
+
 def run_loop(
     model: BaseChatModel,
     tools: Sequence[ToolSpec],
@@ -341,16 +445,5 @@ def run_loop(
         if _all_resolved(state.candidates):
             state.result.review_complete = True
             break
-    trace = state.result.tool_trace
-    state.result.tool_request_count = len(trace)
-    state.result.tool_call_count = sum(
-        record["status"] == "success" for record in trace)
-    state.result.tool_calls = [record["tool"] for record in trace]
-    state.result.items = {qname: item.model_copy() for qname, item in state.candidates.items()}
-    state.result.findings = [
-        item.finding for item in state.result.items.values()
-        if item.state == "confirmed" and item.finding is not None]
-    state.emit(POINT_RUN_FINISHED,
-               failure_reason=state.result.failure_reason,
-               finding_count=len(state.result.findings))
+    _settle_result(state, derive_findings=True)
     return state.result

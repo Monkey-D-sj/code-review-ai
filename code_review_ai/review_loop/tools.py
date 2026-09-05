@@ -26,9 +26,11 @@ from code_review_ai.changes import detect_changed_symbols
 from code_review_ai.config import Config
 from code_review_ai.impact import get_impact
 from code_review_ai.review_loop.schemas import (
-    UPDATE_REVIEW_TOOL,
+    FINISH_REVIEW_TOOL,
     ReviewItemUpdate,
+    ReviewSubmission,
     ToolSpec,
+    UPDATE_REVIEW_TOOL,
 )
 
 _MAX_READ_LINES = 1_000
@@ -284,6 +286,23 @@ def _run_impact(config: Config, conn, symbols: list[str] | None,
 # ---------------------------------------------------------------------------
 # factory
 # ---------------------------------------------------------------------------
+
+def finish_review_tool() -> ToolSpec:
+    """The free-form submitter: schema-only; the loop validates and finishes."""
+
+    def _handled(*_args, **_kwargs) -> str:
+        raise AssertionError("finish_review is applied by the loop, never run")
+
+    return ToolSpec(
+        name=FINISH_REVIEW_TOOL,
+        description="Finish the review: submit your structured findings. Call "
+                    "only after you have inspected the diff and its callers; "
+                    "empty findings is a valid 'no concrete regression' "
+                    "conclusion.",
+        args_schema=ReviewSubmission,
+        run=_handled,
+    )
+
 
 def update_review_tool() -> ToolSpec:
     """The worksheet updater: schema-only; the loop applies it to candidate rows."""

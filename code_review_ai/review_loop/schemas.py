@@ -81,6 +81,24 @@ class Finding(BaseModel):
     description: str
 
 
+# The tool that submits a free-form review's findings. Named here so the loop,
+# the runner's tool list and the free driver agree on one constant.
+FINISH_REVIEW_TOOL = "finish_review"
+
+
+class ReviewSubmission(BaseModel):
+    """Payload of ``finish_review``: the free-form review's structured findings.
+
+    Empty ``findings`` is a valid submission (the model reviewed and found no
+    concrete regression). Unlike the worksheet's confirmed rows, these findings
+    carry no evidence-gate bookkeeping -- the model owns the whole report.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    findings: list[Finding] = Field(default_factory=list)
+
+
 FindingState = Literal["candidate", "confirmed", "dismissed"]
 
 

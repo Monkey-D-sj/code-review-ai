@@ -23,11 +23,14 @@ from code_review_ai.review_loop import (
     POINT_PRE_TOOL,
     POINT_RUN_FINISHED,
     ToolSpec,
+    run_free_loop,
     run_loop,
 )
 from code_review_ai.review_loop.schemas import (
+    FINISH_REVIEW_TOOL,
     ReviewItem,
     ReviewItemUpdate,
+    ReviewSubmission,
     UPDATE_REVIEW_TOOL,
 )
 
@@ -574,3 +577,88 @@ def test_hooks_emit_without_registered_observers_is_a_noop():
     hooks = Hooks()
     hooks.emit("event-x", n=1)  # point never subscribed
     hooks.emit("never-registered")  # no observers at all: must not raise
+
+
+# ---------------------------------------------------------------------------
+# free-form review (run_free_loop: no worksheet, finish_review submits)
+# ---------------------------------------------------------------------------
+
+def _free_tools():
+    """The action tools plus the schema-only finish_review submitter."""
+    tools = _make_tools()
+    tools.append(ToolSpec(
+        name=FINISH_REVIEW_TOOL, description="submit findings",
+        args_schema=ReviewSubmission, run=lambda **_kw: "unused"))
+    return tools
+
+
+def _finish_call(findings, ident="finish-1") -> dict:
+    return _call(FINISH_REVIEW_TOOL, {"findings": findings}, ident)
+
+
+def _free_run(model, **kwargs):
+    return run_free_loop(model, _free_tools(), initial_messages=[], **kwargs)
+
+
+def test_free_loop_researches_then_submits_findings():
+    finding = {"file": "app.py", "line": 7, "title": "bug", "description": "why"}
+    model = FakeModel([("", [_call("impact", {"symbols": ["x"]}, "impact-1")]),
+                       ("", [_finish_call([finding])])])
+
+    result = _free_run(model)
+
+    assert result.review_complete is True
+    assert result.failure_reason is None
+    assert [f.title for f in result.findings] == ["bug"]
+    assert result.tool_calls == ["impact", FINISH_REVIEW_TOOL]
+    assert result.tool_call_count == 2
+    assert [record["status"] for record in result.tool_trace] == ["success", "success"]
+
+
+def test_free_loop_empty_submission_is_a_valid_no_regression_verdict():
+    model = FakeModel([("", [_finish_call([])])])
+
+    result = _free_run(model)
+
+    assert result.review_complete is True
+    assert result.failure_reason is None
+    assert result.findings == []
+
+
+def test_free_loop_invalid_submission_is_answered_then_retried():
+    # line 0 fails the Finding schema (ge=1); the model retries with a valid one
+    bad = {"file": "app.py", "line": 0, "title": "t", "description": "d"}
+    good = {"file": "app.py", "line": 3, "title": "t", "description": "d"}
+    model = FakeModel([("", [_finish_call([bad])]),
+                       ("", [_finish_call([good])])])
+
+    result = _free_run(model)
+
+    assert result.review_complete is True
+    assert result.failure_reason is None
+    assert [f.line for f in result.findings] == [3]
+    assert [record["status"] for record in result.tool_trace] == ["error", "success"]
+    assert any("invalid finish_review payload" in content
+               for content in _tool_contents(model))
+
+
+def test_free_loop_empty_turn_before_submit_is_a_failure():
+    model = FakeModel([("clean code, no regressions.", [])])
+
+    result = _free_run(model)
+
+    assert result.review_complete is False
+    assert "finish_review" in result.failure_reason
+    assert result.findings == []
+
+
+def test_free_loop_provider_failure_preserves_partial_research_trace():
+    model = FakeModel([("", [_call("impact", {"symbols": ["x"]}, "impact-1")]),
+                       RuntimeError("connection reset")])
+
+    result = _free_run(model)
+
+    assert result.review_complete is False
+    assert result.failure_reason == "provider call failed: connection reset"
+    assert result.tool_call_count == 1
+    assert len(result.tool_trace) == 1

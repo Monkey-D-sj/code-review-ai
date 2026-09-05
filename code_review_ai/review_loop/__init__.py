@@ -16,14 +16,16 @@ from code_review_ai.review_loop.hooks import (
     POINT_PRE_TOOL,
     POINT_RUN_FINISHED,
 )
-from code_review_ai.review_loop.loop import run_loop
+from code_review_ai.review_loop.loop import run_free_loop, run_loop
 from code_review_ai.review_loop.pricing import compute_cost
 from code_review_ai.review_loop.schemas import (
+    FINISH_REVIEW_TOOL,
     Finding,
     FindingState,
     LoopResult,
     ReviewItem,
     ReviewItemUpdate,
+    ReviewSubmission,
     ToolCallStatus,
     ToolSpec,
     ToolTrace,
@@ -32,6 +34,7 @@ from code_review_ai.review_loop.schemas import (
 )
 
 __all__ = [
+    "FINISH_REVIEW_TOOL",
     "Finding",
     "FindingState",
     "Hooks",
@@ -43,11 +46,13 @@ __all__ = [
     "POINT_RUN_FINISHED",
     "ReviewItem",
     "ReviewItemUpdate",
+    "ReviewSubmission",
     "ToolCallStatus",
     "ToolSpec",
     "ToolTrace",
     "UPDATE_REVIEW_TOOL",
     "Usage",
     "compute_cost",
+    "run_free_loop",
     "run_loop",
 ]
