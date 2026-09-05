@@ -17,6 +17,7 @@ from code_review_ai.review_loop.hooks import (
     POINT_RUN_FINISHED,
 )
 from code_review_ai.review_loop.loop import run_loop
+from code_review_ai.review_loop.pricing import compute_cost
 from code_review_ai.review_loop.schemas import (
     Finding,
     FindingState,
@@ -47,5 +48,6 @@ __all__ = [
     "ToolTrace",
     "UPDATE_REVIEW_TOOL",
     "Usage",
+    "compute_cost",
     "run_loop",
 ]
