@@ -138,38 +138,41 @@ def _model_turn(state: _LoopState) -> AIMessage | None:
     return response
 
 
-def _execute_call(state: _LoopState, call: ToolCall) -> None:
-    """Answer one requested tool call: validate, run (or reject), and reply.
-
-    A call that fails schema validation, or names a tool this run does not
-    expose, never runs and never fires ``pre_tool``/``post_tool``; every call
-    still gets exactly one ToolMessage back, as the provider protocol requires.
-    """
-    name = call["name"]
-    spec = state.tool_map.get(name)
-    if spec is None:
-        content = _error_content("error", f"unknown tool {name!r}")
-        status: ToolCallStatus = "error"
-    else:
-        kwargs, rejection = _validate_args(spec, call)
-        if rejection is not None:
-            content, status = rejection, "error"
-        else:
-            state.emit(POINT_PRE_TOOL, name=spec.name, args=call["args"])
-            content = _execute_tool(spec, kwargs)
-            status = _result_status(content)
-            state.emit(POINT_POST_TOOL, name=spec.name, status=status,
-                       response_chars=len(content))
-    ordinal = len(state.result.tool_trace) + 1
-    call_id = call.get("id")
-    tool_call_id = call_id if isinstance(call_id, str) else f"unknown-{ordinal}"
+def _reply_call(state: _LoopState, call: ToolCall, name: str,
+                content: str, status: ToolCallStatus) -> None:
+    """Record and reply to one resolved call: trace entry + one ToolMessage."""
+    tool_call_id = call["id"]  # ToolCall.id is a required key
     state.result.tool_trace.append(
         _trace_record(call, tool_call_id, status, response_chars=len(content)))
-    state.result.tool_calls.append(name)
     state.messages.append(ToolMessage(
         content=content,
         tool_call_id=tool_call_id,
         name=name))
+
+
+def _execute_call(state: _LoopState, call: ToolCall) -> None:
+    """Answer one requested tool call: validate, run (or reject), then reply.
+
+    Error paths return early and never fire ``pre_tool``/``post_tool``; only a
+    validated, executed call emits them. Every call still gets exactly one
+    ToolMessage back, as the provider protocol requires.
+    """
+    name = call["name"]
+    spec = state.tool_map.get(name)
+    if spec is None:
+        _reply_call(state, call, name,
+                    _error_content("error", f"unknown tool {name!r}"), "error")
+        return
+    kwargs, rejection = _validate_args(spec, call)
+    if rejection is not None:
+        _reply_call(state, call, name, rejection, "error")
+        return
+    state.emit(POINT_PRE_TOOL, name=spec.name, args=call["args"])
+    content = _execute_tool(spec, kwargs)
+    status = _result_status(content)
+    state.emit(POINT_POST_TOOL, name=spec.name, status=status,
+               response_chars=len(content))
+    _reply_call(state, call, name, content, status)
 
 
 def run_loop(
@@ -208,7 +211,7 @@ def run_loop(
         response = _model_turn(state)
         if response is None:
             break
-        calls = list(response.tool_calls)
+        calls = response.tool_calls  # already a list[ToolCall]
         if not calls:
             content = response.content
             state.result.final_text = content if isinstance(content, str) else ""
@@ -219,6 +222,7 @@ def run_loop(
     state.result.tool_request_count = len(trace)
     state.result.tool_call_count = sum(
         record["status"] == "success" for record in trace)
+    state.result.tool_calls = [record["tool"] for record in trace]
     state.emit(POINT_RUN_FINISHED,
                failure_reason=state.result.failure_reason,
                final_chars=len(state.result.final_text or ""))

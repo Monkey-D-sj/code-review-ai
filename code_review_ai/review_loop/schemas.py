@@ -27,8 +27,8 @@ class ToolTrace(TypedDict):
     """One auditable disposition of a requested tool call.
 
     Records are appended in execution order, so list position is the ordinal --
-    no explicit sequence number is stored. ``tool_call_id`` is the provider's
-    call id, or a synthesized ``unknown-<n>`` when the model omitted one.
+    no explicit sequence number is stored. ``tool_call_id`` is the tool call's
+    ``id``, which ``ToolCall`` guarantees is present.
     """
 
     tool_call_id: str
