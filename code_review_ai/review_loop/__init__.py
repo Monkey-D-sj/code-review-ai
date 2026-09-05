@@ -18,13 +18,20 @@ from code_review_ai.review_loop.hooks import (
 )
 from code_review_ai.review_loop.loop import run_loop
 from code_review_ai.review_loop.schemas import (
+    Finding,
+    FindingState,
     LoopResult,
+    ReviewItem,
+    ReviewItemUpdate,
     ToolCallStatus,
     ToolSpec,
     ToolTrace,
+    UPDATE_REVIEW_TOOL,
 )
 
 __all__ = [
+    "Finding",
+    "FindingState",
     "Hooks",
     "LoopResult",
     "POINT_MODEL_REQUEST_STARTED",
@@ -32,8 +39,11 @@ __all__ = [
     "POINT_POST_TOOL",
     "POINT_PRE_TOOL",
     "POINT_RUN_FINISHED",
+    "ReviewItem",
+    "ReviewItemUpdate",
     "ToolCallStatus",
     "ToolSpec",
     "ToolTrace",
+    "UPDATE_REVIEW_TOOL",
     "run_loop",
 ]

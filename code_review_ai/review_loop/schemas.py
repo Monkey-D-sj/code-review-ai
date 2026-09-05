@@ -1,11 +1,13 @@
-"""Minimal contracts for the hand-rolled review loop.
+"""Contracts for the review_loop worksheet flow.
 
-Lives in a package that depends only on ``langchain_core`` -- no langgraph, no
-StructuredTool. ``ToolTrace`` mirrors ``review_agent``'s shape so trace consumers
-stay compatible, and the status vocabulary is single-sourced here instead of
-being rebuilt across two layers. There is no structured report model: the loop
-ends on the first model turn with no tool calls and returns that turn's text,
-which a caller parses.
+Follows ``review_agent`` on master: a deterministic worksheet is built from the
+change summary (one candidate row per changed symbol), the model only updates
+rows via ``update_review_item`` (confirmed with a finding, or dismissed with a
+reason), and the run ends once every candidate is resolved. There is no free-form
+report -- the structured rows are the result.
+
+Depends only on ``langchain_core``/``pydantic`` -- no langgraph, no StructuredTool.
+``ToolTrace`` mirrors ``review_agent``'s shape so trace consumers stay compatible.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 ToolCallStatus = Literal[
@@ -43,9 +45,9 @@ class ToolSpec:
     """A tool the loop can execute, without LangChain StructuredTool machinery.
 
     ``args_schema`` is plain pydantic (extra forbidden); ``run`` receives the
-    validated keyword arguments and returns the content string verbatim. There is
-    no terminal/submit tool: the loop stops when a model turn requests no tools,
-    and the caller parses that turn's text into a structured report.
+    validated keyword arguments and returns the content string verbatim. The
+    worksheet updater (``update_review_item``) is schema-only: the loop applies
+    it to the candidate rows itself and never calls its ``run``.
     """
 
     name: str
@@ -54,16 +56,72 @@ class ToolSpec:
     run: Callable[..., str]
 
 
+class Finding(BaseModel):
+    """One confirmed defect, authored by the model inside a confirmed row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    file: str
+    line: int = Field(ge=1)
+    title: str
+    description: str
+
+
+FindingState = Literal["candidate", "confirmed", "dismissed"]
+
+
+class ReviewItem(BaseModel):
+    """One deterministic worksheet row, created from the change summary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    qname: str
+    file: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+    state: FindingState = "candidate"
+    finding: Finding | None = None
+    reason: str | None = None
+
+
+# The tool that flips candidate rows. Named here so the loop and the runner's
+# tool list agree on one constant.
+UPDATE_REVIEW_TOOL = "update_review_item"
+
+
+class ReviewItemUpdate(BaseModel):
+    """Arguments for ``update_review_item``: resolve one candidate row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    qname: str = Field(min_length=1)
+    state: Literal["confirmed", "dismissed"]
+    finding: Finding | None = None
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_resolution(self) -> "ReviewItemUpdate":
+        if self.state == "confirmed" and self.finding is None:
+            raise ValueError("confirmed rows require a finding")
+        if self.state == "dismissed" and not (self.reason and self.reason.strip()):
+            raise ValueError("dismissed rows require a reason")
+        return self
+
+
 @dataclass
 class LoopResult:
-    """Outcome of one review loop run.
+    """Outcome of one worksheet review run.
 
-    ``final_text`` is the text of the model turn that ended the run (no tool
-    calls); a caller parses it into a structured report. Parity fields such as
-    ``files_read``/``usage`` land on wiring.
+    ``items`` holds the final state of every candidate row (resolved when the
+    run completed), ``findings`` the confirmed rows' findings, and
+    ``affected_entries`` the deterministic entry points the runner computes.
+    ``review_complete`` is true only when every candidate was resolved.
     """
 
-    final_text: str | None = None
+    items: dict[str, ReviewItem] = field(default_factory=dict)
+    findings: list[Finding] = field(default_factory=list)
+    affected_entries: list[str] = field(default_factory=list)
+    review_complete: bool = False
     failure_reason: str | None = None
     tool_trace: list[ToolTrace] = field(default_factory=list)
     tool_calls: list[str] = field(default_factory=list)

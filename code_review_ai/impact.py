@@ -378,6 +378,24 @@ def _attach_aliases(result: dict, conn: sqlite3.Connection,
         result["aliases"] = aliases
 
 
+def affected_entries(conn: sqlite3.Connection, qname: str,
+                     tests: str = "exclude") -> list[str]:
+    """Business entry points of the flows containing ``qname``, deterministically.
+
+    This is the one remaining flow read in the impact stack (a whole-graph BFS
+    has no notion of entry point), exposed so a reviewer run can fill
+    ``affected_entries`` without authoring it. ``tests`` follows ``get_impact``'s
+    filter. Empty when the symbol is absent from the index or sits on no flow.
+    """
+    if tests not in _TEST_FILTER:
+        raise ValueError(f"tests must be one of {list(_TEST_FILTER)}, got {tests!r}")
+    node = conn.execute(
+        "SELECT id FROM nodes WHERE qualified_name=?", (qname,)).fetchone()
+    if node is None:
+        return []
+    return sorted(_affected_entries(conn, node["id"], _TEST_FILTER[tests]))
+
+
 def get_impact(conn: sqlite3.Connection, changed_symbols: list[str],
                max_nodes_per_direction: int = 20,
                tests: str = "exclude",

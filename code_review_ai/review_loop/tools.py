@@ -24,7 +24,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from code_review_ai.changes import detect_changed_symbols
 from code_review_ai.config import Config
 from code_review_ai.impact import get_impact
-from code_review_ai.review_loop.schemas import ToolSpec
+from code_review_ai.review_loop.schemas import (
+    UPDATE_REVIEW_TOOL,
+    ReviewItemUpdate,
+    ToolSpec,
+)
 
 _MAX_READ_LINES = 200
 _MAX_READ_CHARS = 20_000
@@ -259,6 +263,21 @@ def _run_impact(config: Config, conn, symbols: list[str] | None,
 # ---------------------------------------------------------------------------
 # factory
 # ---------------------------------------------------------------------------
+
+def update_review_tool() -> ToolSpec:
+    """The worksheet updater: schema-only; the loop applies it to candidate rows."""
+
+    def _handled(*_args, **_kwargs) -> str:
+        raise AssertionError("update_review_item is applied by the loop, never run")
+
+    return ToolSpec(
+        name=UPDATE_REVIEW_TOOL,
+        description="Confirm (with a finding) or dismiss (with a reason) one "
+                    "candidate row of the change worksheet.",
+        args_schema=ReviewItemUpdate,
+        run=_handled,
+    )
+
 
 def make_tools(config: Config, conn) -> list[ToolSpec]:
     """Bind the three review tools to one repo/config and its index connection."""

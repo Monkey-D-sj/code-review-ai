@@ -24,7 +24,7 @@ pre_tool                   before each tool runs                     name, args
 post_tool                  after each tool ran                       name, status,
                                                                      response_chars
 run_finished               at the single exit of run_loop            failure_reason,
-                                                                     final_chars
+                                                                     finding_count
 =========================  ========================================  ===========
 
 ``post_tool``'s ``status`` is ``success`` (the call ran and returned usable

@@ -1,10 +1,11 @@
-"""The hand-rolled ReAct loop, milestone 1: bare control flow only.
+"""The hand-rolled ReAct loop over a review worksheet.
 
-One rule: while the model keeps requesting tools, run every requested call and
-feed its result back; the moment a turn requests no tools, the run is over and
-that turn's text is the answer (a caller parses it into a report). There is no
-submit tool, no turn classification, no refusal/nudge states -- a single turn
-counter is the only thing that can stop a looping model.
+The runner seeds a deterministic worksheet (one candidate row per changed
+symbol); the loop lets the model read code with the bounded tools and resolve
+rows through ``update_review_item`` (schema-only: the loop applies it to the
+rows itself). The run ends when every candidate is resolved, when the model
+stops requesting tools without resolving everything (incomplete), or at
+``max_turns`` -- there is no free-form report, the resolved rows are the result.
 
 Dependency discipline: this module imports only ``langchain_core`` message/model
 abstractions, never ``langgraph`` and never ``code_review_ai.review_agent``.
@@ -17,7 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage, ToolCall
+from langchain_core.messages import AIMessage, BaseMessage, ToolCall, ToolMessage
 from langchain_core.runnables import Runnable
 from pydantic import ValidationError
 
@@ -30,14 +31,17 @@ from code_review_ai.review_loop.hooks import (
     POINT_RUN_FINISHED,
 )
 from code_review_ai.review_loop.schemas import (
+    Finding,
     LoopResult,
+    ReviewItem,
+    ReviewItemUpdate,
     ToolCallStatus,
     ToolSpec,
     ToolTrace,
+    UPDATE_REVIEW_TOOL,
 )
 
-# A sentinel bound on model turns so the loop always terminates; real budgets
-# (tool/token/wall-clock) replace this in a later milestone.
+# A sentinel bound on model turns so the loop always terminates.
 MAX_TURNS = 50
 
 
@@ -48,6 +52,7 @@ class _LoopState:
     tool_map: dict[str, ToolSpec]
     bound: Runnable  # model.bind_tools(...), answering one invoke per turn
     messages: list[BaseMessage]
+    candidates: dict[str, ReviewItem]  # the worksheet, mutated by updates
     result: LoopResult
     hooks: Hooks = field(default_factory=Hooks)
     max_turns: int = MAX_TURNS
@@ -63,12 +68,7 @@ def _error_content(status: str, message: str) -> str:
 
 
 def _result_status(content: str) -> ToolCallStatus:
-    """``success`` unless a tool's returned content reports an error.
-
-    A tool reports its own failure as a ``{"status": ...}`` JSON string on a
-    successful return -- ``error`` or a policy ``rejected_policy`` -- either way
-    the call did not complete, so it counts as ``error``.
-    """
+    """``success`` unless a tool's returned content reports an error."""
     try:
         payload = json.loads(content)
     except ValueError:
@@ -150,14 +150,53 @@ def _reply_call(state: _LoopState, call: ToolCall, name: str,
         name=name))
 
 
-def _execute_call(state: _LoopState, call: ToolCall) -> None:
-    """Answer one requested tool call: validate, run (or reject), then reply.
+def _all_resolved(candidates: dict[str, ReviewItem]) -> bool:
+    return all(item.state != "candidate" for item in candidates.values())
 
-    Error paths return early and never fire ``pre_tool``/``post_tool``; only a
-    validated, executed call emits them. Every call still gets exactly one
-    ToolMessage back, as the provider protocol requires.
+
+def _apply_update(state: _LoopState, call: ToolCall) -> None:
+    """Resolve one candidate row from an ``update_review_item`` call.
+
+    The model may only flip an existing candidate row (confirmed with a finding,
+    or dismissed with a reason); anything else is answered as an error and the
+    worksheet is left untouched.
+    """
+    try:
+        transition = ReviewItemUpdate.model_validate(call["args"])
+    except ValidationError as exc:
+        _reply_call(state, call, UPDATE_REVIEW_TOOL,
+                    _error_content("error", f"invalid update_review_item payload: {exc}"),
+                    "error")
+        return
+    item = state.candidates.get(transition.qname)
+    if item is None or item.state != "candidate":
+        _reply_call(state, call, UPDATE_REVIEW_TOOL,
+                    _error_content("error",
+                                   f"qname {transition.qname!r} is not an active candidate"),
+                    "error")
+        return
+    resolved = item.model_copy(update={
+        "state": transition.state,
+        "finding": transition.finding,
+        "reason": transition.reason,
+    })
+    state.candidates[transition.qname] = resolved
+    _reply_call(state, call, UPDATE_REVIEW_TOOL,
+                json.dumps({"accepted": True, "qname": transition.qname},
+                           ensure_ascii=False), "success")
+
+
+def _execute_call(state: _LoopState, call: ToolCall) -> None:
+    """Answer one requested tool call: resolve the worksheet or run a tool.
+
+    Error paths return early and never fire ``pre_tool``/``post_tool``; every
+    call still gets exactly one ToolMessage back, as the provider protocol
+    requires.
     """
     name = call["name"]
+    if name == UPDATE_REVIEW_TOOL:
+        _apply_update(state, call)
+        return
     spec = state.tool_map.get(name)
     if spec is None:
         _reply_call(state, call, name,
@@ -178,27 +217,26 @@ def _execute_call(state: _LoopState, call: ToolCall) -> None:
 def run_loop(
     model: BaseChatModel,
     tools: Sequence[ToolSpec],
+    candidates: Sequence[ReviewItem],
     *,
     initial_messages: list[BaseMessage],
     hooks: Hooks | None = None,
     max_turns: int = MAX_TURNS,
 ) -> LoopResult:
-    """Run the review loop until the model stops requesting tools.
+    """Run the review loop until every candidate row is resolved.
 
-    Each model turn either asks for tool calls -- every one is validated and run,
-    with one ToolMessage fed back per call -- or asks for none, which ends the
-    run with that turn's text as ``LoopResult.final_text``. A provider failure or
-    ``max_turns`` of tool-requesting turns ends the run with a ``failure_reason``.
-
-    ``hooks`` carries observer-only events (progress display); there is no policy
-    to register because nothing is gated -- a later milestone adds budgets and
-    the evidence gate as hardcoded steps, never as hooks.
+    Each model turn may read code with the tools or call ``update_review_item``
+    to confirm/dismiss a candidate. The run ends when all candidates are
+    resolved (``review_complete``), or when the model stops requesting tools
+    while some rows remain unresolved (incomplete), or at ``max_turns`` / on a
+    provider failure (``failure_reason``). The resolved worksheet is the result.
     """
     tool_map = {spec.name: spec for spec in tools}
     state = _LoopState(
         tool_map=tool_map,
         bound=model.bind_tools([_bound_schema(spec) for spec in tools]),
         messages=list(initial_messages),
+        candidates={item.qname: item.model_copy() for item in candidates},
         result=LoopResult(),
         hooks=hooks if hooks is not None else Hooks(),
         max_turns=max_turns,
@@ -217,17 +255,22 @@ def run_loop(
         state.messages.append(response)
         calls = response.tool_calls  # already a list[ToolCall]
         if not calls:
-            content = response.content
-            state.result.final_text = content if isinstance(content, str) else ""
-            break
+            break  # the model stopped without resolving every row
         for call in calls:
             _execute_call(state, call)
+        if _all_resolved(state.candidates):
+            state.result.review_complete = True
+            break
     trace = state.result.tool_trace
     state.result.tool_request_count = len(trace)
     state.result.tool_call_count = sum(
         record["status"] == "success" for record in trace)
     state.result.tool_calls = [record["tool"] for record in trace]
+    state.result.items = {qname: item.model_copy() for qname, item in state.candidates.items()}
+    state.result.findings = [
+        item.finding for item in state.result.items.values()
+        if item.state == "confirmed" and item.finding is not None]
     state.emit(POINT_RUN_FINISHED,
                failure_reason=state.result.failure_reason,
-               final_chars=len(state.result.final_text or ""))
+               finding_count=len(state.result.findings))
     return state.result
