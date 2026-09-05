@@ -239,15 +239,6 @@ def _execute_call(state: _LoopState, call: ToolCall) -> None:
     _reply_call(state, call, name, content, status)
 
 
-def _exceeds_token_budget(spent_tokens: int, max_total_tokens: int | None) -> bool:
-    """True once a run has spent more ``total_tokens`` than the cap.
-
-    ``None`` means no cap and never trips; a provider that does not report
-    ``total_tokens`` never trips either, because ``spent_tokens`` stays 0.
-    """
-    return max_total_tokens is not None and spent_tokens > max_total_tokens
-
-
 def run_loop(
     model: BaseChatModel,
     tools: Sequence[ToolSpec],
@@ -290,12 +281,17 @@ def run_loop(
         # provider rejects a 'tool' message unless the assistant message with
         # the matching tool_calls is already in the history.
         spent_tokens = state.result.usage.get("total_tokens", 0)
-        if _exceeds_token_budget(spent_tokens, max_total_tokens):
+        if max_total_tokens is not None and spent_tokens > max_total_tokens:
             state.result.failure_reason = (
                 f"token budget exceeded: spent {spent_tokens} total_tokens, "
                 f"limit {max_total_tokens}")
             break
         state.messages.append(response)
+        # TODO: history grows unboundedly and every invoke re-sends all of it (a
+        # real run hit ~70k chars / 36k input tokens by turn 15). Once history
+        # exceeds a threshold, compress early turns (drop or summarize, keeping
+        # system + worksheet + recent turns) without separating an ai message
+        # that carries tool_calls from the tool replies that follow it.
         calls = response.tool_calls  # already a list[ToolCall]
         if not calls:
             break  # the model stopped without resolving every row
