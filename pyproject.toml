@@ -23,6 +23,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 community = ["leidenalg", "igraph"]
+deepseek = [
+    "langchain-deepseek>=1",
+]
 
 [project.scripts]
 code-review-ai = "code_review_ai.cli:main"
