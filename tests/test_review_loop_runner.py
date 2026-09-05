@@ -96,6 +96,34 @@ def test_build_initial_messages_carries_prompt_summary_and_worksheet():
     assert '"qname": "app::login"' in messages[1].content
 
 
+class CostReportingModel(ScriptedReviewModel):
+    """Like ScriptedReviewModel, but the confirm turn reports provider usage."""
+
+    def invoke(self, messages):
+        response = super().invoke(messages)
+        if any(call["name"] == UPDATE_REVIEW_TOOL
+               for call in getattr(response, "tool_calls", [])):
+            response.usage_metadata = {
+                "input_tokens": 1_000_000, "output_tokens": 1_000_000,
+                "total_tokens": 2_000_000}
+        return response
+
+
+def test_run_review_reports_yuan_cost_from_usage(env):
+    config, conn = env
+
+    result = run_review(
+        config, conn,
+        prompt="check auth for regressions",
+        summary={"changed_functions": [{"qname": "app::login"}]},
+        model=CostReportingModel(), max_turns=5)
+
+    assert result.review_complete is True
+    # turn 1 priced: 1M miss input (1.5) + 1M output (4.5) = 6.0 元
+    assert result.usage["total_tokens"] == 2_000_000
+    assert result.cost == pytest.approx(6.0)
+
+
 def test_run_review_resolves_worksheet_and_reports_structured_result(env):
     config, conn = env
     model = ScriptedReviewModel()

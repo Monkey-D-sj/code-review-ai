@@ -29,6 +29,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from code_review_ai.config import Config
 from code_review_ai.impact import affected_entries
 from code_review_ai.review_loop.loop import MAX_TURNS, run_loop
+from code_review_ai.review_loop.pricing import compute_cost
 from code_review_ai.review_loop.providers import build_review_model
 from code_review_ai.review_loop.schemas import (
     Finding,
@@ -161,7 +162,8 @@ def run_review(
     built from env / ``.env``. ``max_total_tokens`` (``None`` = uncapped) stops
     the loop once the provider-reported total exceeds it. Returns the resolved
     worksheet (``items``, ``findings``, ``affected_entries``,
-    ``review_complete``).
+    ``review_complete``), plus ``usage`` and the yuan ``cost`` computed from it
+    at the DeepSeek per-million rates (see ``compute_cost``).
     """
     if model is None:
         model = create_model(config, model_name=model_name, base_url=base_url,
@@ -177,6 +179,7 @@ def run_review(
     if items:
         result.affected_entries = sorted({
             entry for item in items for entry in affected_entries(conn, item.qname)})
+    result.cost = compute_cost(result.usage)
     return result
 
 

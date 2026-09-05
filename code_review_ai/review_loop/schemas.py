@@ -132,7 +132,9 @@ class LoopResult:
     ``review_complete`` is true only when every candidate was resolved.
     ``usage`` aggregates the model-side tokens the provider reported across the
     run's model turns (see ``Usage``); it survives a partial run so a truncated
-    review still shows what was spent.
+    review still shows what was spent. ``cost`` is the yuan estimate
+    ``compute_cost`` derives from ``usage``; the runner fills it (the loop
+    itself does not price) and it stays 0 until then.
     """
 
     items: dict[str, ReviewItem] = field(default_factory=dict)
@@ -141,6 +143,7 @@ class LoopResult:
     review_complete: bool = False
     failure_reason: str | None = None
     usage: Usage = field(default_factory=dict)
+    cost: float = 0.0
     tool_trace: list[ToolTrace] = field(default_factory=list)
     tool_calls: list[str] = field(default_factory=list)
     tool_call_count: int = 0
