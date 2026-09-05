@@ -152,13 +152,16 @@ def run_review(
     base_url: str | None = None,
     api_key_env: str = _API_KEY_ENV,
     max_turns: int | None = None,
+    max_total_tokens: int | None = None,
 ) -> LoopResult:
     """Run one structured code review from a change summary.
 
     ``summary`` is ``changes.build_change_summary`` output; its changed symbols
     become the worksheet. ``model`` may be injected (tests); otherwise one is
-    built from env / ``.env``. Returns the resolved worksheet (``items``,
-    ``findings``, ``affected_entries``, ``review_complete``).
+    built from env / ``.env``. ``max_total_tokens`` (``None`` = uncapped) stops
+    the loop once the provider-reported total exceeds it. Returns the resolved
+    worksheet (``items``, ``findings``, ``affected_entries``,
+    ``review_complete``).
     """
     if model is None:
         model = create_model(config, model_name=model_name, base_url=base_url,
@@ -169,7 +172,8 @@ def run_review(
     messages = build_initial_messages(prompt, summary, items, diff=diff)
     tools = [*make_tools(config, conn), update_review_tool()]
     result = run_loop(model, tools, candidates=items, initial_messages=messages,
-                      hooks=hooks, max_turns=max_turns)
+                      hooks=hooks, max_turns=max_turns,
+                      max_total_tokens=max_total_tokens)
     if items:
         result.affected_entries = sorted({
             entry for item in items for entry in affected_entries(conn, item.qname)})

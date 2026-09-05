@@ -46,9 +46,11 @@ Usage = dict[str, int]
 A plain ``dict[str, int]`` so it stays assignable to and from the accumulator.
 Keys mirror the ``usage_metadata`` an ``AIMessage`` carries from the provider,
 summed across every model turn -- typically ``input_tokens``/``output_tokens``/
-``total_tokens``, and only those the provider reported are present. This is the
-model-side ground truth, not an estimate of tool-output tokens (that comes
-later, if at all).
+``total_tokens``, plus ``cache_read`` (prompt-cache-hit input tokens, read from
+``input_token_details.cache_read`` and accumulated separately because it prices
+differently; cache-miss input = ``input_tokens - cache_read``). Only the keys
+the provider reported are present. This is the model-side ground truth, not an
+estimate of tool-output tokens (that comes later, if at all).
 """
 
 

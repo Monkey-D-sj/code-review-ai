@@ -122,23 +122,29 @@ def _trace_record(call: ToolCall, tool_call_id: str, status: ToolCallStatus, *,
     }
 
 
-_USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens")
-
-
 def _accumulate_usage(usage: dict[str, int], response: AIMessage) -> None:
     """Add one model response's provider-reported tokens to the running total.
 
     ``usage_metadata`` is optional and provider-shaped; only the keys that are
     present and integral contribute, so a provider that omits a field just never
-    populates it.
+    populates it. ``cache_read`` (prompt-cache hits) is not part of the top-level
+    input total breakdown, so it is read from ``input_token_details.cache_read``
+    and accumulated separately -- it prices differently from cache misses, and
+    ``miss = input_tokens - cache_read``.
     """
     metadata = getattr(response, "usage_metadata", None)
     if not isinstance(metadata, dict):
         return
-    for key in _USAGE_KEYS:
+    for key in ("input_tokens", "output_tokens", "total_tokens"):
         value = metadata.get(key)
         if isinstance(value, int):
             usage[key] = usage.get(key, 0) + value
+    details = metadata.get("input_token_details")
+    if not isinstance(details, dict):
+        return
+    cache_read = details.get("cache_read")
+    if isinstance(cache_read, int):
+        usage["cache_read"] = usage.get("cache_read", 0) + cache_read
 
 
 def _model_turn(state: _LoopState) -> AIMessage | None:
@@ -233,6 +239,15 @@ def _execute_call(state: _LoopState, call: ToolCall) -> None:
     _reply_call(state, call, name, content, status)
 
 
+def _exceeds_token_budget(spent_tokens: int, max_total_tokens: int | None) -> bool:
+    """True once a run has spent more ``total_tokens`` than the cap.
+
+    ``None`` means no cap and never trips; a provider that does not report
+    ``total_tokens`` never trips either, because ``spent_tokens`` stays 0.
+    """
+    return max_total_tokens is not None and spent_tokens > max_total_tokens
+
+
 def run_loop(
     model: BaseChatModel,
     tools: Sequence[ToolSpec],
@@ -241,6 +256,7 @@ def run_loop(
     initial_messages: list[BaseMessage],
     hooks: Hooks | None = None,
     max_turns: int = MAX_TURNS,
+    max_total_tokens: int | None = None,
 ) -> LoopResult:
     """Run the review loop until every candidate row is resolved.
 
@@ -248,7 +264,9 @@ def run_loop(
     to confirm/dismiss a candidate. The run ends when all candidates are
     resolved (``review_complete``), or when the model stops requesting tools
     while some rows remain unresolved (incomplete), or at ``max_turns`` / on a
-    provider failure (``failure_reason``). The resolved worksheet is the result.
+    provider failure / past ``max_total_tokens`` (``failure_reason`` -- the
+    token cap is checked right after each model turn, against the accumulated
+    provider-reported ``total_tokens``). The resolved worksheet is the result.
     """
     tool_map = {spec.name: spec for spec in tools}
     state = _LoopState(
@@ -271,6 +289,12 @@ def run_loop(
         # The assistant turn must precede the tool replies it asked for: a
         # provider rejects a 'tool' message unless the assistant message with
         # the matching tool_calls is already in the history.
+        spent_tokens = state.result.usage.get("total_tokens", 0)
+        if _exceeds_token_budget(spent_tokens, max_total_tokens):
+            state.result.failure_reason = (
+                f"token budget exceeded: spent {spent_tokens} total_tokens, "
+                f"limit {max_total_tokens}")
+            break
         state.messages.append(response)
         calls = response.tool_calls  # already a list[ToolCall]
         if not calls:

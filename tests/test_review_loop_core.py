@@ -295,6 +295,89 @@ def test_provider_failure_keeps_usage_already_spent():
     assert result.usage == {"input_tokens": 20, "output_tokens": 4, "total_tokens": 24}
 
 
+def test_cache_read_accumulates_from_input_token_details():
+    # input_tokens is the grand total (cache hits included); cache_read is the
+    # cheaper slice, reported under input_token_details.
+    model = FakeModel([("", [_confirm_update("app::run")],
+                        {"input_tokens": 200, "output_tokens": 10, "total_tokens": 210,
+                         "input_token_details": {"cache_read": 150}}),
+                       ("", [_dismiss_update("app::helper")],
+                        {"input_tokens": 400, "output_tokens": 20, "total_tokens": 420,
+                         "input_token_details": {"cache_read": 350}})])
+
+    result = _run(model, _candidates("app::run", "app::helper"))
+
+    assert result.review_complete is True
+    assert result.usage == {"input_tokens": 600, "output_tokens": 30,
+                            "total_tokens": 630, "cache_read": 500}
+
+
+def test_cache_read_skipped_when_details_absent_or_non_int():
+    # turn 1 has no input_token_details; turn 2's cache_read is not an int
+    model = FakeModel([("", [_confirm_update("app::run")],
+                        {"input_tokens": 50, "output_tokens": 5, "total_tokens": 55}),
+                       ("", [_dismiss_update("app::helper")],
+                        {"input_tokens": 60, "output_tokens": 6, "total_tokens": 66,
+                         "input_token_details": {"cache_read": "lots"}})])
+
+    result = _run(model, _candidates("app::run", "app::helper"))
+
+    assert result.usage == {"input_tokens": 110, "output_tokens": 11, "total_tokens": 121}
+    assert "cache_read" not in result.usage
+
+
+# ---------------------------------------------------------------------------
+# token budget gate
+# ---------------------------------------------------------------------------
+
+def test_token_budget_stops_an_overspending_model():
+    # turn 1 stays under the cap; turn 2 crosses it, so its calls never run
+    model = FakeModel([("", [_confirm_update("app::run")],
+                        {"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500}),
+                       ("", [_dismiss_update("app::helper")],
+                        {"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500})])
+
+    result = run_loop(model, _make_tools(), candidates=_candidates("app::run", "app::helper"),
+                      initial_messages=[], max_total_tokens=2000)
+
+    assert result.review_complete is False
+    assert result.failure_reason == ("token budget exceeded: spent 3000 total_tokens, "
+                                     "limit 2000")
+    assert result.items["app::run"].state == "confirmed"
+    assert result.items["app::helper"].state == "candidate"  # dropped before it ran
+    assert result.usage["total_tokens"] == 3000
+
+
+def test_token_budget_allows_spending_up_to_the_cap():
+    # exactly at the cap is allowed; the run completes normally
+    model = FakeModel([("", [_confirm_update("app::run")],
+                        {"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500}),
+                       ("", [_dismiss_update("app::helper")],
+                        {"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500})])
+
+    result = run_loop(model, _make_tools(), candidates=_candidates("app::run", "app::helper"),
+                      initial_messages=[], max_total_tokens=3000)
+
+    assert result.review_complete is True
+    assert result.failure_reason is None
+    assert result.items["app::helper"].state == "dismissed"
+
+
+def test_token_budget_ignores_non_reporting_turns():
+    # turn 1 sits exactly at the cap; turn 2 reports no usage, so the cap never
+    # sees further spend (a documented blind spot: the gate reads reported totals)
+    model = FakeModel([("", [_confirm_update("app::run")],
+                        {"input_tokens": 1, "output_tokens": 0, "total_tokens": 1}),
+                       ("", [_dismiss_update("app::helper")])])
+
+    result = run_loop(model, _make_tools(), candidates=_candidates("app::run", "app::helper"),
+                      initial_messages=[], max_total_tokens=1)
+
+    assert result.review_complete is True
+    assert result.failure_reason is None
+    assert result.usage["total_tokens"] == 1
+
+
 # ---------------------------------------------------------------------------
 # tool execution mechanics (kept from the natural-stop loop)
 # ---------------------------------------------------------------------------
