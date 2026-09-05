@@ -123,6 +123,25 @@ def _trace_record(call: ToolCall, tool_call_id: str, status: ToolCallStatus, *,
     }
 
 
+_USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens")
+
+
+def _accumulate_usage(usage: dict[str, int], response: AIMessage) -> None:
+    """Add one model response's provider-reported tokens to the running total.
+
+    ``usage_metadata`` is optional and provider-shaped; only the keys that are
+    present and integral contribute, so a provider that omits a field just never
+    populates it.
+    """
+    metadata = getattr(response, "usage_metadata", None)
+    if not isinstance(metadata, dict):
+        return
+    for key in _USAGE_KEYS:
+        value = metadata.get(key)
+        if isinstance(value, int):
+            usage[key] = usage.get(key, 0) + value
+
+
 def _model_turn(state: _LoopState) -> AIMessage | None:
     """One model invoke; ``None`` means the run must stop (provider failure)."""
     state.turn += 1
@@ -132,6 +151,7 @@ def _model_turn(state: _LoopState) -> AIMessage | None:
     except Exception as exc:  # provider failure keeps the partial audit trail
         state.result.failure_reason = f"provider call failed: {exc}"
         return None
+    _accumulate_usage(state.result.usage, response)
     state.emit(POINT_MODEL_RESPONSE_RECEIVED, turn=state.turn,
                response_chars=len(str(response.content)),
                tool_calls=len(response.tool_calls))

@@ -109,8 +109,19 @@ class FakeModel:
         step = self._schedule.pop(0)
         if isinstance(step, Exception):
             raise step
-        content, calls = step
-        return AIMessage(content=content, tool_calls=calls)
+        usage = None
+        if len(step) == 3:  # (content, tool_calls, usage_metadata)
+            content, calls, usage = step
+        else:
+            content, calls = step
+        # AIMessage's pydantic model requires all three usage keys to be ints,
+        # so construct with a placeholder then overwrite: lets a test feed a
+        # provider-shaped partial/odd usage_metadata the constructor rejects.
+        message = AIMessage(content=content, tool_calls=calls,
+                            usage_metadata={"input_tokens": 0, "output_tokens": 0,
+                                            "total_tokens": 0})
+        message.usage_metadata = usage
+        return message
 
 
 def _run(model, candidates, **kwargs):
@@ -232,6 +243,56 @@ def test_resolving_last_candidate_in_an_action_turn_completes_the_run():
     assert result.review_complete is True
     assert result.tool_calls == [UPDATE_REVIEW_TOOL, "impact"]
     assert result.tool_call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# usage (model-side token accounting)
+# ---------------------------------------------------------------------------
+
+def test_usage_aggregates_model_reported_tokens_across_turns():
+    model = FakeModel([("", [_confirm_update("app::run")],
+                        {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}),
+                       ("", [_dismiss_update("app::helper")],
+                        {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15})])
+
+    result = _run(model, _candidates("app::run", "app::helper"))
+
+    assert result.review_complete is True
+    assert result.usage == {"input_tokens": 22, "output_tokens": 8, "total_tokens": 30}
+
+
+def test_usage_skips_absent_or_non_integral_provider_fields():
+    # the provider reports only output_tokens on turn 1 and a non-int on turn 2
+    model = FakeModel([("", [_confirm_update("app::run")],
+                        {"output_tokens": 7, "total_tokens": None}),
+                       ("", [_dismiss_update("app::helper")],
+                        {"input_tokens": 3, "output_tokens": "five"})])
+
+    result = _run(model, _candidates("app::run", "app::helper"))
+
+    assert result.usage == {"output_tokens": 7, "input_tokens": 3}
+
+
+def test_usage_stays_empty_when_provider_reports_none():
+    model = FakeModel([("", [_confirm_update("app::run")]),
+                       ("", [_dismiss_update("app::helper")])])
+
+    result = _run(model, _candidates("app::run", "app::helper"))
+
+    assert result.usage == {}
+
+
+def test_provider_failure_keeps_usage_already_spent():
+    # turn 1 reports usage before the call that should resolve the rest fails
+    model = FakeModel([("", [_confirm_update("app::run")],
+                        {"input_tokens": 20, "output_tokens": 4, "total_tokens": 24}),
+                       RuntimeError("connection reset")])
+
+    result = _run(model, _candidates("app::run", "app::helper"))
+
+    assert result.review_complete is False
+    assert result.failure_reason == "provider call failed: connection reset"
+    assert result.usage == {"input_tokens": 20, "output_tokens": 4, "total_tokens": 24}
 
 
 # ---------------------------------------------------------------------------

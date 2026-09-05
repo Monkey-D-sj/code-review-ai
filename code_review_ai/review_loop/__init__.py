@@ -27,6 +27,7 @@ from code_review_ai.review_loop.schemas import (
     ToolSpec,
     ToolTrace,
     UPDATE_REVIEW_TOOL,
+    Usage,
 )
 
 __all__ = [
@@ -45,5 +46,6 @@ __all__ = [
     "ToolSpec",
     "ToolTrace",
     "UPDATE_REVIEW_TOOL",
+    "Usage",
     "run_loop",
 ]

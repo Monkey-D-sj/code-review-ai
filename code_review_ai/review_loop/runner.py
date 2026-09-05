@@ -30,7 +30,12 @@ from code_review_ai.config import Config
 from code_review_ai.impact import affected_entries
 from code_review_ai.review_loop.loop import MAX_TURNS, run_loop
 from code_review_ai.review_loop.providers import build_review_model
-from code_review_ai.review_loop.schemas import Finding, LoopResult, ReviewItem
+from code_review_ai.review_loop.schemas import (
+    Finding,
+    LoopResult,
+    ReviewItem,
+    Usage,
+)
 from code_review_ai.review_loop.tools import make_tools, update_review_tool
 
 _API_KEY_ENV = "OPENAI_API_KEY"
@@ -175,6 +180,7 @@ __all__ = [
     "Finding",
     "LoopResult",
     "ReviewItem",
+    "Usage",
     "build_initial_messages",
     "create_model",
     "local_env_values",

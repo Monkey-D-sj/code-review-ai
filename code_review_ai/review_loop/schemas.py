@@ -40,6 +40,21 @@ class ToolTrace(TypedDict):
     response_chars: int
 
 
+class Usage(TypedDict, total=False):
+    """Aggregated model-side tokens for one run.
+
+    ``total=False``: only the keys the provider actually reports are present
+    (a turn that omits ``usage_metadata`` contributes nothing). Fields mirror
+    the ``usage_metadata`` an ``AIMessage`` carries from the provider, summed
+    across every model turn -- this is the model-side ground truth, not an
+    estimate of tool-output tokens (that comes later, if at all).
+    """
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     """A tool the loop can execute, without LangChain StructuredTool machinery.
@@ -116,6 +131,9 @@ class LoopResult:
     run completed), ``findings`` the confirmed rows' findings, and
     ``affected_entries`` the deterministic entry points the runner computes.
     ``review_complete`` is true only when every candidate was resolved.
+    ``usage`` aggregates the model-side tokens the provider reported across the
+    run's model turns (see ``Usage``); it survives a partial run so a truncated
+    review still shows what was spent.
     """
 
     items: dict[str, ReviewItem] = field(default_factory=dict)
@@ -123,6 +141,7 @@ class LoopResult:
     affected_entries: list[str] = field(default_factory=list)
     review_complete: bool = False
     failure_reason: str | None = None
+    usage: Usage = field(default_factory=dict)
     tool_trace: list[ToolTrace] = field(default_factory=list)
     tool_calls: list[str] = field(default_factory=list)
     tool_call_count: int = 0
