@@ -40,19 +40,16 @@ class ToolTrace(TypedDict):
     response_chars: int
 
 
-class Usage(TypedDict, total=False):
-    """Aggregated model-side tokens for one run.
+Usage = dict[str, int]
+"""Aggregated model-side tokens for one run (``LoopResult.usage``).
 
-    ``total=False``: only the keys the provider actually reports are present
-    (a turn that omits ``usage_metadata`` contributes nothing). Fields mirror
-    the ``usage_metadata`` an ``AIMessage`` carries from the provider, summed
-    across every model turn -- this is the model-side ground truth, not an
-    estimate of tool-output tokens (that comes later, if at all).
-    """
-
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
+A plain ``dict[str, int]`` so it stays assignable to and from the accumulator.
+Keys mirror the ``usage_metadata`` an ``AIMessage`` carries from the provider,
+summed across every model turn -- typically ``input_tokens``/``output_tokens``/
+``total_tokens``, and only those the provider reported are present. This is the
+model-side ground truth, not an estimate of tool-output tokens (that comes
+later, if at all).
+"""
 
 
 @dataclass(frozen=True)

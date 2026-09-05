@@ -31,7 +31,6 @@ from code_review_ai.review_loop.hooks import (
     POINT_RUN_FINISHED,
 )
 from code_review_ai.review_loop.schemas import (
-    Finding,
     LoopResult,
     ReviewItem,
     ReviewItemUpdate,
