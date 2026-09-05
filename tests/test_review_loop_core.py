@@ -276,6 +276,20 @@ def test_schema_rejected_call_never_fires_pre_or_post_tool():
     assert tool_events == []  # the call was rejected before it could run
 
 
+def test_assistant_turn_precedes_tool_replies_in_history():
+    model = FakeModel([("", [_call("impact", {"symbols": ["x"]}, "impact-1")]),
+                       ("done.", [])])
+
+    result = _run(model, _make_tools())
+
+    assert result.final_text == "done."
+    second_turn = model.invoked[1]
+    types = [message.type for message in second_turn]
+    # the assistant message carrying tool_calls must precede the tool reply,
+    # or the provider rejects the 'tool' message as dangling.
+    assert types.index("ai") < types.index("tool")
+
+
 def test_hooks_run_observers_in_registration_order_with_context():
     hooks = Hooks()
     received: list[tuple[str, int]] = []

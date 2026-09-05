@@ -211,6 +211,10 @@ def run_loop(
         response = _model_turn(state)
         if response is None:
             break
+        # The assistant turn must precede the tool replies it asked for: a
+        # provider rejects a 'tool' message unless the assistant message with
+        # the matching tool_calls is already in the history.
+        state.messages.append(response)
         calls = response.tool_calls  # already a list[ToolCall]
         if not calls:
             content = response.content
