@@ -128,7 +128,7 @@ def test_action_then_natural_stop_returns_the_final_text():
     assert result.tool_calls == ["impact"]
     assert result.tool_call_count == 1
     assert result.tool_request_count == 1
-    assert [record["status"] for record in result.tool_trace] == ["executed"]
+    assert [record["status"] for record in result.tool_trace] == ["success"]
 
 
 def test_immediate_stop_without_tools_is_a_clean_finish():
@@ -160,8 +160,8 @@ def test_invalid_args_are_a_policy_rejection_not_an_execution():
     assert result.final_text == "done."
     assert result.tool_call_count == 0
     assert result.tool_request_count == 1
-    assert [record["status"] for record in result.tool_trace] == ["rejected_policy"]
-    assert any("rejected_policy" in content for content in _tool_contents(model))
+    assert [record["status"] for record in result.tool_trace] == ["error"]
+    assert any("do not match the allowed schema" in content for content in _tool_contents(model))
 
 
 def test_runtime_tool_failure_is_answered_and_the_loop_continues():
@@ -183,7 +183,7 @@ def test_tool_self_reported_policy_denial_does_not_count_as_execution():
 
     assert result.tool_call_count == 0
     assert result.tool_request_count == 1
-    assert [record["status"] for record in result.tool_trace] == ["rejected_policy"]
+    assert [record["status"] for record in result.tool_trace] == ["error"]
 
 
 def test_several_tools_in_one_turn_all_run_in_order():
@@ -196,7 +196,7 @@ def test_several_tools_in_one_turn_all_run_in_order():
     assert result.final_text == "done."
     assert result.tool_calls == ["impact", "echo"]
     assert result.tool_call_count == 2
-    assert [record["status"] for record in result.tool_trace] == ["executed", "executed"]
+    assert [record["status"] for record in result.tool_trace] == ["success", "success"]
 
 
 def test_unknown_tool_is_rejected_and_the_loop_continues():
@@ -208,7 +208,7 @@ def test_unknown_tool_is_rejected_and_the_loop_continues():
     assert result.final_text == "done."
     assert result.tool_call_count == 0
     assert result.tool_request_count == 1
-    assert [record["status"] for record in result.tool_trace] == ["rejected_policy"]
+    assert [record["status"] for record in result.tool_trace] == ["error"]
     assert any("unknown tool" in content for content in _tool_contents(model))
 
 
@@ -221,7 +221,7 @@ def test_provider_failure_keeps_the_partial_audit_trail():
     assert result.final_text is None
     assert result.failure_reason == "provider call failed: connection reset"
     assert len(result.tool_trace) == 1
-    assert result.tool_trace[0]["status"] == "executed"
+    assert result.tool_trace[0]["status"] == "success"
     assert result.tool_call_count == 1
 
 

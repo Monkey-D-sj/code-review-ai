@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage, ToolCall
 from langchain_core.runnables import Runnable
 from pydantic import ValidationError
 
@@ -52,9 +52,6 @@ class _LoopState:
     hooks: Hooks = field(default_factory=Hooks)
     max_turns: int = MAX_TURNS
     turn: int = 0
-    request_count: int = 0
-    sequence: int = 0
-    last_ai: AIMessage | None = None
 
     def emit(self, point: str, **context: object) -> None:
         self.hooks.emit(point, **context)
@@ -66,22 +63,19 @@ def _error_content(status: str, message: str) -> str:
 
 
 def _result_status(content: str) -> ToolCallStatus:
-    """Classify what a tool returned.
+    """``success`` unless a tool's returned content reports an error.
 
-    A tool reports its *own* policy/runtime rejection as a ``{"status": ...}``
-    JSON string on a successful return, so those must not count as executions.
+    A tool reports its own failure as a ``{"status": ...}`` JSON string on a
+    successful return -- ``error`` or a policy ``rejected_policy`` -- either way
+    the call did not complete, so it counts as ``error``.
     """
     try:
         payload = json.loads(content)
     except ValueError:
-        return "executed"
-    if isinstance(payload, dict):
-        status = payload.get("status")
-        if status == "rejected_policy":
-            return "rejected_policy"
-        if status == "error":
-            return "error"
-    return "executed"
+        return "success"
+    if isinstance(payload, dict) and payload.get("status") in ("error", "rejected_policy"):
+        return "error"
+    return "success"
 
 
 def _bound_schema(spec: ToolSpec) -> dict:
@@ -93,28 +87,18 @@ def _bound_schema(spec: ToolSpec) -> dict:
     }
 
 
-def _call_id(call: dict, fallback: str) -> str:
-    value = call.get("id")
-    return value if isinstance(value, str) else fallback
-
-
-def _call_args(call: dict) -> dict:
-    args = call.get("args")
-    return args if isinstance(args, dict) else {}
-
-
-def _validate_args(spec: ToolSpec, call: dict) -> tuple[dict | None, str | None]:
+def _validate_args(spec: ToolSpec, call: ToolCall) -> tuple[dict | None, str | None]:
     """Schema-check a tool call before anything runs.
 
     Returns ``(kwargs, None)`` when the args are valid, or ``(None, rejection)``
-    with a machine-readable ``rejected_policy`` string when they are not. A call
-    that fails validation never runs, so it must not fire ``pre_tool``/``post_tool``.
+    with a machine-readable ``error`` string when they are not. A call that fails
+    validation never runs, so it must not fire ``pre_tool``/``post_tool``.
     """
     try:
-        validated = spec.args_schema.model_validate(_call_args(call))
+        validated = spec.args_schema.model_validate(call["args"])
     except ValidationError as exc:
         return None, _error_content(
-            "rejected_policy",
+            "error",
             f"tool arguments do not match the allowed schema "
             f"({exc.error_count()} validation error(s))")
     return validated.model_dump(exclude_unset=True), None
@@ -128,19 +112,18 @@ def _execute_tool(spec: ToolSpec, kwargs: dict) -> str:
         return _error_content("error", str(exc))
 
 
-def _trace_record(sequence: int, call: dict, status: ToolCallStatus, *,
+def _trace_record(call: ToolCall, tool_call_id: str, status: ToolCallStatus, *,
                   response_chars: int = 0) -> ToolTrace:
     return {
-        "sequence": sequence,
-        "tool_call_id": _call_id(call, f"unknown-{sequence}"),
-        "tool": str(call.get("name", "unknown")),
-        "input": _call_args(call),
+        "tool_call_id": tool_call_id,
+        "tool": call["name"],
+        "input": call["args"],
         "status": status,
         "response_chars": response_chars,
     }
 
 
-def _model_turn(state: _LoopState) -> list[dict] | None:
+def _model_turn(state: _LoopState) -> AIMessage | None:
     """One model invoke; ``None`` means the run must stop (provider failure)."""
     state.turn += 1
     state.emit(POINT_MODEL_REQUEST_STARTED, turn=state.turn)
@@ -149,47 +132,44 @@ def _model_turn(state: _LoopState) -> list[dict] | None:
     except Exception as exc:  # provider failure keeps the partial audit trail
         state.result.failure_reason = f"provider call failed: {exc}"
         return None
-    state.last_ai = response
-    calls = list(response.tool_calls)
     state.emit(POINT_MODEL_RESPONSE_RECEIVED, turn=state.turn,
                response_chars=len(str(response.content)),
-               tool_calls=len(calls))
-    return calls
+               tool_calls=len(response.tool_calls))
+    return response
 
 
-def _execute_call(state: _LoopState, call: dict) -> None:
+def _execute_call(state: _LoopState, call: ToolCall) -> None:
     """Answer one requested tool call: validate, run (or reject), and reply.
 
     A call that fails schema validation, or names a tool this run does not
     expose, never runs and never fires ``pre_tool``/``post_tool``; every call
     still gets exactly one ToolMessage back, as the provider protocol requires.
     """
-    state.request_count += 1
-    spec = state.tool_map.get(str(call.get("name", "")))
+    name = call["name"]
+    spec = state.tool_map.get(name)
     if spec is None:
-        content = _error_content("rejected_policy",
-                                 f"unknown tool {str(call.get('name', ''))!r}")
-        status: ToolCallStatus = "rejected_policy"
+        content = _error_content("error", f"unknown tool {name!r}")
+        status: ToolCallStatus = "error"
     else:
         kwargs, rejection = _validate_args(spec, call)
         if rejection is not None:
-            content, status = rejection, "rejected_policy"
+            content, status = rejection, "error"
         else:
-            state.emit(POINT_PRE_TOOL, name=spec.name, args=_call_args(call))
+            state.emit(POINT_PRE_TOOL, name=spec.name, args=call["args"])
             content = _execute_tool(spec, kwargs)
             status = _result_status(content)
             state.emit(POINT_POST_TOOL, name=spec.name, status=status,
                        response_chars=len(content))
-    state.sequence += 1
+    ordinal = len(state.result.tool_trace) + 1
+    call_id = call.get("id")
+    tool_call_id = call_id if isinstance(call_id, str) else f"unknown-{ordinal}"
     state.result.tool_trace.append(
-        _trace_record(state.sequence, call, status, response_chars=len(content)))
-    state.result.tool_calls.append(str(call.get("name", "")))
-    if status == "executed":
-        state.result.tool_call_count += 1
+        _trace_record(call, tool_call_id, status, response_chars=len(content)))
+    state.result.tool_calls.append(name)
     state.messages.append(ToolMessage(
         content=content,
-        tool_call_id=_call_id(call, f"unknown-{state.sequence}"),
-        name=str(call.get("name", "unknown"))))
+        tool_call_id=tool_call_id,
+        name=name))
 
 
 def run_loop(
@@ -225,16 +205,20 @@ def run_loop(
             state.result.failure_reason = (
                 f"agent kept requesting tools for {state.max_turns} turns")
             break
-        calls = _model_turn(state)
-        if calls is None:
+        response = _model_turn(state)
+        if response is None:
             break
+        calls = list(response.tool_calls)
         if not calls:
-            content = state.last_ai.content if state.last_ai is not None else ""
+            content = response.content
             state.result.final_text = content if isinstance(content, str) else ""
             break
         for call in calls:
             _execute_call(state, call)
-    state.result.tool_request_count = state.request_count
+    trace = state.result.tool_trace
+    state.result.tool_request_count = len(trace)
+    state.result.tool_call_count = sum(
+        record["status"] == "success" for record in trace)
     state.emit(POINT_RUN_FINISHED,
                failure_reason=state.result.failure_reason,
                final_chars=len(state.result.final_text or ""))

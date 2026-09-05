@@ -18,17 +18,19 @@ from pydantic import BaseModel
 
 
 ToolCallStatus = Literal[
-    "executed",
-    "rejected_policy",  # arguments or target violate a tool's own rules
-    "error",            # the tool ran but failed
+    "success",  # the call ran and returned usable content
+    "error",    # the call did not complete: bad args, unknown tool, or failed
 ]
 
 
 class ToolTrace(TypedDict):
-    """One auditable disposition of a requested tool call (same shape as
-    ``review_agent``'s ``ToolTrace``, so trace consumers stay compatible)."""
+    """One auditable disposition of a requested tool call.
 
-    sequence: int
+    Records are appended in execution order, so list position is the ordinal --
+    no explicit sequence number is stored. ``tool_call_id`` is the provider's
+    call id, or a synthesized ``unknown-<n>`` when the model omitted one.
+    """
+
     tool_call_id: str
     tool: str
     input: object

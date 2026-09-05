@@ -27,9 +27,11 @@ run_finished               at the single exit of run_loop            failure_rea
                                                                      final_chars
 =========================  ========================================  ===========
 
-``post_tool``'s ``status`` is one of ``executed`` (ran), ``rejected_policy``
-(its own policy/schema denial), or ``error`` (it raised) -- see ``ToolCallStatus``
-in ``schemas.py``. ``run_finished`` fires on every exit path, success or failure.
+``post_tool``'s ``status`` is ``success`` (the call ran and returned usable
+content) or ``error`` (it did not complete: bad args, unknown tool, a raised
+failure, or the tool's own ``error``/``rejected_policy`` JSON) -- see
+``ToolCallStatus`` in ``schemas.py``. ``run_finished`` fires on every exit path,
+success or failure.
 """
 
 from __future__ import annotations
