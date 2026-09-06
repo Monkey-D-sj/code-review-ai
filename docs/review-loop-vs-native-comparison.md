@@ -63,14 +63,17 @@ uv run --frozen python benchmarks/review_loop_case_compare.py \
 | 形态 | n | avg total tokens | 收敛/命中 | search 次数 |
 |---|---|---|---|---|
 | `native_agent` | 3 | ~30,970 | 3/3 · F1 1.0 | 全靠 grep |
-| `product` | 6 | ~7,700（修复 400 前成功样本） | 5/6 · 5/5 | 0（1 次除外） |
+| `product` | 6 | 成功 5 次 ≈ **7,500**（7.4–7.6k） | **5/6** · 5/5 | **0**（成功各次全 0） |
 | `plain` | 6 | ~23,375 | 5/6 · 5/5 | 6/6 |
 
-- 结论口径：**token 省 ~75%（native 的 ¼）；同 DeepSeek 单价表下成本省约一个数量级**。
-- 注意：product 那 5/6 的一次失败是已修复的 loop bug（DeepSeek 400，见 `7a898d7`），
-  **修复后应重跑 product 确认 6/6** 再当正式数。
+- 结论口径：**token 省 ~75%（native 的 ¼，product 成功样本 vs native）；同 DeepSeek 单价表
+  下成本省约一个数量级**（product ~0.007 元/次 vs native 人民币重算 ~0.07 元/次）。
+- product 剩余 1/6 失败**不再是 400 工具 bug**（已修，`7a898d7` 后 10/10 无 400），而是
+  **空轮 nudge cap 耗尽**（`1 candidate unresolved after 3 empty turn(s)`，模型连 3 次空轮
+  不 resolve）。即修复后收敛仍 5/6，缺口在"强制收敛"而非工具。
 - free-form 消融发现：单独拿掉 get_impact（不拿掉 summary）≈0 token 收益——get_impact
   依赖前一步索引给的 qname 才有用，价值在与 summary 配套（产品不能拆开卖）。
+- 复跑命令：`uv run --frozen python benchmarks/review_loop_case_compare.py --runs 6 --arms product`。
 
 ## 六、跑完一个 case 的核对清单
 
