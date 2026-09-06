@@ -94,8 +94,10 @@ def _candidates(*qnames: str) -> list[ReviewItem]:
 class FakeModel:
     """bind_tools-shaped fake: records what it binds, replays a script of turns.
 
-    Each schedule entry is a ``(content, tool_calls)`` pair, or an ``Exception``
-    to simulate a provider failure.
+    Each schedule entry is a ``(content, tool_calls)`` pair, optionally a
+    ``(content, tool_calls, usage_metadata)`` triple or a
+    ``(content, tool_calls, usage_metadata, reasoning_content)`` 4-tuple, or an
+    ``Exception`` to simulate a provider failure.
     """
 
     def __init__(self, schedule):
@@ -113,7 +115,10 @@ class FakeModel:
         if isinstance(step, Exception):
             raise step
         usage = None
-        if len(step) == 3:  # (content, tool_calls, usage_metadata)
+        reasoning = None
+        if len(step) == 4:  # (content, tool_calls, usage_metadata, reasoning)
+            content, calls, usage, reasoning = step
+        elif len(step) == 3:  # (content, tool_calls, usage_metadata)
             content, calls, usage = step
         else:
             content, calls = step
@@ -124,6 +129,8 @@ class FakeModel:
                             usage_metadata={"input_tokens": 0, "output_tokens": 0,
                                             "total_tokens": 0})
         message.usage_metadata = usage
+        if reasoning is not None:
+            message.additional_kwargs["reasoning_content"] = reasoning
         return message
 
 
@@ -234,6 +241,36 @@ def test_tool_less_assistant_turns_are_not_appended_to_history():
     nudge_batch = model.invoked[1]
     assert all(message.type != "ai" for message in nudge_batch)
     assert any(message.type == "human" for message in nudge_batch)
+
+
+def test_empty_turn_failure_records_each_turn_text_and_reasoning():
+    # the debugging record must keep what the model actually wrote across the
+    # empty turns (text + reasoning), even though those turns never re-enter the
+    # history (they carry no state and DeepSeek hallucinates tool_calls onto
+    # them). This is the payload a post-mortem reads on the rare empty-turn
+    # failure -- so a blank here means the transcript was lost before analysis.
+    model = FakeModel([("no issues to flag.", [], None, "scanning callers..."),
+                       ("", [], None, "still no call site"),
+                       ("nothing to confirm.", [], None, "decided: not a bug")])
+
+    result = _run(model, _candidates("app::run"), max_empty_turns=2)
+
+    assert result.review_complete is False
+    assert result.failure_reason is not None
+    assert "unresolved after 3 empty turn(s)" in result.failure_reason
+    recorded = result.assistant_turns
+    assert [turn.turn for turn in recorded] == [1, 2, 3]
+    assert [turn.content for turn in recorded] == ["no issues to flag.", "",
+                                                   "nothing to confirm."]
+    assert [turn.reasoning for turn in recorded] == ["scanning callers...",
+                                                     "still no call site",
+                                                     "decided: not a bug"]
+    assert all(turn.tool_calls == [] for turn in recorded)
+    # the nudges the loop wrote are not mistaken for model speech
+    assert all("尚有 candidate" not in (turn.content or "") for turn in recorded)
+    # and the empty turns stayed out of the re-sent history: only nudges accrue
+    assert all(message.type != "ai" for message in model.invoked[-1])
+    assert any(message.type == "human" for message in model.invoked[-1])
 
 
 def test_hidden_tool_calls_are_promoted_and_executed():
