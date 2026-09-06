@@ -221,6 +221,36 @@ def test_empty_stop_between_updates_is_nudged_back_to_finish():
     assert nudges
 
 
+def test_tool_less_assistant_turns_are_not_appended_to_history():
+    # an empty assistant turn carries no state, and (DeepSeek) serializers have
+    # hallucinated tool_calls onto such turns -> provider 400. It must not be
+    # sent back; only the nudge human message follows.
+    model = FakeModel([("no issues to flag.", []),
+                       ("", [_dismiss_update("app::run")])])
+
+    result = _run(model, _candidates("app::run"))
+
+    assert result.review_complete is True
+    nudge_batch = model.invoked[1]
+    assert all(message.type != "ai" for message in nudge_batch)
+    assert any(message.type == "human" for message in nudge_batch)
+
+
+def test_hidden_tool_calls_are_promoted_and_executed():
+    from code_review_ai.review_loop.loop import _promote_hidden_tool_calls
+
+    assistant = AIMessage(content="", tool_calls=[])
+    assistant.additional_kwargs["tool_calls"] = [{
+        "id": "call_hidden", "type": "function",
+        "function": {"name": "echo", "arguments": '{"text": "hi"}'}}]
+
+    _promote_hidden_tool_calls(assistant)
+
+    assert assistant.tool_calls == [{"id": "call_hidden", "name": "echo",
+                                     "args": {"text": "hi"}}]
+    assert "tool_calls" not in assistant.additional_kwargs
+
+
 def test_invalid_update_payload_is_rejected_and_worksheet_untouched():
     # turn 1: confirmed without a finding -> rejected, row untouched
     model = FakeModel([("", [_update_call("app::run", state="confirmed")]),

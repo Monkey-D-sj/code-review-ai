@@ -34,13 +34,19 @@ class ReasoningChatModelMixin:
             for source, outgoing in zip(input_, messages):
                 reasoning = getattr(source, "additional_kwargs", {}).get(
                     "reasoning_content")
+                # Echo reasoning verbatim, matching how the provider's own
+                # client appends the assistant turn ({content,
+                # reasoning_content, tool_calls}). The base serializer drops it.
+                # Only echo beside an assistant that also carries tool_calls: a
+                # plain-text / empty assistant turn does not need its reasoning
+                # re-sent, and echoing it there has tripped DeepSeek's
+                # "tool_calls must be followed by tool replies" validation on a
+                # later multi-tool request.
+                has_tool_calls = bool(outgoing.get("tool_calls"))
                 if (isinstance(outgoing, dict)
                         and outgoing.get("role") == "assistant"
+                        and has_tool_calls
                         and isinstance(reasoning, str) and reasoning):
-                    # Echo the reasoning verbatim as a sibling of content and
-                    # tool_calls, matching how the provider's own client would
-                    # append the assistant turn ({content, reasoning_content,
-                    # tool_calls}). The base serializer drops this field.
                     outgoing["reasoning_content"] = reasoning
         except Exception:
             pass

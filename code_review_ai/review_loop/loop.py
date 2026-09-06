@@ -160,15 +160,123 @@ def _accumulate_usage(usage: dict[str, int], response: AIMessage) -> None:
         usage["cache_read"] = usage.get("cache_read", 0) + cache_read
 
 
+def _coerce_tool_call(call: object) -> dict | None:
+    """Normalize one provider tool_call dict (openai or our ToolCall shape)."""
+    if not isinstance(call, dict):
+        return None
+    call_id = call.get("id")
+    name = call.get("name")
+    args = call.get("args")
+    function = call.get("function")
+    if isinstance(function, dict):  # openai: {"id", "type", "function":{...}}
+        name = function.get("name", name)
+        raw_args = function.get("arguments")
+        if isinstance(raw_args, str):
+            try:
+                args = json.loads(raw_args) or {}
+            except ValueError:
+                args = {}
+        else:
+            args = raw_args
+    if not isinstance(call_id, str) or not isinstance(name, str):
+        return None
+    return {"id": call_id, "name": name, "args": args if isinstance(args, dict) else {}}
+
+
+def _pending_tool_call_ids(message: BaseMessage) -> list[str]:
+    """tool_call ids an assistant turn requests, from top-level or hidden kwargs."""
+    ids = [call["id"] for call in (getattr(message, "tool_calls", None) or [])
+           if isinstance(call.get("id"), str)]
+    hidden = getattr(message, "additional_kwargs", {}).get("tool_calls")
+    if isinstance(hidden, list):
+        for call in hidden:
+            coerced = _coerce_tool_call(call)
+            if coerced is not None:
+                ids.append(coerced["id"])
+    return ids
+
+
+def _ensure_tool_replies(messages: list[BaseMessage]) -> None:
+    """Guarantee every assistant tool_call has a reply before sending.
+
+    DeepSeek 400s when an assistant message carries tool_calls (including ones
+    a provider parser hid in additional_kwargs) with no following tool reply.
+    Self-heal the history: whenever a non-tool message appears while some
+    tool_call ids are still unanswered, insert an error ToolMessage for each
+    right before it. Normally a no-op.
+    """
+    pending: dict[str, str] = {}
+    for index, message in enumerate(messages):
+        if isinstance(message, ToolMessage):
+            pending.pop(message.tool_call_id, None)
+            continue
+        if isinstance(message, AIMessage) and message.tool_calls:
+            pending = {call_id: index for call_id in _pending_tool_call_ids(message)}
+            continue
+        if pending:  # a system/user/plain-assistant turn interrupts the replies
+            for call_id in sorted(pending):
+                messages.insert(index, ToolMessage(
+                    content=_error_content(
+                        "error", "no recorded reply for this tool call"),
+                    tool_call_id=call_id))
+            pending = {}
+    for call_id in sorted(pending):  # trailing assistant tool_calls at the end
+        messages.append(ToolMessage(
+            content=_error_content("error", "no recorded reply for this tool call"),
+            tool_call_id=call_id))
+
+
+def _promote_hidden_tool_calls(response: AIMessage) -> None:
+    """Lift tool_calls that langchain-deepseek left in additional_kwargs.
+
+    DeepSeek occasionally returns a tool_calls array that the parser stores in
+    ``additional_kwargs["tool_calls"]`` instead of the top-level ``.tool_calls``.
+    The loop would then see an "empty" assistant turn, nudge instead of
+    executing, but the outbound serializer still re-sends the hidden tool_calls
+    -- and DeepSeek 400s for lacking replies to it. Promote (and remove) them so
+    the loop executes and replies them like any other tool call.
+    """
+    hidden = response.additional_kwargs.pop("tool_calls", None)
+    if response.tool_calls or not isinstance(hidden, list):
+        return
+    promoted = [call for call in (_coerce_tool_call(call) for call in hidden)
+                if call is not None]
+    if promoted:
+        response.tool_calls = promoted
+
+
+def _transient_tool_400(exc: Exception) -> bool:
+    """True for DeepSeek's "tool_calls must be followed by tool replies" 400.
+
+    The usual cause is a hidden tool_calls array (see _promote_hidden_tool_calls)
+    that left the assistant turn without replies; that is now fixed at the
+    source. This retry remains as a second line of defence for the same 400
+    from any other shape.
+    """
+    text = str(exc)
+    return ("400" in text and "tool messages following tool_calls" in text)
+
+
 def _model_turn(state: _LoopState) -> AIMessage | None:
-    """One model invoke; ``None`` means the run must stop (provider failure)."""
+    """One model invoke; ``None`` means the run must stop (provider failure).
+
+    The one retried failure is DeepSeek's tool-reply 400 above: the exact same
+    request is sent again once. Everything else fails the run and keeps the
+    partial audit trail.
+    """
     state.turn += 1
     state.emit(POINT_MODEL_REQUEST_STARTED, turn=state.turn)
-    try:
-        response = state.bound.invoke(state.messages)
-    except Exception as exc:  # provider failure keeps the partial audit trail
-        state.result.failure_reason = f"provider call failed: {exc}"
-        return None
+    _ensure_tool_replies(state.messages)
+    for attempt in (0, 1):
+        try:
+            response = state.bound.invoke(state.messages)
+            break
+        except Exception as exc:  # provider failure keeps the partial audit trail
+            if attempt == 0 and _transient_tool_400(exc):
+                continue
+            state.result.failure_reason = f"provider call failed: {exc}"
+            return None
+    _promote_hidden_tool_calls(response)
     _accumulate_usage(state.result.usage, response)
     state.emit(POINT_MODEL_RESPONSE_RECEIVED, turn=state.turn,
                response_chars=len(str(response.content)),
@@ -348,12 +456,15 @@ def run_free_loop(
                 f"token budget exceeded: spent {spent_tokens} total_tokens, "
                 f"limit {max_total_tokens}")
             break
-        state.messages.append(response)
         calls = response.tool_calls  # already a list[ToolCall]
         if not calls:
+            # A tool-less assistant turn carries no state (tools carry it) and
+            # DeepSeek's serializer can hallucinate a tool_call onto some empty
+            # reasoning turns, so it is never appended to the history.
             state.result.failure_reason = (
                 "agent stopped without submitting finish_review")
             break
+        state.messages.append(response)
         submitted = False
         for call in calls:
             if call["name"] == FINISH_REVIEW_TOOL:
@@ -410,23 +521,17 @@ def run_loop(
         response = _model_turn(state)
         if response is None:
             break
-        # The assistant turn must precede the tool replies it asked for: a
-        # provider rejects a 'tool' message unless the assistant message with
-        # the matching tool_calls is already in the history.
         spent_tokens = state.result.usage.get("total_tokens", 0)
         if max_total_tokens is not None and spent_tokens > max_total_tokens:
             state.result.failure_reason = (
                 f"token budget exceeded: spent {spent_tokens} total_tokens, "
                 f"limit {max_total_tokens}")
             break
-        state.messages.append(response)
-        # TODO: history grows unboundedly and every invoke re-sends all of it (a
-        # real run hit ~70k chars / 36k input tokens by turn 15). Once history
-        # exceeds a threshold, compress early turns (drop or summarize, keeping
-        # system + worksheet + recent turns) without separating an ai message
-        # that carries tool_calls from the tool replies that follow it.
         calls = response.tool_calls  # already a list[ToolCall]
         if not calls:
+            # A tool-less assistant turn carries no state (tools carry it) and
+            # DeepSeek's serializer can hallucinate a tool_call onto some empty
+            # reasoning turns, so it is never appended to the history.
             if _all_resolved(state.candidates):
                 state.result.review_complete = True
                 break  # every row decided; the model's closing turn is fine
@@ -440,6 +545,15 @@ def run_loop(
             state.messages.append(_nudge_message(state.candidates))
             continue
         state.empty_turns = 0  # the model acted; a later empty turn restarts
+        # The assistant turn must precede the tool replies it asked for: a
+        # provider rejects a 'tool' message unless the assistant message with
+        # the matching tool_calls is already in the history.
+        state.messages.append(response)
+        # TODO: history grows unboundedly and every invoke re-sends all of it (a
+        # real run hit ~70k chars / 36k input tokens by turn 15). Once history
+        # exceeds a threshold, compress early turns (drop or summarize, keeping
+        # system + worksheet + recent turns) without separating an ai message
+        # that carries tool_calls from the tool replies that follow it.
         for call in calls:
             _execute_call(state, call)
         if _all_resolved(state.candidates):
