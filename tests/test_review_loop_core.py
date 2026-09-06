@@ -692,3 +692,24 @@ def test_free_loop_provider_failure_preserves_partial_research_trace():
     assert result.failure_reason == "provider call failed: connection reset"
     assert result.tool_call_count == 1
     assert len(result.tool_trace) == 1
+
+
+def test_assistant_turns_record_text_and_reasoning_per_turn():
+    class ReasoningTextModel:
+        """Returns one tool-less reply carrying text + reasoning."""
+
+        def bind_tools(self, schemas):
+            return self
+
+        def invoke(self, messages):
+            reply = AIMessage(content="clean code, no regression")
+            reply.additional_kwargs["reasoning_content"] = "thinking through callers"
+            return reply
+
+    result = _free_run(ReasoningTextModel())
+
+    # the empty turn fails the free run, but its text is kept for debugging
+    assert result.review_complete is False
+    assert result.assistant_turns[0].content == "clean code, no regression"
+    assert result.assistant_turns[0].reasoning == "thinking through callers"
+    assert result.assistant_turns[0].tool_calls == []

@@ -99,6 +99,24 @@ class ReviewSubmission(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
 
 
+class AssistantTurn(BaseModel):
+    """One model reply kept for post-hoc debugging (esp. empty turns).
+
+    ``content`` is the visible assistant text, ``reasoning`` the provider's
+    ``reasoning_content`` when present, and ``tool_calls`` the tool names that
+    reply requested. Recorded for every model turn so a failed/empty run can be
+    reconstructed after the fact (the empty-turn replies are otherwise dropped
+    from the sent history).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    turn: int = Field(ge=1)
+    content: str = ""
+    reasoning: str | None = None
+    tool_calls: list[str] = Field(default_factory=list)
+
+
 FindingState = Literal["candidate", "confirmed", "dismissed"]
 
 
@@ -162,6 +180,7 @@ class LoopResult:
     failure_reason: str | None = None
     usage: Usage = field(default_factory=dict)
     cost: float = 0.0
+    assistant_turns: list[AssistantTurn] = field(default_factory=list)
     tool_trace: list[ToolTrace] = field(default_factory=list)
     tool_calls: list[str] = field(default_factory=list)
     tool_call_count: int = 0

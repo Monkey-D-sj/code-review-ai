@@ -38,6 +38,7 @@ from code_review_ai.review_loop.hooks import (
 )
 from code_review_ai.review_loop.schemas import (
     FINISH_REVIEW_TOOL,
+    AssistantTurn,
     LoopResult,
     ReviewItem,
     ReviewItemUpdate,
@@ -245,6 +246,36 @@ def _promote_hidden_tool_calls(response: AIMessage) -> None:
         response.tool_calls = promoted
 
 
+def _assistant_text(content: object) -> str:
+    """Flatten an assistant content (string or list of text blocks) to text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(str(block.get("text", "")))
+        return "".join(parts)
+    return str(content) if content is not None else ""
+
+
+def _record_assistant_turn(state: _LoopState, response: AIMessage) -> None:
+    """Keep every model reply (text + reasoning) for post-hoc debugging.
+
+    Empty turns are deliberately dropped from the sent history (they carry no
+    state), so without this the reviewer could not see what the model wrote on
+    an empty/failed run.
+    """
+    reasoning = response.additional_kwargs.get("reasoning_content")
+    state.result.assistant_turns.append(AssistantTurn(
+        turn=state.turn,
+        content=_assistant_text(response.content),
+        reasoning=reasoning if isinstance(reasoning, str) else None,
+        tool_calls=[call["name"] for call in response.tool_calls]))
+
+
 def _transient_tool_400(exc: Exception) -> bool:
     """True for DeepSeek's "tool_calls must be followed by tool replies" 400.
 
@@ -277,6 +308,7 @@ def _model_turn(state: _LoopState) -> AIMessage | None:
             state.result.failure_reason = f"provider call failed: {exc}"
             return None
     _promote_hidden_tool_calls(response)
+    _record_assistant_turn(state, response)
     _accumulate_usage(state.result.usage, response)
     state.emit(POINT_MODEL_RESPONSE_RECEIVED, turn=state.turn,
                response_chars=len(str(response.content)),

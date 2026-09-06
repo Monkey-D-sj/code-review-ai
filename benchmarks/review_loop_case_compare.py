@@ -122,6 +122,9 @@ def _snapshot(result, label: str) -> dict:
         "input": result.usage.get("input_tokens", 0),
         "cache_read": result.usage.get("cache_read", 0),
         "cost": compute_cost(result.usage),
+        "turns": [{"turn": turn.turn, "content": turn.content,
+                   "reasoning": turn.reasoning, "tools": turn.tool_calls}
+                  for turn in result.assistant_turns],
     }
 
 

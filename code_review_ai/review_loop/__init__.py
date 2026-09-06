@@ -20,6 +20,7 @@ from code_review_ai.review_loop.loop import run_free_loop, run_loop
 from code_review_ai.review_loop.pricing import compute_cost
 from code_review_ai.review_loop.schemas import (
     FINISH_REVIEW_TOOL,
+    AssistantTurn,
     Finding,
     FindingState,
     LoopResult,
@@ -35,6 +36,7 @@ from code_review_ai.review_loop.schemas import (
 
 __all__ = [
     "FINISH_REVIEW_TOOL",
+    "AssistantTurn",
     "Finding",
     "FindingState",
     "Hooks",
