@@ -203,6 +203,36 @@ class TestRowAndBatch:
         assert {row["run"] for row in rows} == {1, 2, 3}
 
 
+class TestCallerOwnedRows:
+    """``run_batch`` must fill the list the caller keeps, not a private one.
+
+    A harvester that writes its output file from inside ``on_row`` reads that
+    list, so a second list the callback has to remember to append to is a
+    silent way to persist nothing while every run reports success.
+    """
+
+    def test_on_row_sees_the_caller_owned_list_growing(self):
+        rows: list[dict] = []
+        seen: list[int] = []
+        rows = run_batch([CASE, CASE_WITH_ALTERNATE], arms=("graph",), runs=2,
+                         rows=rows, prepare=lambda case: case,
+                         execute=lambda arm, case, prepared: _Result(
+                             findings=[_finding("app/x.py")]),
+                         on_row=lambda row: seen.append(len(rows)))
+
+        # 2 cases x 1 arm x 2 runs: the count grows as each row lands.
+        assert seen == [1, 2, 3, 4], "on_row must observe rows already appended"
+        assert len(rows) == 4
+        assert all(row["hit"] for row in rows)
+
+    def test_without_a_caller_list_it_still_returns_every_row(self):
+        rows = run_batch([CASE], arms=("graph",), runs=1,
+                         prepare=lambda case: case,
+                         execute=lambda arm, case, prepared: _Result())
+
+        assert len(rows) == 1
+
+
 class TestSummarize:
     def test_a_perfect_reporter_scores_one_and_an_empty_one_scores_zero(self):
         rows, _p, _r, _c = _batch(findings_for={"graph": [_finding("app/x.py")]})

@@ -200,7 +200,7 @@ def row_from(result, case: EvalCase, arm: str, run_no: int) -> dict:
     }
 
 
-def run_batch(cases, *, arms, runs: int, prepare, execute,
+def run_batch(cases, *, arms, runs: int, prepare, execute, rows=None,
               release=None, on_row=None) -> list[dict]:
     """Run every arm against every case, ``runs`` times each.
 
@@ -208,11 +208,16 @@ def run_batch(cases, *, arms, runs: int, prepare, execute,
     ``execute(arm, case, prepared)`` needs; ``release(prepared)`` tears it down.
     Both are injected so the batching is testable without a repo or a model.
 
+    ``rows`` may be a caller-owned list to append into. Pass one when
+    ``on_row`` needs the rows so far -- an incremental output file, say -- so
+    there is a single list rather than a second one the callback must remember
+    to keep in step.
+
     Arms alternate inside each repetition (rather than one arm draining the
     whole batch) so a provider that slows or degrades mid-run affects both
     equally.
     """
-    rows: list[dict] = []
+    rows = [] if rows is None else rows
     for case in cases:
         prepared = prepare(case)
         try:

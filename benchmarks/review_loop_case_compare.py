@@ -227,7 +227,7 @@ def main() -> None:
         _progress(row)
         _write_output(output, cases, args.arms, args.runs, rows)
 
-    run_batch(cases, arms=args.arms, runs=args.runs,
+    run_batch(cases, arms=args.arms, runs=args.runs, rows=rows,
               prepare=prepare_case,
               execute=lambda arm, case, prepared: _ARM_RUNNERS[arm](prepared, model),
               release=release_case, on_row=record)
