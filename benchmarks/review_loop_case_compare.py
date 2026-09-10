@@ -26,14 +26,15 @@ The scored outcome is one thing -- did the run report the injected defect
 columns (tokens, files read, tool calls), not off a second score.
 
 Usage:
-    uv run --no-sync python benchmarks/review_loop_case_compare.py \
+    uv run python benchmarks/review_loop_case_compare.py \
         [--case case-backend-decrypt-password-alias] [--runs 6] \
         [--arms graph nograph] [-o eval-results/review-loop-ab.json]
 
-``--no-sync`` matters: a bare ``uv run`` re-syncs the venv to the project's
-default dependency set, which uninstalls the ``deepseek`` provider package this
-needs (and pytest with it), and can collide with a running MCP server holding
-the venv's file lock.
+Both the DeepSeek provider this needs and pytest live in the ``dev`` dependency
+group, which ``uv run`` syncs by default -- so a bare ``uv run`` is correct.
+(Putting the provider in an *extra* made every bare ``uv run`` prune it out of
+the venv. Add ``--no-sync`` only to dodge the venv's file lock while a
+``code-review-ai-mcp.exe`` is running.)
 
 Requires repo-local .env model config (CRAI_REVIEW_MODEL etc.).
 """

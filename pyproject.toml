@@ -21,11 +21,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
 community = ["leidenalg", "igraph"]
 deepseek = [
     "langchain-deepseek>=1",
 ]
+
+# Development dependencies live in a PEP 735 group rather than an extra:
+# `uv run` syncs a group by default (uv's `default-groups` is ["dev"]), while an
+# extra only joins the sync when asked for -- so a bare `uv run` used to prune
+# pytest and the DeepSeek provider out of the venv. The DeepSeek provider is
+# repeated here because the review loop cannot be run or tested without it; the
+# `deepseek` extra above stays for users who install the tool itself.
+[dependency-groups]
+dev = ["pytest>=8", "langchain-deepseek>=1"]
 
 [project.scripts]
 code-review-ai = "code_review_ai.cli:main"

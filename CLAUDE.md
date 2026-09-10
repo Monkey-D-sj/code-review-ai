@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-uv sync --extra dev              # install deps incl. pytest
+uv sync                          # installs the `dev` group (pytest + the DeepSeek provider)
 uv run pytest                    # run all tests (testpaths = ["tests"])
 uv run pytest tests/test_flow_builder.py                 # one file
 uv run pytest tests/test_flow_builder.py::test_linear_chain   # one test
