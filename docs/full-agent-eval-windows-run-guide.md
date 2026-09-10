@@ -11,7 +11,7 @@ uv run --no-sync python -m code_review_ai.cli full-agent-eval \
   --case-ids case-backend-decrypt-password-alias \
   --agent-command "C:\Users\HMG-BA110\Desktop\code-review-ai\.venv\Scripts\python.exe -m code_review_ai.agent_adapter claude" \
   --model deepseek-v4-flash \
-  --modes full_project_core \
+  --modes loop_full \
   --work-dir eval-results/<run-name> \
   -o eval-results/<run-name>/report.json
 ```
@@ -41,7 +41,7 @@ uv run --no-sync python -m code_review_ai.cli full-agent-eval \
 uv run --no-sync python -m code_review_ai.cli full-agent-eval \
   --cases benchmarks/case-backend-cases.json \
   --case-ids <case-id> --agent-command "<abs-venv-python> -m code_review_ai.agent_adapter claude" \
-  --modes full_project_core --dry-run
+  --modes loop_full --dry-run
 
 # 2) 确认 agent-command 能从 worktree cwd 解析（代替真实 run 的秒挂诊断）
 cd eval-results/<run-name>/worktrees/<case-id>-*/ && \

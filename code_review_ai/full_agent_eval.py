@@ -21,7 +21,6 @@ from code_review_ai.agent_eval import (
     _parse_agent_output, _score, _string_values, _usage,
     SHARED_REVIEW_POLICY,
 )
-from code_review_ai.agent_adapter import MCP_TOOL_NAMES
 from code_review_ai.changes import (
     detect_changed_symbols,
     detect_changed_symbols_from_patch,
@@ -40,45 +39,11 @@ from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild
 
 
-FULL_EVAL_MODES = ("native_agent", "native_full",
-                   "full_project_agent",
-                   "full_project_querygraph", "full_project_summary",
-                   "full_project_search", "full_project_core",
-                   "full_project_core_json", "full_project_core_toon")
-DEFAULT_FULL_EVAL_MODES = ("native_agent", "full_project_core")
-
-# MCP tool subset each online-ablation mode exposes, fed to the agent via
-# CRAI_EVAL_MCP_TOOLS and to the server via CRAI_MCP_ONLY_TOOLS (server-side
-# registration filter). None = the full online tool set.
-_CORE_EXCLUDED_MCP_TOOLS = {
-    "rebuild_index", "get_communities", "get_community", "call_external_service",
-    "find_dead_code", "query_graph", "get_change_context", "get_test_impact",
-}
-_CORE_MCP_TOOLS = tuple(
-    name for name in MCP_TOOL_NAMES if name not in _CORE_EXCLUDED_MCP_TOOLS)
-
-_MODE_MCP_TOOLS: dict[str, tuple[str, ...] | None] = {
-    "full_project_agent": None,
-    "full_project_querygraph": ("query_graph",),
-    "full_project_summary": ("get_change_summary",),
-    "full_project_search": ("search_symbol",),
-    "full_project_core": _CORE_MCP_TOOLS,
-    "full_project_core_json": _CORE_MCP_TOOLS,
-    "full_project_core_toon": _CORE_MCP_TOOLS,
-}
-
-# Serialization ablation for the core toolset: ``full_project_core_json``
-# forces the MCP server to emit JSON (now the default) and
-# ``full_project_core_toon`` forces TOON text, so the two arms differ only in
-# the tool-response format, not the tool surface or the prompt. Empty (plain
-# ``full_project_core``) = keep the server default (JSON). TOON is disabled by
-# default because 2026-08 measurements showed it saves nothing on deep-nested
-# payloads (see mcp_server._forced_toon). Fed to the agent subprocess as
-# CRAI_EVAL_TOON, which agent_adapter._mcp_config passes to the server.
-_MODE_TOON: dict[str, str] = {
-    "full_project_core_json": "0",
-    "full_project_core_toon": "1",
-}
+# Eval arms are the review loop's own tool surfaces: ``loop_full`` exposes the
+# graph retrieval tools, ``loop_nograph`` runs the same loop without them, so
+# the pair isolates what the graph contributes.
+FULL_EVAL_MODES = ("loop_full", "loop_nograph")
+DEFAULT_FULL_EVAL_MODES = ("loop_full",)
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _READ_ONLY_REVIEW_POLICY = """本评估强制以只读方式执行。你只能使用 Read、Glob、Grep、允许列表中的只读 Bash 命令（例如
@@ -473,7 +438,7 @@ def run_full_agent_eval(cases: list[FullAgentCase], repos_dir: str,
     aggregates = _full_aggregates(runs, modes)
     return {"schema_version": 2, "gold_schema_version": 1,
             "evaluation": "full_project_online_tool_use",
-            "baseline_mode": "native_agent",
+            "baseline_mode": "loop_nograph",
             "modes": list(modes), "repetitions": repetitions,
             "hint_mode": "hinted" if hinted else "blind",
             "guidance_mode": "stripped" if _guidance_stripped() else "full",
@@ -593,18 +558,14 @@ def _difficulty_counts(cases: list[FullAgentCase]) -> dict[str, int]:
 
 
 def _eval_tool_profile(mode: str) -> str:
-    """Map an eval mode to the adapter's tool profile.
+    """Map an eval mode to the agent-side tool profile.
 
-    ``native_agent`` restricts the model to the four read-only native tools;
-    ``native_full`` grants every Claude Code built-in tool (no MCP), to probe
-    whether the wider toolset changes agent behavior; every ``full_project_*``
-    mode adds the product's MCP tools.
+    ``loop_nograph`` restricts the agent to read-only code search;
+    ``loop_full`` adds the product's graph retrieval tools. The profile is
+    exported as ``CRAI_EVAL_TOOL_PROFILE`` for adapters that drive an external
+    agent; the review loop reads the mode itself.
     """
-    if mode == "native_agent":
-        return "native"
-    if mode == "native_full":
-        return "native_full"
-    return "full_project"
+    return "native" if mode == "loop_nograph" else "full_project"
 
 
 def _run_once(item: PreparedCase, mode: str, repetition: int,
@@ -621,14 +582,6 @@ def _run_once(item: PreparedCase, mode: str, repetition: int,
     if os.environ.get("CRAI_EVAL_MODEL"):
         # Lock every arm to the same model so cost/token comparisons are fair.
         environment["CRAI_EVAL_MODEL"] = os.environ["CRAI_EVAL_MODEL"]
-    tools = _MODE_MCP_TOOLS.get(mode)
-    if tools:
-        # Ablation: the model sees only this MCP subset (both the agent-side
-        # allowedTools filter and the server-side registration filter).
-        environment["CRAI_EVAL_MCP_TOOLS"] = ",".join(tools)
-    if _MODE_TOON.get(mode):
-        # Serialization ablation: force the tool-result format server-side.
-        environment["CRAI_EVAL_TOON"] = _MODE_TOON[mode]
     run = executor(command, prompt, item.repo_path, environment, timeout_seconds)
     payload, parse_error = _parse_agent_output(run.stdout)
     score = _score(payload.get("findings", []), item.case.gold_findings)
@@ -709,43 +662,15 @@ def _prompt(item: PreparedCase, mode: str, hinted: bool = False) -> str:
         "affected_entries": [],
         "files_read": [], "tool_calls": [],
     }
-    if mode == "full_project_agent":
-        tool_note = """你可以使用原生只读检查工具以及已安装的 code-review-ai MCP 工具。图索引已同步；
-不要调用 rebuild_index。使用 get_change_summary 获取结构化变更详情，使用 query_graph 获取上游或下游邻居。
-当更广泛的影响范围不确定时，使用 query_graph（根据需要反复指定 direction=in 或 out）遍历调用图。
-风险是排序信号，不是硬性门槛。"""
-    elif mode == "full_project_querygraph":
-        tool_note = """你可以使用原生只读检查工具以及 query_graph MCP 工具；该工具返回某个符号已解析的调用图邻居
-（in = 上游调用方，out = 下游被调用方）。图索引已同步；不要调用 rebuild_index。整个评审中最多调用两次 query_graph，
-每次使用 max_neighbors=5。不要查询每个变更符号。只选择最可能暴露运行时使用方链路和公共/API 契约链路的结构性契约节点。
-默认使用 direction=in；仅当补丁改变参数、返回值或下游调用时使用 direction=out。在这两条链路均已表示后停止图探索。
-不要 grep，也不要重新读取图响应中已经存在的关系。"""
-    elif mode == "full_project_summary":
-        tool_note = """你可以使用原生只读检查工具以及 get_change_summary MCP 工具；该工具会报告哪些符号发生了变更以及
-变更位置（文件/行号/签名）；差异内容已内嵌在下方的任务中。图索引已同步；不要调用 rebuild_index。
-先调用 get_change_summary 了解变更符号，然后使用原生工具定位并读取这些符号的调用方和被调用方。"""
-    elif mode == "full_project_search":
-        tool_note = """你可以使用原生只读检查工具以及 search_symbol MCP 工具；该工具可以按名称或 glob 查找符号的限定名称
-（qname）。图索引已同步；不要调用 rebuild_index。从下方的差异中识别变更符号，使用 search_symbol 解析它们的 qname，
-然后使用原生工具定位这些符号的调用方和被调用方。"""
-    elif mode.startswith("full_project_core"):
-        tool_note = """你可以使用原生只读检查工具以及这些 code-review-ai MCP 工具：get_impact、
-get_change_summary 和 search_symbol。未开放 rebuild_index、query_graph、get_change_context、get_test_impact、
-get_symbol_detail、get_communities、get_community、call_external_service、find_dead_code。评审主通道是 get_impact：
-你的第一个工具调用必须是 get_change_summary——在任何其他工具之前（包括所有原生只读工具），必须先调用
-get_change_summary 获取结构化变更符号，然后对每个关键变更符号调用一次 get_impact，获取其直接上下游调用点
-（upstream/downstream，含契约断点 call_site）与受影响业务入口（affected_entries）——这是本模式区别于 grep 的核心价值；
-其 depth 摘要（upstream_max/downstream_max/total）表明影响传播有多深——如果某直接调用方需要继续深挖，对那个
-调用方 qname 再调用一次 get_impact（可传 max_level=0 获取完整传递闭包）。其 uncertainty 已列出解析缺口、coverage
-已给出解析覆盖率。get_impact 的直接调用点 call_site 已含调用行代码（code），足以判断契约变更，
-不需要 get_change_context（已关闭）。get_test_impact（测试选择）是 CI 的职责、对评审无帮助，已关闭；
-get_symbol_detail 的信息已被 get_impact 覆盖，已删除。search_symbol 仅用于解析不确定的 qname。
-图索引已同步。不要 grep，也不要重新读取 MCP 响应中已经存在的关系；仅使用原生工具验证缺失证据
-或具体候选问题。"""
-    elif mode == "native_full":
-        tool_note = """你可以使用 Claude Code 自带的全部内置工具（Read、Glob、Grep、Bash、Write、Edit、
-WebSearch、WebFetch 等）。未安装任何外部 MCP 工具。这是对 native_agent（仅 Read/Glob/Grep/Bash）的放宽：
-你可以自由选择任何内置工具来获取评审所需的仓库证据。"""
+    if mode == "loop_full":
+        tool_note = """图检索工具已开放。先用 get_change_summary 获取结构化变更符号，再对每个关键变更符号调用一次
+get_impact，拿到直接上下游调用点（含契约断点 call_site）与受影响业务入口（affected_entries）——这是本模式区别于
+纯检索的核心价值。其深度摘要（upstream_max/downstream_max/total）表明影响传播有多深，需要时对下游调用方 qname
+再查一次；uncertainty 已列出解析缺口、coverage 已给出解析覆盖率。search_symbol 仅用于解析不确定的 qname。
+不要重复读取图响应里已经存在的关系；只用检索工具补齐缺失证据或验证候选问题。"""
+    elif mode == "loop_nograph":
+        tool_note = """本次只开放只读检索工具（读文件、搜索代码），未开放图检索工具。
+使用这些工具获取评审策略所需的仓库证据。"""
     else:
         tool_note = """你可以使用原生只读检查工具。使用这些工具获取评审策略所需的仓库证据。"""
     if _guidance_stripped():

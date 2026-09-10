@@ -397,9 +397,9 @@ Claude 会把`&&`、`;`、管道和换行拆为子命令逐一校验,不能在�
 `get_community`、`call_external_service`、`find_dead_code`;只在 prompt 中写
 “不要修改”不视为有效隔离。
 
-`full_project_querygraph`保留为压力/消融模式,不再作为默认产品 A/B。该模式最多
-调用两次`query_graph`,每次`max_neighbors=5`:先选能代表运行时消费链和公开契约链
-的结构节点,默认只查上游;只有参数、返回值或下游调用发生变化时才查下游。
+`loop_nograph`保留为**无图对照臂**(同一个 review_loop,不开放图检索工具),用来隔离图工具
+带来的差异。原先只给单个 MCP 工具的消融臂(`full_project_querygraph`/`_summary`/`_search`)
+与 TOON 序列化臂随 claude 工具面一并移除。
 
 native 在 hard 档失败不预先标成`unsolvable`,而按实际运行结果记录
 `incorrect`、`timeout`或`provider_failure`。只有同一运行条件下重复失败,
@@ -476,8 +476,8 @@ code-review-ai eval-trace `
 `full-agent-eval`传入`-o <name>.json`并成功完成时，会自动在同目录生成
 `<name>-routes.md`；`eval-trace`保留用于重新解析旧报告或指定其他输出位置。
 
-未传`--modes`时默认就是`native_agent full_project_core`;需要测原始图邻域工具时再
-显式传`--modes native_agent full_project_querygraph`,并将结果标为 ablation。
+未传`--modes`时默认就是`loop_full`(单臂);要做「有图 vs 无图」消融时显式传
+`--modes loop_nograph loop_full`,并将配对差值标为 ablation。
 
 建索引时间继续由`index_setup`单列且不计入 Agent 在线耗时。最终报告同时给出
 cold setup、Agent A/B及按 tier 的配对结果,不能只摘 hard 档或只报告成功运行。

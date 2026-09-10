@@ -264,7 +264,7 @@ def run_scripted_agent(prompt: str, scenario: str | None = None) -> dict:
 
 def _scripted_scenario_from_env() -> str:
     mode = os.environ.get("CRAI_EVAL_MODE", "")
-    return "native" if mode == "native_agent" else "core"
+    return "native" if mode == "loop_nograph" else "core"
 
 
 def _changed_files_from_prompt(prompt: str) -> list[str]:
@@ -919,6 +919,93 @@ def _strip_fence(value: str) -> str:
     return text
 
 
+_LOOP_NOGRAPH_TOOLS = ("read_file", "search_code")
+
+
+def run_review_loop_agent(prompt: str, *, model: str | None = None,
+                          base_url: str | None = None,
+                          api_key_env: str | None = None) -> dict:
+    """Agent adapter for the repo's own ``review_loop`` (no langgraph, no MCP).
+
+    Reads the eval prompt from stdin, rebuilds the change summary from the
+    embedded diff, and runs one worksheet review. Under ``CRAI_EVAL_MODE ==
+    "loop_nograph"`` the repo tools are narrowed to code search, so a single
+    ``--agent-command`` serves both eval arms.
+    """
+    from code_review_ai.changes import build_change_summary
+    from code_review_ai.review_loop.runner import resolve_setting, run_review
+
+    config = load_config()
+    config.repo_path = os.getcwd()
+    config.db_path = os.environ.get(
+        "CRAI_EVAL_DB_PATH",
+        str(Path(config.repo_path) / ".code-review-ai" / "index.db"))
+    conn = connect(config.db_path)
+    init_schema(conn)
+    diff = _diff_from_prompt(prompt)
+    try:
+        model_name = (model or resolve_setting(config.repo_path, "CRAI_EVAL_MODEL")
+                      or resolve_setting(config.repo_path, "CRAI_REVIEW_MODEL"))
+        if not model_name:
+            raise ValueError(
+                "--model, CRAI_EVAL_MODEL, or CRAI_REVIEW_MODEL is required")
+        symbols = detect_changed_symbols_from_patch(config, diff) if diff else []
+        summary = build_change_summary(config, conn, symbols=symbols)
+        tool_names = (_LOOP_NOGRAPH_TOOLS
+                      if os.environ.get("CRAI_EVAL_MODE") == "loop_nograph"
+                      else None)
+        result = run_review(
+            config, conn, prompt=prompt, summary=summary, diff=diff,
+            model_name=model_name, base_url=base_url,
+            api_key_env=api_key_env or "OPENAI_API_KEY",
+            tool_names=tool_names)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {**_EMPTY_CONTRACT, "failure_reason": str(exc)}
+    return loop_result_payload(result, model_name)
+
+
+def loop_result_payload(result, model_name: str | None = None) -> dict:
+    """Map a ``LoopResult`` onto the eval harness's agent-payload contract."""
+    confirmed = [item for item in result.items.values()
+                 if item.state == "confirmed"]
+    usage = result.usage if isinstance(result.usage, dict) else {}
+    return {
+        "findings": [finding.model_dump() for finding in result.findings],
+        "affected_symbols": [item.qname for item in confirmed],
+        "affected_files": sorted({item.file for item in confirmed if item.file}),
+        "affected_entries": list(result.affected_entries),
+        "files_read": _loop_files_read(result.tool_trace),
+        "tool_calls": [record["tool"] for record in result.tool_trace
+                       if isinstance(record.get("tool"), str)],
+        "tool_call_count": len(result.tool_trace),
+        "tool_trace": [dict(record) for record in result.tool_trace],
+        "review_complete": result.review_complete,
+        "usage": {"input_tokens": _token_count(usage, "input_tokens"),
+                  "output_tokens": _token_count(usage, "output_tokens"),
+                  "cache_read_input_tokens": _token_count(usage, "cache_read"),
+                  "model": model_name},
+        "failure_reason": result.failure_reason,
+    }
+
+
+def _loop_files_read(trace) -> list[str]:
+    """Repo-relative paths the loop read, in first-seen order."""
+    paths: list[str] = []
+    for record in trace:
+        if record.get("tool") != "read_file":
+            continue
+        args = record.get("input")
+        path = args.get("path") if isinstance(args, dict) else None
+        if isinstance(path, str) and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _token_count(usage: dict, key: str) -> int:
+    value = usage.get(key)
+    return value if isinstance(value, int) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="code-review-ai-agent-adapter")
     subparsers = parser.add_subparsers(dest="provider", required=True)
@@ -934,50 +1021,24 @@ def main(argv: list[str] | None = None) -> int:
         help="deterministic agent (no LLM) for wiring/regression tests")
     scripted.add_argument("--scenario", choices=["core", "native"],
                           help="default: derived from CRAI_EVAL_MODE")
-    langgraph = subparsers.add_parser(
-        "langgraph", help="OpenAI-compatible read-only LangGraph agent")
-    langgraph.add_argument("--model",
-                           help="model name (or CRAI_EVAL_MODEL in .env)")
-    langgraph.add_argument("--base-url",
-                           help="OpenAI-compatible API base URL")
-    langgraph.add_argument("--api-key-env",
-                           help="environment variable holding the API key")
+    loop = subparsers.add_parser(
+        "review_loop", help="the repo's own review loop (OpenAI-compatible)")
+    loop.add_argument("--model",
+                      help="model name (or CRAI_EVAL_MODEL in .env)")
+    loop.add_argument("--base-url",
+                      help="OpenAI-compatible API base URL")
+    loop.add_argument("--api-key-env",
+                      help="environment variable holding the API key")
     args = parser.parse_args(argv)
     prompt = sys.stdin.read()
     if args.provider == "scripted":
         payload = run_scripted_agent(prompt, scenario=args.scenario)
         print(json.dumps(payload, ensure_ascii=False))
         return 0
-    if args.provider == "langgraph":
-        from code_review_ai.review_agent.runner import resolve_setting, run_review
-        config = load_config()
-        config.repo_path = os.getcwd()
-        config.db_path = os.environ.get(
-            "CRAI_EVAL_DB_PATH", str(Path(config.repo_path) / ".code-review-ai" / "index.db"))
-        conn = connect(config.db_path)
-        init_schema(conn)
-        diff = _diff_from_prompt(prompt)
-        try:
-            model_name = (args.model or resolve_setting(config.repo_path, "CRAI_EVAL_MODEL")
-                          or resolve_setting(config.repo_path, "CRAI_REVIEW_MODEL"))
-            if not model_name:
-                raise ValueError("--model, CRAI_EVAL_MODEL, or CRAI_REVIEW_MODEL is required")
-            base_url = (args.base_url or resolve_setting(config.repo_path, "CRAI_BASE_URL")
-                        or resolve_setting(config.repo_path, "CRAI_REVIEW_BASE_URL"))
-            api_key_env = args.api_key_env or "OPENAI_API_KEY"
-            symbols = detect_changed_symbols_from_patch(config, diff) if diff else []
-            tool_names = (["read_file", "search_code", "submit_review"]
-                          if os.environ.get("CRAI_EVAL_MODE") == "native_agent"
-                          else None)
-            payload = run_review(
-                config, conn, model_name=model_name, base_url=base_url,
-                api_key_env=api_key_env, diff=diff or prompt,
-                symbols=symbols, tool_names=tool_names)
-        except (OSError, RuntimeError, ValueError) as exc:
-            payload = {"findings": [], "affected_symbols": [],
-                       "affected_files": [], "affected_entries": [], "tests": [],
-                       "files_read": [], "tool_calls": [], "tool_call_count": 0,
-                       "tool_trace": [], "usage": {}, "failure_reason": str(exc)}
+    if args.provider == "review_loop":
+        payload = run_review_loop_agent(prompt, model=args.model,
+                                        base_url=args.base_url,
+                                        api_key_env=args.api_key_env)
         print(json.dumps(payload, ensure_ascii=False))
         return 0 if payload.get("failure_reason") is None else 1
     profile = None if args.tool_profile == "none" else args.tool_profile

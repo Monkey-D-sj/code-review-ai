@@ -29,30 +29,44 @@ def test_normalize_claude_structured_output_and_usage():
         "total_cost_usd": 0.01, "model": "claude-sonnet-test"}
 
 
-def test_langgraph_adapter_uses_native_registry_subset(monkeypatch, tmp_path,
-                                                        capsys):
+def test_review_loop_adapter_narrows_tools_for_nograph_arm(monkeypatch, tmp_path,
+                                                           capsys):
     import code_review_ai.agent_adapter as adapter
 
     seen = {}
-    monkeypatch.setenv("CRAI_EVAL_MODE", "native_agent")
+    monkeypatch.setenv("CRAI_EVAL_MODE", "loop_nograph")
     monkeypatch.setenv("CRAI_EVAL_DB_PATH", str(tmp_path / "agent.db"))
     monkeypatch.setattr(adapter.sys, "stdin", io.StringIO(
         "TASK\nDIFF\ndiff --git a/app.py b/app.py\n@@ -1 +1 @@"))
     monkeypatch.setattr(adapter, "detect_changed_symbols_from_patch",
                         lambda config, diff: ["app::run"])
+    monkeypatch.setattr("code_review_ai.changes.build_change_summary",
+                        lambda config, conn, symbols=None: {"changed_functions": []})
+
+    class FakeResult:
+        items: dict = {}
+        findings: list = []
+        affected_entries: list = ["app::main"]
+        review_complete = True
+        failure_reason = None
+        usage = {"input_tokens": 11, "output_tokens": 2, "cache_read": 3}
+        tool_trace = [{"tool_call_id": "1", "tool": "read_file",
+                       "input": {"path": "app.py"}, "status": "ok",
+                       "response_chars": 5}]
 
     def fake_review(config, conn, **kwargs):
         seen.update(kwargs)
-        return {"findings": [], "affected_symbols": [], "affected_files": [],
-                "affected_entries": [], "tests": [], "files_read": [],
-                "tool_calls": [], "tool_call_count": 0, "tool_trace": [],
-                "usage": {}, "failure_reason": None}
+        return FakeResult()
 
-    monkeypatch.setattr("code_review_ai.review_agent.runner.run_review", fake_review)
-    assert main(["langgraph", "--model", "fake-model"]) == 0
-    assert seen["symbols"] == ["app::run"]
-    assert seen["tool_names"] == ["read_file", "search_code", "submit_review"]
-    assert json.loads(capsys.readouterr().out)["failure_reason"] is None
+    monkeypatch.setattr("code_review_ai.review_loop.runner.run_review", fake_review)
+    assert main(["review_loop", "--model", "fake-model"]) == 0
+    assert seen["summary"] == {"changed_functions": []}
+    assert seen["tool_names"] == ("read_file", "search_code")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["failure_reason"] is None
+    assert payload["files_read"] == ["app.py"]
+    assert payload["tool_call_count"] == 1
+    assert payload["usage"]["cache_read_input_tokens"] == 3
 
 
 def test_normalize_claude_text_result_and_defaults():

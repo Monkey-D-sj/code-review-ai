@@ -223,34 +223,24 @@ agent reads the single `OPENAI_API_KEY` entry by default.
 environment takes precedence over `.env`, and no CLI option accepts a plaintext
 API key.
 
-A review run is bounded on four axes, all overridable through the same env/`.env`
-layering: `CRAI_REVIEW_TIMEOUT_SECONDS` (per provider request, default `180`) and
-`CRAI_REVIEW_MAX_RETRIES` (default `3`) bound one model call — LangChain otherwise
-leaves the request untimed entirely — while `CRAI_REVIEW_MAX_TOTAL_TOKENS`
-(default `500000`) and `CRAI_REVIEW_WALL_CLOCK_SECONDS` (default `900`) bound the
-whole run alongside the fixed 50-call action-tool budget. Exhausting any of them
-forces an immediate `submit_review` instead of failing the run, and the payload's
-`budgets` block reports the limits next to what was actually spent. For the existing full-project evaluator, use the
-same runtime through `python -m code_review_ai.agent_adapter langgraph
---model your-model`; its `native_agent` arm gets `read_file + search_code`,
-and full-project arms also get `get_impact`.
+A review run is bounded: at most 50 model turns, and the run fails after 2
+consecutive turns that neither resolve a worksheet row nor call a tool. The loop
+is hand-rolled — it calls an OpenAI-compatible endpoint directly, with no agent
+framework in between — so a run spends no tokens on framework overhead.
 
-`review` writes live index/model/tool progress and elapsed time to stderr while
-reserving stdout for the final JSON payload. In an interactive terminal it now
-uses an append-only timeline: index/context phases and each model round remain
-visible with their tool requests and completions. Pass `--visual` to force this
-timeline (for terminals where TTY detection is unavailable), `--no-visual` for
-the simpler one-line event log, or `--no-progress` for a quiet automation run.
+`review` writes live index/model/tool progress to stderr while reserving stdout
+for the final JSON payload. Pass `--no-progress` for a quiet automation run;
+`--visual` and `--no-visual` are accepted for compatibility and have no effect.
+
+For the full-project evaluator, use the same runtime through
+`python -m code_review_ai.agent_adapter review_loop --model your-model`; the
+`loop_nograph` arm gets `read_file + search_code`, and `loop_full` also gets the
+graph retrieval tools. That pair is the whole comparison: same loop, same
+policy, only the graph tools differ.
 
 `full-agent-eval` tests the installed product on isolated real repositories.
 It checks out a real fix commit, restores selected production files to the
-parent revision, keeps the fixed tests available, and pairs a Native Agent
-(`Read`/`Glob`/`Grep`) with a Full Project Agent using the same native tools
-plus this project's MCP server.
-
-Both evaluators use the same review policy. The controlled runner varies only
-the supplied context, while the full-project runner varies only available
-context tools.
+parent revision, and keeps the fixed tests available.
 
 For Full Project mode, each historical snapshot is indexed before the Agent
 timer starts. The evaluated MCP server reuses that index without startup sync
@@ -295,29 +285,28 @@ code-review-ai full-agent-eval \
   --cases benchmarks/fast-cases.json \
   --local-repo benchmarks/fast-repo \
   --agent-command "python -m code_review_ai.agent_adapter scripted" \
-  --modes native_agent full_project_core \
+  --modes loop_nograph loop_full \
   -o eval-results/scripted-report.json
 ```
 
 The `scripted` adapter walks the exact same pipeline as the real one — CLI
 subprocess, eval env vars, transcript persistence, scoring, and aggregation —
-and, in the `full_project_core` arm, opens a real MCP server subprocess over
-stdio and calls `get_change_summary` / `get_impact`, so the graph tools
-genuinely answer against the case index. It makes no model call, so
-it needs no claude login, tokens, or network. The scenario (native vs core) is
-derived from `CRAI_EVAL_MODE`, so one `--agent-command` serves both arms. This
-is a capability-and-wiring oracle, not a behavior substitute: it proves the
-harness wiring and that the graph tools answer on the index, but it cannot say
-how a real LLM agent would use those tools. Keep real `claude` runs for
-behavioral native-vs-core comparison; run the scripted arm in CI for regressions.
-Coverage is `tests/test_scripted_full_agent_eval.py`.
+and, in the `loop_full` arm, opens a real MCP server subprocess over stdio and
+calls `get_change_summary` / `get_impact`, so the graph tools genuinely answer
+against the case index. It makes no model call, so it needs no API key, tokens,
+or network. The scenario is derived from `CRAI_EVAL_MODE`, so one
+`--agent-command` serves both arms. This is a capability-and-wiring oracle, not
+a behavior substitute: it proves the harness wiring and that the graph tools
+answer on the index, but it cannot say how a real LLM agent would use those
+tools. Keep real provider runs for behavioral comparison; run the scripted arm
+in CI for regressions. Coverage is `tests/test_scripted_full_agent_eval.py`.
 
 Cases are graded **blind**: the prompt states the deliverable (what broke, which
 callers / entry points / tests are affected) and shows the diff, but never names a
 symbol. Per-case prose lives in each case's `hint` field and reaches the model only
 under `--hinted`, which exists as an ablation arm — such prose is symmetric input to
-both arms but asymmetric benefit, since naming the affected callers hands the native
-arm the traversal the graph tools exist to do. Gold keywords are therefore restricted
+both arms but asymmetric benefit, since naming the affected callers hands the
+`loop_nograph` arm the traversal the graph tools exist to do. Gold keywords are therefore restricted
 to identifiers only traversal surfaces (a keyword visible in the diff or the hint can
 be paraphrased instead of traced), and each answer is capped at 3 findings so f1 does
 not turn into a verbosity measure.

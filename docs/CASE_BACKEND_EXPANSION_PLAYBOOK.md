@@ -248,7 +248,7 @@ repetition，不要看完一种模式的答案后再修改 case 或另一种模�
 .\.venv\Scripts\python.exe -m code_review_ai.agent_adapter claude `
   --cases benchmarks/case-backend-cases.json `
   --case-ids <case-id> `
-  --modes native_agent full_project_core `
+  --modes loop_nograph loop_full `
   --repetitions 3 `
   -o .code-review-ai/<case-id>-paired.json
 ```

@@ -35,6 +35,7 @@ from code_review_ai.review_loop.schemas import (
     Finding,
     LoopResult,
     ReviewItem,
+    ToolSpec,
     Usage,
 )
 from code_review_ai.review_loop.tools import make_tools, update_review_tool
@@ -155,6 +156,21 @@ DIFF
     return [SystemMessage(content=_POLICY), HumanMessage(content=user)]
 
 
+def _repo_tools(config: Config, conn,
+                tool_names: list[str] | None) -> list[ToolSpec]:
+    """The repo-facing tools, optionally narrowed to ``tool_names``.
+
+    ``run_review`` appends the loop's own control tools and never filters them,
+    so an arm can drop graph retrieval without losing the ability to resolve
+    worksheet rows.
+    """
+    tools = make_tools(config, conn)
+    if tool_names is None:
+        return tools
+    wanted = set(tool_names)
+    return [tool for tool in tools if tool.name in wanted]
+
+
 def run_review(
     config: Config,
     conn,
@@ -167,6 +183,7 @@ def run_review(
     model_name: str | None = None,
     base_url: str | None = None,
     api_key_env: str = _API_KEY_ENV,
+    tool_names: list[str] | None = None,
     max_turns: int | None = None,
     max_total_tokens: int | None = None,
     max_empty_turns: int | None = None,
@@ -178,6 +195,8 @@ def run_review(
     built from env / ``.env``. ``max_total_tokens`` (``None`` = uncapped) stops
     the loop once the provider-reported total exceeds it; ``max_empty_turns``
     bounds the nudges an unresolved empty-turn stop receives before failing.
+    ``tool_names`` narrows the repo-facing tools (``None`` = all of them) so an
+    arm can run without graph retrieval.
     Returns the resolved worksheet (``items``, ``findings``,
     ``affected_entries``, ``review_complete``), plus ``usage`` and the yuan
     ``cost`` computed from it at the DeepSeek per-million rates (see
@@ -192,7 +211,7 @@ def run_review(
         max_empty_turns = MAX_EMPTY_TURNS
     items = worksheet_from_summary(summary)
     messages = build_initial_messages(prompt, summary, items, diff=diff)
-    tools = [*make_tools(config, conn), update_review_tool()]
+    tools = [*_repo_tools(config, conn, tool_names), update_review_tool()]
     result = run_loop(model, tools, candidates=items, initial_messages=messages,
                       hooks=hooks, max_turns=max_turns,
                       max_total_tokens=max_total_tokens,

@@ -21,17 +21,16 @@ Retrieval 和 Agent Review 两层评分。
 | Graph Retrieval | `graph_retrieval` | 索引能否从变更符号找全相关符号、文件、入口和测试 | 否；每个 case 计算一次 |
 | Agent Review | `agent_review` | Agent 能否判断根因，并给出正确影响范围 | 是；每种模式、每次 repetition 单独评分 |
 
-因此不要用 `graph_retrieval` 比较 Native Agent 和 Full Project Agent。模式对比应查看
-`aggregate.<mode>.agent_review`，同时结合成功率、工具采用率、文件读取量和调用次数。
+因此不要用 `graph_retrieval` 比较不同模式。模式对比应查看
+`aggregate.<mode>.agent_review`，同时结合成功率、文件读取量和调用次数。
 
-默认在线对比模式是：
+评测的两条臂都是 review_loop 自己的工具面：
 
-- `native_agent`：只有 Read、Glob、Grep 和受限的只读 Bash。
-- `full_project_core`：Native 工具加产品核心 MCP 工具集。
+- `loop_nograph`：只给只读检索工具（读文件、搜索代码），不开放图检索工具。
+- `loop_full`：在检索工具之上加图检索工具（变更摘要、影响链、符号检索）。
 
-需要验证完整 MCP 工具集时，显式使用
-`--modes native_agent full_project_agent`。其余 `full_project_*` 模式主要用于工具消融，
-不应混入日常回归基线。
+默认只跑 `loop_full`（单臂的绝对分）。要做"有图 vs 无图"的消融对比就显式传
+`--modes loop_nograph loop_full`，并把配对差值标为 ablation，不要混入日常回归基线。
 
 ## 2. 文件放在哪里
 
@@ -246,7 +245,7 @@ Hard negative 是名称或结构上很像、但实际上不受影响的符号或
 code-review-ai full-agent-eval \
   --cases benchmarks/case-backend-cases.json \
   --case-ids case-backend-short-stable-name \
-  --modes native_agent full_project_core \
+  --modes loop_nograph loop_full \
   --agent-command "python -m code_review_ai.agent_adapter claude --model sonnet --max-budget-usd 1.00" \
   --repetitions 3 --workers 2 \
   -o eval-results/full-agent-report.json
@@ -291,13 +290,13 @@ code-review-ai full-agent-eval \
   --cases benchmarks/fast-cases.json \
   --local-repo benchmarks/fast-repo \
   --agent-command "python -m code_review_ai.agent_adapter scripted" \
-  --modes native_agent full_project_core \
+  --modes loop_nograph loop_full \
   -o eval-results/scripted-report.json
 ```
 
-`scripted` 与真实 claude 走完全相同的编排：`native_agent` 臂只用 Read/Grep 语义
-（`mcp_adoption_rate` 应为 0），`full_project_core` 臂通过 stdio 协议真实连接 MCP
-server 子进程并调用 `get_change_summary` / `get_impact` / `get_test_impact`
+`scripted` 与真实 agent 走完全相同的编排：`loop_nograph` 臂只用 Read/Grep 语义
+（`mcp_adoption_rate` 应为 0），`loop_full` 臂通过 stdio 协议真实连接 MCP
+server 子进程并调用 `get_change_summary` / `get_impact`
 （`mcp_adoption_rate` 应为 1），图工具对该 case 返回的 `affected_entries` 是真实索引
 结果。场景由 `CRAI_EVAL_MODE` 自动派生，一条 `--agent-command` 服务两个臂。
 

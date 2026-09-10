@@ -1,9 +1,10 @@
-"""Hand-rolled ReAct loop for the code-review agent (parallel to ``review_agent``).
+"""Hand-rolled ReAct loop for the code-review agent.
 
-Milestone 1 ships the bare control flow on a minimal tool contract, with no
-langgraph dependency. Wiring to the index, budgets, and the evidence gate arrive
-in later milestones; the old ``review_agent`` package stays authoritative until
-then.
+Ships the control flow on a minimal tool contract with no langgraph dependency.
+``runner.run_review`` wires it to the index: a deterministic worksheet built from
+the change summary, per-row resolution rules (confirmed needs a finding,
+dismissed needs a reason), and turn/token budgets. The CLI ``review`` command and
+the eval harness's ``review_loop`` agent adapter both drive this package.
 """
 
 from __future__ import annotations

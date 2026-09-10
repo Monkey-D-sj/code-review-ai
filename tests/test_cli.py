@@ -46,14 +46,26 @@ def test_cli_review_syncs_then_writes_agent_contract(tmp_path, monkeypatch):
         cli, "sync",
         lambda config, conn, **kwargs: calls.update(synced=True, **kwargs))
 
+    def fake_summary(config, conn, symbols=None, files=None):
+        calls["symbols"] = symbols
+        return {"changed_functions": []}
+
+    monkeypatch.setattr(cli, "build_change_summary", fake_summary)
+
+    class FakeResult:
+        items: dict = {}
+        findings: list = []
+        affected_entries: list = []
+        review_complete = True
+        failure_reason = None
+        usage: dict = {}
+        tool_trace: list = []
+
     def fake_review(config, conn, **kwargs):
         calls.update(kwargs)
-        return {"findings": [], "affected_symbols": [], "affected_files": [],
-                "affected_entries": [], "tests": [], "files_read": [],
-                "tool_calls": [], "tool_call_count": 0, "tool_trace": [],
-                "usage": {}, "failure_reason": None}
+        return FakeResult()
 
-    monkeypatch.setattr("code_review_ai.review_agent.runner.run_review", fake_review)
+    monkeypatch.setattr("code_review_ai.review_loop.runner.run_review", fake_review)
     code = main(["review", "--repo", FIX, "--db", str(tmp_path / "review.db"),
                  "--model", "fake-model", "--base-url", "http://provider/v1",
                  "--symbols", Q("auth", "login"), "--out", str(output)])
@@ -63,6 +75,7 @@ def test_cli_review_syncs_then_writes_agent_contract(tmp_path, monkeypatch):
     assert callable(calls["progress"])
     assert calls["model_name"] == "fake-model"
     assert calls["symbols"] == [Q("auth", "login")]
+    assert calls["summary"] == {"changed_functions": []}
     assert json.loads(output.read_text(encoding="utf-8"))["failure_reason"] is None
 
 

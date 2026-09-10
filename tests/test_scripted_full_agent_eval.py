@@ -44,22 +44,22 @@ def _run(slug: str, tmp_path: Path, modes: tuple[str, ...]) -> dict:
 
 @pytest.mark.slow
 def test_scripted_full_agent_eval_runs_both_arms_without_claude(tmp_path):
-    """native and core both run to completion with no claude login/tokens."""
+    """nograph and full arms both run to completion with no claude login/tokens."""
     report = _run("caller-return-shape", tmp_path,
-                  ("native_agent", "full_project_core"))
+                  ("loop_nograph", "loop_full"))
     assert len(report["runs"]) == 2
     for run in report["runs"]:
         assert run["success"] is True, run.get("failure_reason")
         assert run["parse_error"] is None
-    assert report["aggregate"]["native_agent"]["mcp_adoption_rate"] == 0.0
-    assert report["aggregate"]["full_project_core"]["mcp_adoption_rate"] == 1.0
+    assert report["aggregate"]["loop_nograph"]["mcp_adoption_rate"] == 0.0
+    assert report["aggregate"]["loop_full"]["mcp_adoption_rate"] == 1.0
 
 
 @pytest.mark.slow
 def test_scripted_core_arm_really_calls_graph_tools(tmp_path):
-    """The core arm's MCP calls land on the real server and return entries."""
+    """The full arm's MCP calls land on the real server and return entries."""
     report = _run("caller-return-shape", tmp_path,
-                  ("full_project_core",))
+                  ("loop_full",))
     core = report["runs"][0]
     assert core["success"] is True
     calls = core["tool_calls"]
@@ -70,7 +70,7 @@ def test_scripted_core_arm_really_calls_graph_tools(tmp_path):
     assert "mcp__code-review-ai__get_change_context" not in calls
     # The transcript persisted the run so the pipeline end is reachable.
     transcript = (tmp_path / "work" / "transcripts"
-                  / "caller-return-shape" / "full_project_core" / "run-1.json")
+                  / "caller-return-shape" / "loop_full" / "run-1.json")
     assert transcript.is_file()
 
 
@@ -78,11 +78,11 @@ def test_scripted_core_arm_really_calls_graph_tools(tmp_path):
 def test_scripted_full_agent_eval_aggregate_shape(tmp_path):
     """The report carries per-mode aggregates and the difficulty split."""
     report = _run("caller-return-shape", tmp_path,
-                  ("native_agent", "full_project_core"))
+                  ("loop_nograph", "loop_full"))
     assert report["evaluation"] == "full_project_online_tool_use"
-    assert report["modes"] == ["native_agent", "full_project_core"]
+    assert report["modes"] == ["loop_nograph", "loop_full"]
     assert report["difficulty_counts"]["unclassified"] == 1
-    for mode in ("native_agent", "full_project_core"):
+    for mode in ("loop_nograph", "loop_full"):
         aggregate = report["aggregate"][mode]
         assert "macro_f1" in aggregate
         assert "mcp_adoption_rate" in aggregate

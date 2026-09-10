@@ -32,6 +32,10 @@ from code_review_ai.context_planner import (
     DEFAULT_MAX_CHARS, plan_context, run_context_plan_eval,
 )
 
+# Framing for the CLI's one-shot review; the loop's own policy (worksheet,
+# evidence rules, read-only guard) is injected by review_loop.runner.
+_CLI_REVIEW_PROMPT = "评审本次变更引入的具体回归，逐行核对 worksheet 中的变更符号。"
+
 
 def _conn(db_path):
     conn = connect(db_path)
@@ -129,11 +133,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="environment variable holding the API key")
     review.add_argument("--no-progress", action="store_true",
                         help="suppress live review progress on stderr")
+    # Kept for compatibility: the TTY dashboard lived in the retired agent
+    # package, so both flags now fall back to the same one-line progress.
     visual_group = review.add_mutually_exclusive_group()
     visual_group.add_argument("--visual", dest="visual", action="store_true",
-                              help="show an append-only terminal timeline (default when stderr is a terminal)")
+                              help="accepted for compatibility (progress is one line)")
     visual_group.add_argument("--no-visual", dest="visual", action="store_false",
-                              help="use one-line progress messages instead of the dashboard")
+                              help="accepted for compatibility (progress is one line)")
     review.set_defaults(visual=None)
     review.add_argument("-o", "--out")
     cp = sub.add_parser("context-plan")
@@ -397,9 +403,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "review":
-        from code_review_ai.review_agent.runner import (resolve_api_key,
-                                                         resolve_setting,
-                                                         run_review)
+        from code_review_ai.agent_adapter import loop_result_payload
+        from code_review_ai.review_loop import (Hooks,
+                                                POINT_MODEL_REQUEST_STARTED,
+                                                POINT_MODEL_RESPONSE_RECEIVED,
+                                                POINT_POST_TOOL,
+                                                POINT_PRE_TOOL,
+                                                POINT_RUN_FINISHED)
+        from code_review_ai.review_loop.runner import (resolve_api_key,
+                                                       resolve_setting,
+                                                       run_review)
         try:
             model_name = args.model or resolve_setting(
                 cfg.repo_path, "CRAI_REVIEW_MODEL")
@@ -413,28 +426,15 @@ def main(argv: list[str] | None = None) -> int:
             api_key_env = args.api_key_env or "OPENAI_API_KEY"
             resolve_api_key(cfg.repo_path, api_key_env)
             started_at = time.perf_counter()
-            progress_display = None
 
             def review_progress(event: str, data: dict[str, object]) -> None:
                 if args.no_progress:
                     return
-                if progress_display is not None:
-                    progress_display.on_event(event, data)
-                    return
-                if event == "summary_ready":
-                    message = (f"变更摘要就绪：{data['changed_symbols']} 个符号，"
-                               f"{data['uncovered_changes']} 处未归属变更")
-                elif event == "agent_started":
-                    message = "模型开始分析"
-                elif event == "model_request_started":
+                if event == "model_request_started":
                     message = f"模型第 {data['turn']} 轮推理中…"
                 elif event == "model_response_received":
                     message = (f"模型第 {data['turn']} 轮响应："
                                f"{data['tool_calls']} 个工具调用")
-                elif event == "budget_exhausted":
-                    message = (f"评审预算耗尽（{data['limit']}）："
-                               f"{data['tool_requests']} 次工具调用、"
-                               f"{data['total_tokens']} tokens，要求立即提交")
                 elif event == "full_rebuild_required":
                     message = "索引版本或配置已变化，开始全量重建"
                 elif event == "source_scan_started":
@@ -466,44 +466,47 @@ def main(argv: list[str] | None = None) -> int:
                     message = "检查增量索引变更…"
                 elif event == "incremental_sync_finished":
                     message = "增量索引同步完成"
-                elif event == "tool_requests":
-                    message = "请求工具：" + ", ".join(str(name) for name in data["names"])
-                elif event == "tool_completed":
-                    message = (f"工具完成：{data['name']} "
-                               f"({data['response_chars']} 字符)")
-                elif event == "finished":
-                    outcome = "失败" if data["failed"] else "完成"
-                    message = (f"评审{outcome}：{data['findings']} 条发现，"
-                               f"{data['tool_calls']} 次动作工具调用")
+                elif event == "pre_tool":
+                    message = f"请求工具：{data.get('name')}"
+                elif event == "post_tool":
+                    message = (f"工具完成：{data.get('name')} "
+                               f"({data.get('response_chars')} 字符，"
+                               f"{data.get('status')})")
+                elif event == "run_finished":
+                    outcome = "失败" if data.get("failure_reason") else "完成"
+                    message = (f"评审{outcome}：{data.get('finding_count')} 条发现")
                 else:
                     message = event
                 print(f"[review] {message}", file=sys.stderr, flush=True)
 
+            hooks = Hooks()
+            for point in (POINT_MODEL_REQUEST_STARTED,
+                          POINT_MODEL_RESPONSE_RECEIVED, POINT_PRE_TOOL,
+                          POINT_POST_TOOL, POINT_RUN_FINISHED):
+                hooks.on(point, review_progress)
+
             def execute_review() -> dict:
                 # A review must never query a stale graph. sync performs the
                 # smallest necessary update (or a full rebuild when required).
-                if not args.no_progress and progress_display is None:
+                if not args.no_progress:
                     print("[review] 正在同步代码索引…", file=sys.stderr, flush=True)
                 sync(cfg, conn, progress=review_progress)
-                if not args.no_progress and progress_display is None:
+                if not args.no_progress:
                     print("[review] 索引同步完成", file=sys.stderr, flush=True)
+                summary = build_change_summary(
+                    cfg, conn, symbols=args.symbols, files=args.files)
                 result = run_review(
-                    cfg, conn, model_name=model_name, base_url=base_url,
-                    api_key_env=api_key_env, symbols=args.symbols,
-                    files=args.files, progress=review_progress)
-                if not args.no_progress and progress_display is None:
+                    cfg, conn, prompt=_CLI_REVIEW_PROMPT, summary=summary,
+                    model_name=model_name, base_url=base_url,
+                    api_key_env=api_key_env, hooks=hooks)
+                if not args.no_progress:
                     elapsed = time.perf_counter() - started_at
                     print(f"[review] 总耗时：{elapsed:.1f}s", file=sys.stderr, flush=True)
-                return result
+                return loop_result_payload(result, model_name)
 
-            use_visual = (not args.no_progress and
-                          (args.visual if args.visual is not None else sys.stderr.isatty()))
-            if use_visual:
-                from code_review_ai.review_agent.progress import ReviewProgressDisplay
-                with ReviewProgressDisplay(model_name) as progress_display:
-                    payload = execute_review()
-            else:
-                payload = execute_review()
+            # The TTY dashboard lived in the retired agent package; --visual
+            # and --no-visual now print the same one-line progress.
+            payload = execute_review()
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
