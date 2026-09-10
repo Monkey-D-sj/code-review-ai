@@ -153,17 +153,23 @@ def worksheet_from_summary(summary: dict) -> list[ReviewItem]:
 
 def build_initial_messages(prompt: str, summary: dict, items: list[ReviewItem],
                            *, diff: str = "") -> list[BaseMessage]:
-    """The review request: policy as system, prompt + summary + worksheet as user."""
-    rows = [{"qname": item.qname, "file": item.file,
-             "start_line": item.start_line, "end_line": item.end_line}
-            for item in items]
+    """The review request: policy as system, prompt + summary + worksheet as user.
+
+    The worksheet renders as the bare qname roster. Its file/start/end were
+    already in the summary's changed_functions records, so rendering rows made
+    this a second copy of the summary; what the model needs from it is the
+    ordered list of rows it must resolve. (The coordinates still live on
+    ``ReviewItem`` -- the payload derives ``affected_files`` from them.)
+    """
+    roster = [item.qname for item in items]
     user = f"""{prompt}
 
 CHANGE SUMMARY (deterministic, do not regenerate)
 {json.dumps(summary, ensure_ascii=False)}
 
-CANDIDATE WORKSHEET (deterministic; you only update these rows)
-{json.dumps(rows, ensure_ascii=False)}
+CANDIDATE WORKSHEET (deterministic; resolve every qname below -- its file, line
+range and diff are in the summary above)
+{json.dumps(roster, ensure_ascii=False)}
 
 DIFF
 {diff or '(no working-tree diff was supplied)'}

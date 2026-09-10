@@ -95,7 +95,27 @@ def test_build_initial_messages_carries_prompt_summary_and_worksheet():
     assert messages[0].type == "system"
     assert "review auth" in messages[1].content
     assert "changed_functions" in messages[1].content
-    assert '"qname": "app::login"' in messages[1].content
+    assert '["app::login"]' in messages[1].content
+
+
+def test_worksheet_roster_does_not_repeat_the_summarys_coordinates():
+    """The roster is qnames only; repeating file/lines doubled the summary.
+
+    Every changed_functions record already carries file/start_line/end_line, so
+    a row-shaped worksheet was a second copy of the same coordinates. The order
+    is still the worksheet's (changed_functions, then delete_change).
+    """
+    items = [ReviewItem(qname="app::login", file="app.py", start_line=1, end_line=9)]
+    summary = {"changed_functions": [
+        {"qname": "app::login", "file": "app.py", "start_line": 1, "end_line": 9}]}
+
+    content = build_initial_messages("p", summary, items)[1].content
+
+    # The roster is the only JSON array in the request.
+    roster_line = next(line for line in content.splitlines() if line.startswith("["))
+    assert roster_line == '["app::login"]'
+    # ...and the coordinates appear once, in the summary rather than twice.
+    assert content.count("app.py") == 1
 
 
 class CostReportingModel(ScriptedReviewModel):
