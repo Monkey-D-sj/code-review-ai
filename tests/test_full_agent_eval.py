@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from code_review_ai.agent_eval import (AgentRun, GoldFinding,
-                                       SHARED_REVIEW_POLICY)
+from code_review_ai.eval_gold import GoldFinding
+from code_review_ai.eval_runtime import AgentRun, SHARED_REVIEW_POLICY
 from code_review_ai.full_agent_eval import (
     DEFAULT_FULL_EVAL_MODES, FULL_EVAL_MODES, FullAgentCase, PreparedCase,
     _case_config,

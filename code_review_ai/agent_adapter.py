@@ -1,4 +1,4 @@
-"""Provider adapters that normalize agent CLIs to the agent-eval JSON contract."""
+"""Provider adapters that normalize agent CLIs to the eval JSON contract."""
 
 from __future__ import annotations
 
@@ -832,7 +832,7 @@ def _relative_tool_path(value: str) -> str:
 
 
 def normalize_claude_result(outer: object) -> dict:
-    """Convert Claude Code's JSON envelope into the agent-eval contract."""
+    """Convert Claude Code's JSON envelope into the eval contract."""
     if not isinstance(outer, dict):
         raise ValueError("Claude output must be a JSON object")
     result = outer.get("structured_output")

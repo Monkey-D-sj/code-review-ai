@@ -6,10 +6,7 @@ import time
 from pathlib import Path
 
 from code_review_ai.changes import build_change_summary, detect_changed_symbols
-from code_review_ai.agent_eval import (MODES, load_agent_cases,
-                                       preflight_agent_eval,
-                                       parse_agent_command, run_agent_eval,
-                                       select_agent_cases)
+from code_review_ai.eval_runtime import parse_agent_command
 from code_review_ai.full_agent_eval import (DEFAULT_FULL_EVAL_MODES,
                                             FULL_EVAL_MODES,
                                             load_full_agent_cases,
@@ -198,32 +195,9 @@ def main(argv: list[str] | None = None) -> int:
     gp.add_argument("-n", "--max-nodes", type=int, default=200)
     gp.add_argument("-m", "--mode", default="communities",
                     choices=["communities", "graph", "flow"])
-    ae = sub.add_parser("agent-eval")
-    _add_common(ae)
-    ae.add_argument("--cases", required=True)
-    ae.add_argument("--case-ids", nargs="+",
-                    help="run only the selected case ids")
-    ae.add_argument("--agent-command",
-                    help="command that reads the eval prompt from stdin and "
-                         "writes the required JSON object to stdout")
-    ae.add_argument("--dry-run", action="store_true",
-                    help="build contexts and validate symbols without calling an agent")
-    ae.add_argument("--modes", nargs="+", choices=MODES, default=list(MODES))
-    ae.add_argument("--repetitions", type=int, default=1)
-    ae.add_argument("--workers", type=int, default=1,
-                    help="concurrent agent processes (default: 1)")
-    ae.add_argument("--timeout", type=int, default=300)
-    ae.add_argument("--runs-dir", default="eval-results/agent-eval")
-    ae.add_argument("--repos-dir", default="eval-results/external-repos",
-                    help="cache for repositories referenced by canonical cases")
-    ae.add_argument("-o", "--out")
-    rc = sub.add_parser("agent-eval-route-check")
-    _add_common(rc)
-    rc.add_argument("--cases", required=True)
-    rc.add_argument("--runs-dir", required=True)
-    rc.add_argument("--repos-dir", default="eval-results/external-repos")
-    rc.add_argument("-o", "--out")
-    aa = sub.add_parser("agent-eval-analyze")
+    aa = sub.add_parser("eval-analyze",
+                        help="bootstrap confidence intervals and paired "
+                             "comparisons across an eval report's arms")
     aa.add_argument("--report", required=True)
     aa.add_argument("-o", "--out")
     fe = sub.add_parser("full-agent-eval")
@@ -326,8 +300,8 @@ def main(argv: list[str] | None = None) -> int:
         if not args.out:
             print(output, end="")
         return 0
-    if args.cmd == "agent-eval-analyze":
-        from code_review_ai.agent_eval_analysis import analyze_file
+    if args.cmd == "eval-analyze":
+        from code_review_ai.eval_analysis import analyze_file
         try:
             payload = analyze_file(args.report, args.out)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -393,22 +367,6 @@ def main(argv: list[str] | None = None) -> int:
     cfg.repo_path = args.repo
     cfg.db_path = args.db
     conn = _conn(args.db)
-
-    if args.cmd == "agent-eval-route-check":
-        from code_review_ai.agent_eval_analysis import route_check_analysis
-        try:
-            cases = load_agent_cases(args.cases)
-            if any(case.source_commit is None for case in cases):
-                rebuild(cfg, conn)
-            payload = route_check_analysis(
-                conn, cases, args.runs_dir, config=cfg,
-                work_dir=str(Path(args.runs_dir) / ".route-check-snapshots"),
-                repos_dir=args.repos_dir)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        _write_json(payload, args.out)
-        return 0
 
     if args.cmd == "review":
         from code_review_ai.agent_adapter import loop_result_payload
@@ -607,27 +565,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"installed {path}")
     elif args.cmd == "graph":
         export_graph(args.db, args.out, args.max_nodes, args.mode)
-    elif args.cmd == "agent-eval":
-        try:
-            cases = select_agent_cases(load_agent_cases(args.cases), args.case_ids)
-            if args.dry_run:
-                payload = preflight_agent_eval(cfg, conn, cases,
-                                               modes=tuple(args.modes),
-                                               repos_dir=args.repos_dir)
-            else:
-                if not args.agent_command:
-                    raise ValueError("--agent-command is required unless --dry-run")
-                payload = run_agent_eval(
-                    cfg, conn, cases, parse_agent_command(args.agent_command),
-                    args.runs_dir, modes=tuple(args.modes),
-                    repetitions=args.repetitions,
-                    timeout_seconds=args.timeout, workers=args.workers,
-                    repos_dir=args.repos_dir,
-                )
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        _write_json(payload, args.out)
     return 0
 
 

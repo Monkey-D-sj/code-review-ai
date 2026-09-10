@@ -15,12 +15,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from code_review_ai.agent_eval import (
-    AgentExecutor, AgentRun, DEFAULT_DIFFICULTY, DIFFICULTIES, GoldFinding,
-    _execute_agent, _mode_metrics,
-    _parse_agent_output, _score, _string_values, _usage,
-    SHARED_REVIEW_POLICY,
-)
 from code_review_ai.changes import (
     detect_changed_symbols,
     detect_changed_symbols_from_patch,
@@ -30,10 +24,16 @@ from code_review_ai.db import connect, init_schema
 from code_review_ai.eval_gold import (
     EvaluationGold,
     GoldContext,
+    GoldFinding,
     evaluation_gold_to_dict,
     parse_evaluation_gold,
     score_agent_review,
     score_context,
+)
+from code_review_ai.eval_runtime import (
+    AgentExecutor, AgentRun, DEFAULT_DIFFICULTY, DIFFICULTIES,
+    SHARED_REVIEW_POLICY, _execute_agent, _mode_metrics, _parse_agent_output,
+    _score, _string_values, _usage,
 )
 from code_review_ai.impact import get_impact
 from code_review_ai.indexer import rebuild

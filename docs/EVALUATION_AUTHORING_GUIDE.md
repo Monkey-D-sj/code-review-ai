@@ -386,7 +386,7 @@ python -m pytest \
 
 1. `code_review_ai/eval_gold.py` 的数据模型、解析、序列化和评分。
 2. `code_review_ai/agent_adapter.py` 的输出 schema。
-3. `code_review_ai/agent_eval.py` 与 `code_review_ai/full_agent_eval.py` 的 prompt/报告聚合。
+3. `code_review_ai/eval_runtime.py` 与 `code_review_ai/full_agent_eval.py` 的 prompt/报告聚合。
 4. `tests/test_eval_gold.py`、完整评测测试和本文档。
 
 不要为单个 case 在评分器中加入特判；特判应表达在结构化 Gold 中，或说明当前 schema 缺少

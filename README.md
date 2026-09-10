@@ -116,91 +116,35 @@ using only git diff, tree-sitter and the local SQLite index:
 code-review-ai context-plan --max-chars 8000 -o eval-results/context-plan.json
 ```
 
-## Agentic Eval
+## Eval report analysis
 
-`agent-eval` compares the same review cases under four controlled, precomputed
-context modes: `diff_only`, `search_baseline`, `graph_agent`, and
-`hybrid_agent`. Despite the historical name, `graph_agent` does not let an
-agent call tools; it is a component ablation that injects `get_impact` output.
-Hybrid mode combines the diff with the changed-symbol source, up to three
-direct callers/callees per symbol, and compact graph evidence under a 12,000
-serialized-character hard budget. The agent command
-reads a prompt from stdin and must write one JSON object to stdout. Runs retain
-the full prompt, stdout, stderr, parsed answer, latency, reported/estimated
-tokens, files read, tool calls, and deterministic finding scores.
-
-Start from `examples/agent-eval-cases.example.json`, then run:
+`eval-analyze` turns a completed eval report into bootstrap confidence
+intervals and paired comparisons across its arms:
 
 ```bash
-code-review-ai agent-eval --repo . \
-  --cases examples/agent-eval-cases.example.json \
-  --agent-command "your-agent --json" --repetitions 3 \
-  --workers 4 \
-  --runs-dir eval-results/agent-eval \
-  -o eval-results/agent-eval-report.json
+code-review-ai eval-analyze \
+  --report benchmark-results/case-backend-tiered.json \
+  -o benchmark-results/case-backend-tiered-analysis.json
 ```
 
-Use `--case-ids case-a case-b` to rerun provider failures without paying for
-the rest of the suite again. Reports preserve provider model, uncached/cache
-token categories, and total cost when the adapter exposes them. For the Claude
-streaming adapter, files and tool calls come from observed provider events,
-not model-authored telemetry fields.
+The analysis is harness-agnostic: it reads each run's `mode`, `case_id`,
+`difficulty`, and metrics, so it pairs whatever arms the report holds (e.g.
+`loop_full` against `loop_nograph`) and repeats the pairing per difficulty
+tier. Confidence intervals are bootstrap-resampled over cases, not runs.
 
 Each gold finding has a stable `id`, repository-relative `file`, optional line
 range, and optional matching keywords. A prediction matches only when every
-provided constraint is satisfied. The aggregate report compares finding
+provided constraint is satisfied. Reports compare finding
 Precision/Recall/F1, success rate, latency, tokens, files read, and tool calls
-per mode. Token and file/tool metrics are marked or understood as agent-reported;
-when usage is absent, token counts are explicitly estimated from text length.
+per arm; runs also retain the full prompt, stdout, stderr, and parsed answer.
+Token and file/tool metrics are marked or understood as agent-reported; when
+usage is absent, token counts are explicitly estimated from text length.
 
-The runner sets `CRAI_EVAL_MODE` and `CRAI_EVAL_CASE` for provider adapters.
-For a fair experiment, keep the model, prompt policy, temperature, context
-budget, and repetition count fixed, and prevent the Diff/Search agents from
-using repository tools outside the supplied context.
+For a fair experiment, keep the model, prompt policy, temperature, and
+repetition count fixed across arms. On Windows, commands with complex quoting
+can also be supplied as a JSON array.
 
-A built-in Claude Code adapter normalizes `claude -p --output-format json`
-into the eval contract and disables repository tools for controlled context
-experiments:
-
-```bash
-code-review-ai agent-eval --repo . \
-  --cases examples/agent-eval-cases.example.json \
-  --agent-command "python -m code_review_ai.agent_adapter claude --model sonnet" \
-  --repetitions 3 --workers 4 \
-  -o eval-results/agent-eval-example-r3.json
-```
-
-`examples/agent-eval-cases.example.json` is a single offline case (inline diff,
-no clone needed). For repository-backed cases the manifest supplies a
-`repo_url`/`source_commit`/`mutation_paths` triple; `agent-eval` clones/caches
-each repository, creates an isolated worktree, restores the selected production
-paths to the fix parent, detects changed symbols, and builds all four controlled
-contexts from the same mutations used by `full-agent-eval`.
-On Windows, commands with complex quoting can also be supplied as a JSON array.
-Search currently has the best F1 point estimate; confidence intervals do not
-establish that Graph or Hybrid improves F1 over Diff Only.
-
-Before spending model budget, preflight the manifest, symbol coverage, context
-sizes, and supplied files:
-
-```bash
-code-review-ai agent-eval --repo . \
-  --cases examples/agent-eval-cases.example.json --dry-run \
-  -o eval-results/agent-eval-preflight.json
-```
-
-After a multi-repetition run, generate bootstrap confidence intervals and
-paired comparisons against Diff Only:
-
-```bash
-code-review-ai agent-eval-analyze \
-  --report eval-results/agent-eval-report.json \
-  -o eval-results/agent-eval-analysis.json
-```
-
-### Full-project tool-use eval
-
-### Built-in LangGraph review agent
+### Built-in review loop
 
 The package also includes a provider-neutral, read-only review loop. It talks
 to an OpenAI-compatible endpoint directly, builds the change summary before
@@ -273,8 +217,7 @@ CLI's current default model.
 (`source_dir`-anchored under `full_agent_eval/case-backend`, no clone or
 network needed), and `benchmarks/fast-cases.json` is the fast single-repo
 regression set against `benchmarks/fast-repo` (`--local-repo`). Both run the
-same `full-agent-eval` harness and share the `examples/agent-eval-cases.example.json`
-offline shape.
+same `full-agent-eval` harness.
 
 #### Run without an LLM (`scripted` agent)
 

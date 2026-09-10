@@ -409,7 +409,7 @@ native 在 hard 档失败不预先标成`unsolvable`,而按实际运行结果记
 
 项目已有的`full-agent-eval`负责真实仓库、真实 Agent 在线工具调用。case schema
 现已增加`difficulty = trivial | medium | hard`,每个 run、preflight 和 report
-都保留该标签。`agent-eval-analyze`会同时输出全局结果和`by_difficulty`,每档包括:
+都保留该标签。`eval-analyze`会同时输出全局结果和`by_difficulty`,每档包括:
 
 - precision / recall / F1及配对 delta;
 - input / output / total token配对 delta;
@@ -462,7 +462,7 @@ code-review-ai full-agent-eval `
   --agent-command '<adapter command>' `
   --out benchmark-results/case-backend-tiered.json
 
-code-review-ai agent-eval-analyze `
+code-review-ai eval-analyze `
   --report benchmark-results/case-backend-tiered.json `
   --out benchmark-results/case-backend-tiered-analysis.json
 
