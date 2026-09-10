@@ -187,6 +187,15 @@ def _print_summary(summary: dict) -> None:
               f"{stats['mean_cost_yuan']:>8.3f}")
 
 
+def _write_output(output: Path, cases, arms, runs: int, rows: list[dict]) -> None:
+    """Persist what has been paid for; called after every row, not just at the end."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(
+        {"cases": [case.id for case in cases], "arms": list(arms),
+         "runs": runs, "summary": summarize(rows), "rows": rows},
+        ensure_ascii=False), encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", default=str(DEFAULT_MANIFEST),
@@ -206,22 +215,24 @@ def main() -> None:
 
     cases = load_cases(args.cases, args.case)
     model = create_model(load_config(repo_path=str(REPO_ROOT)))
-    print(f"{len(cases)} case(s) x {len(args.arms)} arm(s) x {args.runs} run(s)",
-          flush=True)
-
-    rows = run_batch(cases, arms=args.arms, runs=args.runs,
-                     prepare=prepare_case,
-                     execute=lambda arm, case, prepared: _ARM_RUNNERS[arm](prepared, model),
-                     release=release_case, on_row=_progress)
-
-    summary = summarize(rows)
-    _print_summary(summary)
     output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(
-        {"cases": [case.id for case in cases], "arms": list(args.arms),
-         "runs": args.runs, "summary": summary, "rows": rows},
-        ensure_ascii=False), encoding="utf-8")
+    print(f"{len(cases)} case(s) x {len(args.arms)} arm(s) x {args.runs} run(s) "
+          f"-> {output}", flush=True)
+
+    rows: list[dict] = []
+
+    def record(row: dict) -> None:
+        # Rewrite the file after every run: a batch this long is paid for as it
+        # goes, so a mid-batch failure must not cost the runs already spent.
+        _progress(row)
+        _write_output(output, cases, args.arms, args.runs, rows)
+
+    run_batch(cases, arms=args.arms, runs=args.runs,
+              prepare=prepare_case,
+              execute=lambda arm, case, prepared: _ARM_RUNNERS[arm](prepared, model),
+              release=release_case, on_row=record)
+
+    _print_summary(summarize(rows))
     print(f"\nwrote {output}")
 
 
