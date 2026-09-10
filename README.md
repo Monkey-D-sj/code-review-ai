@@ -116,34 +116,6 @@ using only git diff, tree-sitter and the local SQLite index:
 code-review-ai context-plan --max-chars 8000 -o eval-results/context-plan.json
 ```
 
-## Eval report analysis
-
-`eval-analyze` turns a completed eval report into bootstrap confidence
-intervals and paired comparisons across its arms:
-
-```bash
-code-review-ai eval-analyze \
-  --report benchmark-results/case-backend-tiered.json \
-  -o benchmark-results/case-backend-tiered-analysis.json
-```
-
-The analysis is harness-agnostic: it reads each run's `mode`, `case_id`,
-`difficulty`, and metrics, so it pairs whatever arms the report holds (e.g.
-`loop_full` against `loop_nograph`) and repeats the pairing per difficulty
-tier. Confidence intervals are bootstrap-resampled over cases, not runs.
-
-Each gold finding has a stable `id`, repository-relative `file`, optional line
-range, and optional matching keywords. A prediction matches only when every
-provided constraint is satisfied. Reports compare finding
-Precision/Recall/F1, success rate, latency, tokens, files read, and tool calls
-per arm; runs also retain the full prompt, stdout, stderr, and parsed answer.
-Token and file/tool metrics are marked or understood as agent-reported; when
-usage is absent, token counts are explicitly estimated from text length.
-
-For a fair experiment, keep the model, prompt policy, temperature, and
-repetition count fixed across arms. On Windows, commands with complex quoting
-can also be supplied as a JSON array.
-
 ### Built-in review loop
 
 The package also includes a provider-neutral, read-only review loop. It talks
@@ -162,8 +134,7 @@ code-review-ai review --repo . --db .code-review-ai/index.db \
 The local `.env` template also accepts `CRAI_REVIEW_MODEL` and
 `CRAI_REVIEW_BASE_URL`, so a fully configured file lets
 `code-review-ai review --repo .` run without model/key flags. Every built-in
-agent reads the single `OPENAI_API_KEY` entry by default.
-`CRAI_EVAL_MODEL` and `CRAI_BASE_URL` configure the eval adapter. The process
+agent reads the single `OPENAI_API_KEY` entry by default. The process
 environment takes precedence over `.env`, and no CLI option accepts a plaintext
 API key.
 
@@ -176,116 +147,6 @@ framework in between — so a run spends no tokens on framework overhead.
 for the final JSON payload. Pass `--no-progress` for a quiet automation run;
 `--visual` and `--no-visual` are accepted for compatibility and have no effect.
 
-For the full-project evaluator, use the same runtime through
-`python -m code_review_ai.agent_adapter review_loop --model your-model`; the
-`loop_nograph` arm gets `read_file + search_code`, and `loop_full` also gets the
-graph retrieval tools. That pair is the whole comparison: same loop, same
-policy, only the graph tools differ.
-
-`full-agent-eval` tests the installed product on isolated real repositories.
-It checks out a real fix commit, restores selected production files to the
-parent revision, and keeps the fixed tests available.
-
-For Full Project mode, each historical snapshot is indexed before the Agent
-timer starts. The evaluated MCP server reuses that index without startup sync
-or a watcher, and `rebuild_index` is not available to the Agent. The Prompt
-mirrors the installed review policy: start from the change summary, use graph
-neighbors when context is needed, and expand to `get_impact` only when the
-blast radius remains uncertain or the change crosses an important boundary.
-
-```bash
-code-review-ai full-agent-eval \
-  --cases benchmarks/case-backend-cases.json --dry-run \
-  -o eval-results/full-agent-preflight.json
-
-code-review-ai full-agent-eval \
-  --cases benchmarks/case-backend-cases.json \
-  --model deepseek-v4-flash \
-  --repetitions 3 --workers 4 \
-  -o eval-results/full-agent-report.json
-```
-
-`--agent-command` defaults to this repo's own review loop
-(`python -m code_review_ai.agent_adapter review_loop`, launched with the
-interpreter running the CLI), so a loop-vs-loop run needs no extra flags.
-Pass any other stdin-reading agent to compare against it. `--model` locks every
-arm to the same model (forwarded to the agent via `CRAI_EVAL_MODEL`, so
-per-mode cost/token comparisons stay apples-to-apples); omit it to use the
-CLI's current default model.
-
-`benchmarks/case-backend-cases.json` holds the business-shaped project cases
-(`source_dir`-anchored under `full_agent_eval/case-backend`, no clone or
-network needed), and `benchmarks/fast-cases.json` is the fast single-repo
-regression set against `benchmarks/fast-repo` (`--local-repo`). Both run the
-same `full-agent-eval` harness.
-
-#### Run without an LLM (`scripted` agent)
-
-The default loop spends tokens on a real provider. For a deterministic,
-no-network wiring regression that runs in CI, the same harness accepts a
-scripted agent that replaces the model with a fixed script:
-
-```bash
-code-review-ai full-agent-eval \
-  --cases benchmarks/fast-cases.json \
-  --local-repo benchmarks/fast-repo \
-  --agent-command "python -m code_review_ai.agent_adapter scripted" \
-  --modes loop_nograph loop_full \
-  -o eval-results/scripted-report.json
-```
-
-The `scripted` adapter walks the exact same pipeline as the real one — CLI
-subprocess, eval env vars, transcript persistence, scoring, and aggregation —
-and, in the `loop_full` arm, opens a real MCP server subprocess over stdio and
-calls `get_change_summary` / `get_impact`, so the graph tools genuinely answer
-against the case index. It makes no model call, so it needs no API key, tokens,
-or network. The scenario is derived from `CRAI_EVAL_MODE`, so one
-`--agent-command` serves both arms. This is a capability-and-wiring oracle, not
-a behavior substitute: it proves the harness wiring and that the graph tools
-answer on the index, but it cannot say how a real LLM agent would use those
-tools. Keep real provider runs for behavioral comparison; run the scripted arm
-in CI for regressions. Coverage is `tests/test_scripted_full_agent_eval.py`.
-
-Cases are graded **blind**: the prompt states the deliverable (what broke, which
-callers / entry points / tests are affected) and shows the diff, but never names a
-symbol. Per-case prose lives in each case's `hint` field and reaches the model only
-under `--hinted`, which exists as an ablation arm — such prose is symmetric input to
-both arms but asymmetric benefit, since naming the affected callers hands the
-`loop_nograph` arm the traversal the graph tools exist to do. Gold keywords are therefore restricted
-to identifiers only traversal surfaces (a keyword visible in the diff or the hint can
-be paraphrased instead of traced), and each answer is capped at 3 findings so f1 does
-not turn into a verbosity measure.
-
-Each case has one structured `gold` object shared by two independent score layers:
-
-```json
-{
-  "gold": {
-    "root_causes": [{
-      "id": "bug-id", "fix_file": "app/service.py",
-      "mechanism_terms": ["Caller", "failure"], "min_matches": 2
-    }],
-    "context": {
-      "symbols": [], "files": ["app/service.py"],
-      "entries": [], "tests": [],
-      "hard_negatives": {"symbols": [], "files": []}
-    }
-  }
-}
-```
-
-`graph_retrieval` scores symbols/files/entries/tests and explicit hard negatives.
-`agent_review` scores root causes plus the structured affected context returned by
-the agent. Empty gold dimensions are not applicable rather than zero. Legacy
-`gold_findings`/`gold_files` manifests remain loadable for old reports.
-
-See [docs/EVALUATION_AUTHORING_GUIDE.md](docs/EVALUATION_AUTHORING_GUIDE.md) for
-the case-backend authoring workflow, Gold annotation rules, validation commands,
-and report interpretation.
-
-For the current repository-specific expansion order and Native/Graph balancing
-quota, follow [docs/CASE_BACKEND_EXPANSION_PLAYBOOK.md](docs/CASE_BACKEND_EXPANSION_PLAYBOOK.md).
-
 ### Visualization (`graph`)
 
 Export interactive HTML graphs of the call structure:
@@ -297,6 +158,39 @@ code-review-ai graph -m flow        -o flows.html         # flow chart (BFS call
 ```
 
 Options: `-n` max items (200), `-m` mode (communities|graph|flow), `-o` output path.
+
+## Eval: does the index find the bug, and what does it cost?
+
+`benchmarks/review_loop_case_compare.py` runs the review loop over the 21
+bug-injection cases in `benchmarks/case-backend-cases.json`, twice per run:
+
+- **`graph`** — worksheet mode: the index's change summary (changed symbols →
+  candidate rows) plus `get_impact`'s call graph, resolved through
+  `update_review_item`.
+- **`nograph`** — free-form with no index tooling: `read_file` / `search_code`
+  plus `finish_review`, seeing only the diff. That is a no-graph reviewer's
+  input.
+
+Both arms share one model instance and one 25-turn / 150k-token budget, so the
+cost columns are directly comparable. Scoring is one rule: a run hit if a
+reported finding lands on the gold fix site (`fix_file`, or an alternate file —
+the same regression can be repaired on either side of the broken contract).
+Whether the index earns its keep is not a second score; it is read off the cost
+columns — tokens, files read, tool calls. Finding the defect is the result;
+paying less for the same result is the product.
+
+```bash
+uv run --frozen python benchmarks/review_loop_case_compare.py --runs 3
+uv run --frozen python benchmarks/review_loop_case_compare.py \
+  --case case-backend-decrypt-password-alias --runs 1 -o eval-results/smoke.json
+```
+
+Each case is materialized once (copy, patch, index, diff) and every run reuses
+it — the loop is read-only, so all runs of a case see identical input. Arms
+alternate inside each repetition rather than one arm draining the batch first,
+so a provider that degrades mid-batch hits both equally. The output keeps every
+run's raw findings and tool trace, so the numbers can be recomputed later
+without re-running a model.
 
 ## Automating review
 

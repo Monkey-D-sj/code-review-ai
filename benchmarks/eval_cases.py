@@ -112,8 +112,8 @@ def load_cases(manifest: Path | str = DEFAULT_MANIFEST,
 def _to_case(record: dict, manifest: Path | str) -> EvalCase:
     """One manifest record -> EvalCase, rejecting any other gold shape.
 
-    The fast-cases manifest stores ``gold_findings`` with different key names;
-    scoring it with this loader would silently mis-read the gold, so it fails
+    A manifest whose gold uses another shape (``gold_findings``, different key
+    names) would be silently mis-read rather than scored wrongly, so it fails
     loudly instead.
     """
     gold = record.get("gold") or {}

@@ -7,6 +7,7 @@ execute, which is also how the scorer is checked against a perfect and an empty
 reporter.
 """
 
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,11 +98,17 @@ class TestLoadCases:
         with pytest.raises(ValueError, match="unknown case id"):
             load_cases(case_ids=["nope"])
 
-    def test_rejects_a_gold_shape_it_cannot_score(self):
-        # The fast-cases manifest stores gold_findings with different key names;
-        # scoring it here would silently mis-read the gold.
+    def test_rejects_a_gold_shape_it_cannot_score(self, tmp_path):
+        # A manifest whose gold uses another shape (``gold_findings`` with
+        # different key names) would be silently mis-read, not scored wrongly.
+        manifest = tmp_path / "other-cases.json"
+        manifest.write_text(json.dumps([{
+            "id": "other", "source_dir": "unused", "prompt": "p",
+            "gold_findings": [{"id": "g", "file": "app/x.py"}],
+        }]), encoding="utf-8")
+
         with pytest.raises(ValueError, match="case-backend manifest shape"):
-            load_cases(REPO_ROOT / "benchmarks" / "fast-cases.json")
+            load_cases(manifest)
 
 
 class TestScore:

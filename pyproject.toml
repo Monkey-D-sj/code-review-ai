@@ -44,7 +44,7 @@ exclude = ["*/migrations/*", "dist/*", "*/static/*", ".venv/*", ".claude/*", "as
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "slow: full-repo rebuild / eval runs that take seconds (skip with -m 'not slow')",
+    "slow: full-repo rebuild / end-to-end runs that take seconds (skip with -m 'not slow')",
 ]
 
 [tool.uv.sources]
