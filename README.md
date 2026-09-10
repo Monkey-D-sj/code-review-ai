@@ -25,10 +25,8 @@ code-review-ai install --platform claude-code
 ```
 
 This deploys the review docs + skills. By default it does **not** register
-the MCP server globally: the post-commit review hook (see *Review hooks*)
-injects the graph tools on-demand via `--strict-mcp-config`, so everyday
-interactive sessions never load the ~1.5k tokens of tool descriptions. To
-register globally for interactive manual review, add `--register-mcp`:
+the MCP server globally — pass `--register-mcp` to make the graph tools
+available to interactive sessions:
 
 ```bash
 code-review-ai install --platform claude-code --register-mcp
@@ -173,100 +171,6 @@ alternate inside each repetition rather than one arm draining the batch first,
 so a provider that degrades mid-batch hits both equally. The output keeps every
 run's raw findings and tool trace, so the numbers can be recomputed later
 without re-running a model.
-
-## Automating review
-
-The index keeps itself fresh automatically (watcher + git hooks + MCP startup
-catch-up); firing the *review* itself needs one extra hook. Two options, in
-increasing order of automation.
-
-### Review each commit (`install-hooks --review`)
-
-One command, no global install needed — the hook self-bootstraps: at commit time
-it prefers a PATH-installed `code-review-ai` and otherwise falls back to
-`uvx --from <source>`:
-
-```bash
-uvx --from git+https://github.com/Monkey-D-sj/code-review-ai code-review-ai \
-  install-hooks --repo . --db .code-review-ai/index.db --review
-```
-
-Writes the usual post-* sync hooks plus a review-enabled `post-commit`: it syncs
-the index, summarizes the commit's change impact (`summary --files <changed>`
-diffed against `HEAD^`, i.e. the commit itself, so it works before `origin/main`
-exists), pipes that JSON into the review LLM, and writes the report to
-`.code-review-ai/last-review.md`. Each review is also archived under
-`.code-review-ai/reviews/<date>/<date>-<time>-<short-sha>.md` (with a concise
-`.debug.log` trace — one line per tool/skill/MCP call plus its result — and,
-for claude-code, a `.debug.jsonl` raw `stream-json` transcript for deeper
-dives), so history is kept and `last-review.md` always points at the newest.
-The review prompt first asks the LLM to classify the supplied local change.
-Self-contained changes use no graph context; non-local changes call `get_impact`
-once for direct call sites + affected entries, then use targeted native reads
-only for missing evidence. The headless `claude -p` run injects the graph server
-on-demand via `--strict-mcp-config` (only `get_impact` / `get_change_summary` /
-`search_symbol`) and pre-authorizes those tools so they don't fail on permission
-prompts — no global MCP registration needed, so everyday sessions carry no
-tool-description overhead. The LLM
-platform is selectable — `claude-code` (default, runs `claude -p
---output-format stream-json --verbose`, extracting the answer from the
-transcript) or `codex` (runs `codex exec --full-auto`, which takes the summary
-on stdin as prompt context). Tune the platform, output path, and fallback
-source:
-
-```bash
-code-review-ai install-hooks --review \
-  --platform codex \
-  --review-out .code-review-ai/last-review.md \
-  --from git+https://github.com/Monkey-D-sj/code-review-ai
-```
-
-`--review-launch "your command"` overrides the platform's review command
-entirely (e.g. `--review-launch "codex exec"`).
-
-`--review` only affects the post-commit hook; post-merge / post-checkout /
-post-rewrite still sync only.
-
-Hooks land wherever git actually reads them: `core.hooksPath` if set, else
-`.git/hooks`. Under husky the hooks go to `.husky/` (its `core.hooksPath` points
-at the auto-generated `.husky/_` shim dir, which sources the `.husky/*` files).
-
-### Review each MR/PR in CI
-
-Ready-to-adapt templates that run `sync -> summary (impact chain) -> LLM review`
-and publish the report:
-
-- `examples/ci/gitlab-ci.yml` — artifact `review.md`, merge_request pipelines
-- `examples/ci/github-actions.yml` — artifact + PR comment, needs an `ANTHROPIC_API_KEY` secret
-
-Both install the `claude` CLI in the runner via npm and require
-`.code-review-ai/` in the target project's `.gitignore`.
-
-## Automating test selection
-
-The same always-fresh index powers `test-impact`: given the changed symbols
-in a PR, it reverse-walks the call graph to the test functions that reach
-them, so CI can run only the tests this change can actually break. Add
-`--format paths` and the CLI prints space-separated, shell-ready test files
-(forward slashes, no `./` prefix) - built for `pytest $(...)`:
-
-```bash
-code-review-ai test-impact --files <changed> --format paths
-```
-
-### Run only affected tests in CI
-
-Ready-to-adapt templates that run `sync -> test-impact -> pytest` and fall
-back to the full suite when there are no source changes, no test coverage,
-or the query fails:
-
-- `examples/ci/github-actions-test-select.yml` - pull_request pipelines
-- `examples/ci/gitlab-ci-test-select.yml` - merge_request pipelines
-
-Both need `.code-review-ai/` in the target project's `.gitignore`. The
-fallback is deliberate: if TIA ever can't answer, CI still runs the full
-suite rather than silently skipping. To skip instead of falling back when
-no test covers the change, swap the empty-`$tests` branch for `exit 0`.
 
 ## Config
 

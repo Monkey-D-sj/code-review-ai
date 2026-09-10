@@ -257,7 +257,6 @@ flowchart LR
 | `impact` / `testimpact` | membership 切片 + 边回退 / 反向过滤到测试节点 |
 | `graph` / `changes` | 邻域查询 / git diff → 变更符号 |
 | `community` | 社区检测 |
-| `benchmark` / `export_graph` | 评测 / 可视化 |
 
 ---
 

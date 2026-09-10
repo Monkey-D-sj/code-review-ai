@@ -82,9 +82,9 @@ def _build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--from", dest="source", default=DEFAULT_SOURCE)
     install_parser.add_argument("--name", default="code-review-ai")
     install_parser.add_argument("--register-mcp", action="store_true",
-                                help="also register the MCP server globally (default off: "
-                                     "the review hook injects it on-demand, so everyday "
-                                     "sessions carry no tool-description token cost)")
+                                help="also register the MCP server globally, so "
+                                     "interactive sessions get the graph tools "
+                                     "(default off)")
     return parser
 
 
