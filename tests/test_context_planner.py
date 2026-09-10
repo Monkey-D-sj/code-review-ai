@@ -5,12 +5,8 @@ from pathlib import Path
 import pytest
 
 from code_review_ai.config import load_config
-from code_review_ai.context_planner import (
-    evaluate_prepared_plans,
-    plan_context,
-)
+from code_review_ai.context_planner import plan_context
 from code_review_ai.db import connect, init_schema
-from code_review_ai.full_agent_eval import FullAgentCase, PreparedCase
 
 
 def _setup(tmp_path, monkeypatch, summary, files):
@@ -165,29 +161,3 @@ def test_test_selection_and_hard_budget_are_local_and_bounded(tmp_path, monkeypa
     assert len(rendered) <= 1_600
     assert plan["metrics"]["truncated"] is True
     assert "tests/test_graph_builder.py" in plan["metrics"]["evidence_files"]
-
-
-def test_offline_evaluation_reports_zero_llm_cost_and_unscored_route(tmp_path, monkeypatch):
-    case = FullAgentCase(
-        "case", "repo", "", "abc", ("mod.py",), "unused prompt", (), ())
-    prepared = PreparedCase(case, str(tmp_path), "diff")
-    setup = {"case": {"db_path": str(tmp_path / "db.sqlite"), "nodes": 1,
-                      "edges": 0, "flows": 0, "elapsed_ms": 1.0}}
-    fake_plan = {
-        "route": "local", "reasons": [],
-        "evidence": [{"file": "mod.py", "qname": "mod::f"}],
-        "metrics": {"evidence_files": ["mod.py"], "serialized_chars": 123,
-                    "truncated": False, "duplicate_file_entries": 0},
-    }
-    monkeypatch.setattr("code_review_ai.context_planner.plan_context",
-                        lambda *args, **kwargs: fake_plan)
-    # _case_config only needs this path to exist; connect creates the DB.
-    report = evaluate_prepared_plans(
-        [prepared], setup,
-        [{"id": "case", "mutation_paths": ["mod.py"], "gold_files": ["test.py"]}],
-    )
-
-    assert report["llm_calls"] == 0
-    assert report["model_cost_usd"] == 0.0
-    assert report["aggregate"]["route_accuracy"] is None
-    assert report["cases"][0]["mutation_file_recall"] == 1.0

@@ -1,6 +1,4 @@
 import json
-import os
-import sys
 
 from conftest import FIXTURES as FIX, Q
 
@@ -90,94 +88,6 @@ def test_cli_query_graph(tmp_path, capsys):
     data = json.loads(capsys.readouterr().out)
     assert data["edge_kind"] == "call"
     assert [n["qname"] for n in data["in"]] == [Q("app", "main")]
-
-
-def test_cli_full_agent_eval_automatically_writes_routes(tmp_path, monkeypatch,
-                                                        capsys):
-    cases = tmp_path / "full-cases.json"
-    cases.write_text(json.dumps([{
-        "id": "real-review", "repo_name": "sample",
-        "repo_url": "https://github.com/example/sample.git",
-        "source_commit": "abc123", "mutation_paths": ["src/app.py"],
-        "prompt": "Review it.", "gold_findings": [{
-            "id": "bug", "file": "src/app.py", "keywords": ["bug"]}],
-    }]), encoding="utf-8")
-    output = tmp_path / "report.json"
-    work_dir = tmp_path / "work"
-    payload = {"schema_version": 2, "runs": [{
-        "case_id": "real-review", "mode": "native_agent", "repetition": 1,
-        "precision": 1, "recall": 1, "f1": 1, "elapsed_ms": 10,
-        "files_read": [], "usage": {}, "tool_trace": [],
-    }]}
-    monkeypatch.setattr(cli, "run_full_agent_eval", lambda *a, **k: payload)
-
-    code = main([
-        "full-agent-eval", "--cases", str(cases),
-        "--agent-command", "agent", "--work-dir", str(work_dir),
-        "--out", str(output),
-    ])
-
-    routes = tmp_path / "report-routes.md"
-    assert code == 0
-    assert json.loads(output.read_text(encoding="utf-8")) == payload
-    assert "real-review / native_agent / run-1" in routes.read_text(
-        encoding="utf-8")
-    assert str(routes) in capsys.readouterr().out
-
-
-def test_cli_full_agent_eval_forwards_model_via_env(tmp_path, monkeypatch):
-    """--model locks the agent model: cli sets CRAI_EVAL_MODEL for the run."""
-    cases = tmp_path / "full-cases.json"
-    cases.write_text(json.dumps([{
-        "id": "real-review", "repo_name": "sample",
-        "repo_url": "https://github.com/example/sample.git",
-        "source_commit": "abc123", "mutation_paths": ["src/app.py"],
-        "prompt": "Review it.", "gold_findings": [{
-            "id": "bug", "file": "src/app.py", "keywords": ["bug"]}],
-    }]), encoding="utf-8")
-    monkeypatch.delenv("CRAI_EVAL_MODEL", raising=False)
-    seen = {}
-
-    def fake_run(*args, **kwargs):
-        seen["model"] = os.environ.get("CRAI_EVAL_MODEL")
-        return {"schema_version": 2, "runs": []}
-
-    monkeypatch.setattr(cli, "run_full_agent_eval", fake_run)
-    code = main([
-        "full-agent-eval", "--cases", str(cases),
-        "--agent-command", "agent", "--work-dir", str(tmp_path / "work"),
-        "--out", str(tmp_path / "report.json"),
-        "--model", "deepseek-v4-flash",
-    ])
-    assert code == 0
-    assert seen["model"] == "deepseek-v4-flash"
-
-
-def test_cli_full_agent_eval_defaults_to_the_review_loop(tmp_path, monkeypatch):
-    """Omitting --agent-command runs this repo's own review loop."""
-    cases = tmp_path / "full-cases.json"
-    cases.write_text(json.dumps([{
-        "id": "real-review", "repo_name": "sample",
-        "repo_url": "https://github.com/example/sample.git",
-        "source_commit": "abc123", "mutation_paths": ["src/app.py"],
-        "prompt": "Review it.", "gold_findings": [{
-            "id": "bug", "file": "src/app.py", "keywords": ["bug"]}],
-    }]), encoding="utf-8")
-    seen = {}
-
-    def fake_run(cases, repos_dir, work_dir, command, **kwargs):
-        seen["command"] = command
-        return {"schema_version": 2, "runs": []}
-
-    monkeypatch.setattr(cli, "run_full_agent_eval", fake_run)
-    code = main([
-        "full-agent-eval", "--cases", str(cases),
-        "--work-dir", str(tmp_path / "work"),
-        "--out", str(tmp_path / "report.json"),
-    ])
-    assert code == 0
-    assert seen["command"] == [sys.executable, "-m",
-                               "code_review_ai.agent_adapter", "review_loop"]
 
 
 def test_cli_test_impact(tmp_path, capsys, monkeypatch):

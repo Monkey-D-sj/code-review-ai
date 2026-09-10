@@ -18,6 +18,7 @@ from code_review_ai.review_loop.hooks import (
     POINT_RUN_FINISHED,
 )
 from code_review_ai.review_loop.loop import run_free_loop, run_loop
+from code_review_ai.review_loop.payload import loop_result_payload
 from code_review_ai.review_loop.pricing import compute_cost
 from code_review_ai.review_loop.schemas import (
     FINISH_REVIEW_TOOL,
@@ -56,6 +57,7 @@ __all__ = [
     "UPDATE_REVIEW_TOOL",
     "Usage",
     "compute_cost",
+    "loop_result_payload",
     "run_free_loop",
     "run_loop",
 ]

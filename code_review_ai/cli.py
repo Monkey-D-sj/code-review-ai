@@ -6,14 +6,6 @@ import time
 from pathlib import Path
 
 from code_review_ai.changes import build_change_summary, detect_changed_symbols
-from code_review_ai.eval_runtime import parse_agent_command
-from code_review_ai.full_agent_eval import (DEFAULT_FULL_EVAL_MODES,
-                                            FULL_EVAL_MODES,
-                                            load_full_agent_cases,
-                                            preflight_full_agent_eval,
-                                            rescore_full_agent_report,
-                                            run_full_agent_eval,
-                                            select_full_agent_cases)
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.graph import query_graph
@@ -25,20 +17,11 @@ from code_review_ai.indexer import rebuild
 from code_review_ai.search import fts_search
 from code_review_ai.installer import DEFAULT_SOURCE, install
 from code_review_ai.update import sync, update_nodes_edges
-from code_review_ai.context_planner import (
-    DEFAULT_MAX_CHARS, plan_context, run_context_plan_eval,
-)
+from code_review_ai.context_planner import DEFAULT_MAX_CHARS, plan_context
 
 # Framing for the CLI's one-shot review; the loop's own policy (worksheet,
 # evidence rules, read-only guard) is injected by review_loop.runner.
 _CLI_REVIEW_PROMPT = "评审本次变更引入的具体回归，逐行核对 worksheet 中的变更符号。"
-
-# Default agent for the eval harness: this repo's own review loop, launched with
-# the interpreter running the CLI -- an absolute path, which also sidesteps the
-# Windows trap where a bare `python` resolves to the uv base interpreter. A JSON
-# array keeps shell quoting out of the picture (see parse_agent_command).
-_DEFAULT_AGENT_COMMAND = json.dumps(
-    [sys.executable, "-m", "code_review_ai.agent_adapter", "review_loop"])
 
 
 def _conn(db_path):
@@ -71,20 +54,6 @@ def _write_json(payload: dict, output_path: str | None) -> None:
         path.write_text(rendered + "\n", encoding="utf-8")
     else:
         print(rendered)
-
-
-def _write_full_agent_routes(payload: dict, report_path: str,
-                             work_dir: str) -> tuple[Path, Path]:
-    """Write the automatic trace artifacts (Markdown + collapsible HTML)
-    beside an eval report."""
-    from code_review_ai.full_agent_trace import render, render_html
-    report = Path(report_path)
-    transcripts = Path(work_dir) / "transcripts"
-    md_path = report.with_name(f"{report.stem}-routes.md")
-    md_path.write_text(render(payload, transcripts), encoding="utf-8")
-    html_path = report.with_name(f"{report.stem}-routes.html")
-    html_path.write_text(render_html(payload, transcripts), encoding="utf-8")
-    return md_path, html_path
 
 
 def _normalize_test_paths(files: list[str]) -> list[str]:
@@ -125,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--symbols", nargs="*")
     s.add_argument("--files", nargs="*")
     review = sub.add_parser("review",
-                            help="run the built-in read-only LangGraph review agent")
+                            help="run the built-in read-only review loop")
     _add_common(review)
     review.add_argument("--symbols", nargs="*")
     review.add_argument("--files", nargs="*")
@@ -195,69 +164,6 @@ def main(argv: list[str] | None = None) -> int:
     gp.add_argument("-n", "--max-nodes", type=int, default=200)
     gp.add_argument("-m", "--mode", default="communities",
                     choices=["communities", "graph", "flow"])
-    aa = sub.add_parser("eval-analyze",
-                        help="bootstrap confidence intervals and paired "
-                             "comparisons across an eval report's arms")
-    aa.add_argument("--report", required=True)
-    aa.add_argument("-o", "--out")
-    fe = sub.add_parser("full-agent-eval")
-    fe.add_argument("--cases", required=True)
-    fe.add_argument("--case-ids", nargs="+")
-    fe.add_argument("--repos-dir", default="eval-results/external-repos")
-    fe.add_argument("--local-repo",
-                    help="single local git repo used as the source for every "
-                         "case (cases must have empty repo_url); built by its "
-                         "build_repo.py if it has no history yet")
-    fe.add_argument("--work-dir", default="eval-results/full-agent-eval")
-    fe.add_argument("--agent-command", default=_DEFAULT_AGENT_COMMAND,
-                    help="command that reads the eval prompt from stdin and "
-                         "writes the required JSON object to stdout "
-                         "(default: this repo's own review loop)")
-    fe.add_argument("--model",
-                    help="Claude model for the agent run; passed to the agent "
-                         "via CRAI_EVAL_MODEL so every arm uses the same model")
-    fe.add_argument("--dry-run", action="store_true")
-    fe.add_argument("--modes", nargs="+", choices=FULL_EVAL_MODES,
-                    default=list(DEFAULT_FULL_EVAL_MODES))
-    fe.add_argument("--hinted", action="store_true",
-                    help="inject each case's hint prose into the prompt "
-                         "(ablation arm); blind by default, because a hint "
-                         "that names the affected callers removes the "
-                         "traversal the graph tools exist to do")
-    fe.add_argument("--repetitions", type=int, default=1)
-    fe.add_argument("--workers", type=int, default=1)
-    fe.add_argument("--timeout", type=int, default=600)
-    fe.add_argument("-o", "--out")
-    fr = sub.add_parser("full-agent-eval-rescore")
-    fr.add_argument("--report", required=True)
-    fr.add_argument("--cases", required=True)
-    fr.add_argument("--transcripts", required=True)
-    fr.add_argument("-o", "--out")
-    pe = sub.add_parser("context-plan-eval")
-    pe.add_argument("--cases", required=True)
-    pe.add_argument("--case-ids", nargs="+")
-    pe.add_argument("--repos-dir", default="eval-results/external-repos")
-    pe.add_argument("--work-dir", default="eval-results/context-plan-eval")
-    pe.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
-    pe.add_argument("-o", "--out")
-    xr = sub.add_parser("extract-review")
-    xr.add_argument("debug", help="claude stream-json transcript to read")
-    xr.add_argument("out", help="file to write the final answer to")
-    tr = sub.add_parser("trace-review")
-    tr.add_argument("debug", help="claude stream-json transcript to read")
-    tr.add_argument("out", help="file to write the concise tool trace to")
-    ft = sub.add_parser(
-        "summarize-full-agent-trace",
-        aliases=["eval-trace"],
-        help="render compact complete routes from one or more full-agent-eval reports",
-    )
-    ft.add_argument("report", nargs="+",
-                    help="full-agent-eval report JSON (multiple are merged)")
-    ft.add_argument("--transcripts-root",
-                    help="transcripts root used to recover each run cwd")
-    ft.add_argument("--html", action="store_true",
-                    help="render a collapsible HTML page instead of Markdown")
-    ft.add_argument("-o", "--out", help="output file (stdout if omitted)")
     ip = sub.add_parser("install")
     ip.add_argument("--platform", default="claude-code")
     ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
@@ -272,94 +178,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "install":
         return _run_install(args)
-    if args.cmd == "extract-review":
-        from code_review_ai.extract import extract_review
-        ok = extract_review(args.debug, args.out)
-        if ok:
-            print(f"extracted review to {args.out}")
-        else:
-            print("error: no answer text found in debug log", file=sys.stderr)
-        return 0 if ok else 1
-    if args.cmd == "trace-review":
-        from code_review_ai.extract import trace_review
-        count = trace_review(args.debug, args.out)
-        if count:
-            print(f"wrote tool trace ({count} calls) to {args.out}")
-        else:
-            print("error: no tool calls found in debug log", file=sys.stderr)
-        return 0 if count else 1
-    if args.cmd in {"summarize-full-agent-trace", "eval-trace"}:
-        from code_review_ai.full_agent_trace import summarize_file
-        try:
-            output = summarize_file(
-                args.report, args.transcripts_root, args.out,
-                as_html=args.html)
-        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        if not args.out:
-            print(output, end="")
-        return 0
-    if args.cmd == "eval-analyze":
-        from code_review_ai.eval_analysis import analyze_file
-        try:
-            payload = analyze_file(args.report, args.out)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        if not args.out:
-            _write_json(payload, None)
-        return 0
-    if args.cmd == "full-agent-eval":
-        try:
-            cases = select_full_agent_cases(
-                load_full_agent_cases(args.cases), args.case_ids)
-            if args.model:
-                os.environ["CRAI_EVAL_MODEL"] = args.model
-            if args.dry_run:
-                payload = preflight_full_agent_eval(
-                    cases, args.repos_dir, args.work_dir,
-                    local_repo=args.local_repo)
-            else:
-                payload = run_full_agent_eval(
-                    cases, args.repos_dir, args.work_dir,
-                    parse_agent_command(args.agent_command),
-                    modes=tuple(args.modes), repetitions=args.repetitions,
-                    timeout_seconds=args.timeout, workers=args.workers,
-                    local_repo=args.local_repo, hinted=args.hinted)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        try:
-            _write_json(payload, args.out)
-            if args.out and not args.dry_run:
-                route_path, html_path = _write_full_agent_routes(
-                    payload, args.out, args.work_dir)
-                print(f"wrote tool routes to {route_path}")
-                print(f"wrote visual routes to {html_path}")
-        except OSError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        return 0
-    if args.cmd == "full-agent-eval-rescore":
-        try:
-            payload = rescore_full_agent_report(
-                args.report, load_full_agent_cases(args.cases), args.transcripts)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        _write_json(payload, args.out)
-        return 0
-    if args.cmd == "context-plan-eval":
-        try:
-            payload = run_context_plan_eval(
-                args.cases, args.repos_dir, args.work_dir,
-                case_ids=args.case_ids, max_chars=args.max_chars)
-        except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        _write_json(payload, args.out)
-        return 0
 
     # Config comes from the current project (cwd), matching the MCP server;
     # --repo/--db only select what gets analyzed, not where config is read.
@@ -369,13 +187,13 @@ def main(argv: list[str] | None = None) -> int:
     conn = _conn(args.db)
 
     if args.cmd == "review":
-        from code_review_ai.agent_adapter import loop_result_payload
         from code_review_ai.review_loop import (Hooks,
                                                 POINT_MODEL_REQUEST_STARTED,
                                                 POINT_MODEL_RESPONSE_RECEIVED,
                                                 POINT_POST_TOOL,
                                                 POINT_PRE_TOOL,
                                                 POINT_RUN_FINISHED)
+        from code_review_ai.review_loop.payload import loop_result_payload
         from code_review_ai.review_loop.runner import (resolve_api_key,
                                                        resolve_setting,
                                                        run_review)
