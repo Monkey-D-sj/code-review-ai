@@ -180,10 +180,15 @@ columns — tokens, files read, tool calls. Finding the defect is the result;
 paying less for the same result is the product.
 
 ```bash
-uv run --frozen python benchmarks/review_loop_case_compare.py --runs 3
-uv run --frozen python benchmarks/review_loop_case_compare.py \
+uv run --no-sync python benchmarks/review_loop_case_compare.py --runs 3
+uv run --no-sync python benchmarks/review_loop_case_compare.py \
   --case case-backend-decrypt-password-alias --runs 1 -o eval-results/smoke.json
 ```
+
+`--no-sync` is not optional here: a bare `uv run` re-syncs the environment to the
+project's *default* dependency set, which would uninstall the `deepseek` provider
+package this harness needs (and `pytest` with it), and it can also collide with a
+running `code-review-ai-mcp.exe` holding the venv's file lock.
 
 Each case is materialized once (copy, patch, index, diff) and every run reuses
 it — the loop is read-only, so all runs of a case see identical input. Arms
