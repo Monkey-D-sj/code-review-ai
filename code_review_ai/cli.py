@@ -1,27 +1,46 @@
+"""The `code-review-ai` command: run a review, or install the tooling.
+
+Everything else the graph can answer is an MCP tool (`code-review-ai-mcp`),
+which is the interface the reviewer actually uses; the CLI stays small on
+purpose. `install` writes user-scope skills/MCP registration, `review` runs the
+built-in read-only review loop against the working tree.
+
+The eval harness (`benchmarks/review_loop_case_compare.py`) drives the same
+loop through `review_loop.runner` directly rather than through this CLI.
+"""
+
 import argparse
+import functools
 import json
-import os
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
-from code_review_ai.changes import build_change_summary, detect_changed_symbols
+from code_review_ai.changes import build_change_summary
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
-from code_review_ai.graph import query_graph
-from code_review_ai.export_graph import export as export_graph
-from code_review_ai.impact import get_impact
-from code_review_ai.testimpact import get_test_impact
-from code_review_ai.deadcode import find_dead_code
-from code_review_ai.indexer import rebuild
-from code_review_ai.search import fts_search
 from code_review_ai.installer import DEFAULT_SOURCE, install
-from code_review_ai.update import sync, update_nodes_edges
-from code_review_ai.context_planner import DEFAULT_MAX_CHARS, plan_context
+from code_review_ai.update import sync
 
 # Framing for the CLI's one-shot review; the loop's own policy (worksheet,
 # evidence rules, read-only guard) is injected by review_loop.runner.
 _CLI_REVIEW_PROMPT = "评审本次变更引入的具体回归，逐行核对 worksheet 中的变更符号。"
+
+# Failures a user can act on (missing index, unreadable repo, bad arguments)
+# rather than bugs: reported as `error: ...` with exit 1 instead of a traceback.
+_USER_ERRORS = (OSError, ValueError, RuntimeError)
+
+# Review distinguishes bad configuration (exit 2) from a failed run (exit 1).
+_BAD_CONFIG = 2
+
+
+@dataclass
+class Context:
+    """What a command that touches the index needs."""
+
+    cfg: object
+    conn: object
 
 
 def _conn(db_path):
@@ -30,76 +49,17 @@ def _conn(db_path):
     return conn
 
 
-def _add_common(sp):
-    """Add --repo and --db flags to a subparser."""
-    sp.add_argument("--repo", default=".")
-    sp.add_argument("--db", default=".code-review-ai/index.db")
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="code-review-ai")
+    sub = parser.add_subparsers(dest="cmd", required=True)
 
-
-def _run_install(args) -> int:
-    """Deploy skills/docs; optionally register the MCP server globally."""
-    res = install(platform=args.platform, source=args.source,
-                  scope=args.scope, name=args.name,
-                  register_mcp=args.register_mcp)
-    print(res.message)
-    return 0 if res.success else 1
-
-
-def _write_json(payload: dict, output_path: str | None) -> None:
-    rendered = json.dumps(payload, indent=2, ensure_ascii=False)
-    if output_path:
-        from pathlib import Path
-        path = Path(output_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(rendered + "\n", encoding="utf-8")
-    else:
-        print(rendered)
-
-
-def _normalize_test_paths(files: list[str]) -> list[str]:
-    """Normalize test file paths for shell consumption: forward slashes and
-    no leading ``./`` so ``pytest $(test-impact --format paths)`` works on
-    Linux and Windows runners alike."""
-    normalized = []
-    for file_path in files:
-        path = file_path.replace("\\", "/")
-        if path.startswith("./"):
-            path = path[2:]
-        normalized.append(path)
-    return normalized
-
-
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="code-review-ai")
-    sub = p.add_subparsers(dest="cmd", required=True)
-
-    _add_common(sub.add_parser("rebuild"))
-    s = sub.add_parser("query")
-    _add_common(s)
-    s.add_argument("--symbols", nargs="*")
-    s.add_argument("--files", nargs="*")
-    s = sub.add_parser("test-impact")
-    _add_common(s)
-    s.add_argument("--symbols", nargs="*")
-    s.add_argument("--files", nargs="*")
-    s.add_argument("--format", choices=["json", "paths"], default="json",
-                   help="output format: json (default) or paths "
-                        "(space-separated test files for `pytest $(...)`)")
-    s = sub.add_parser("dead-code")
-    _add_common(s)
-    s.add_argument("--format", choices=["json", "text"], default="json",
-                   help="output format (default: json)")
-    s = sub.add_parser("summary")
-    _add_common(s)
-    s.add_argument("--symbols", nargs="*")
-    s.add_argument("--files", nargs="*")
     review = sub.add_parser("review",
                             help="run the built-in read-only review loop")
-    _add_common(review)
+    review.add_argument("--repo", default=".")
+    review.add_argument("--db", default=".code-review-ai/index.db")
     review.add_argument("--symbols", nargs="*")
     review.add_argument("--files", nargs="*")
-    review.add_argument("--model",
-                        help="OpenAI-compatible model name")
+    review.add_argument("--model", help="OpenAI-compatible model name")
     review.add_argument("--base-url",
                         help="OpenAI-compatible API base URL (optional for OpenAI)")
     review.add_argument("--api-key-env",
@@ -115,275 +75,198 @@ def main(argv: list[str] | None = None) -> int:
                               help="accepted for compatibility (progress is one line)")
     review.set_defaults(visual=None)
     review.add_argument("-o", "--out")
-    cp = sub.add_parser("context-plan")
-    _add_common(cp)
-    cp.add_argument("--files", nargs="*")
-    cp.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
-    cp.add_argument("-o", "--out")
-    s = sub.add_parser("query-graph")
-    _add_common(s)
-    s.add_argument("qualified_name")
-    s.add_argument("--edge-kind", default="call")
-    s.add_argument("--direction", default="both")
-    sp = sub.add_parser("search")
-    _add_common(sp)
-    sp.add_argument("query")
-    sp.add_argument("--limit", type=int, default=50,
-                    help="max results (default: 50)")
-    up = sub.add_parser("update")
-    _add_common(up)
-    sp = sub.add_parser("sync")
-    _add_common(sp)
-    hp = sub.add_parser("install-hooks")
-    _add_common(hp)
-    hp.add_argument("--launch", default="code-review-ai",
-                    help="command the hook uses to run code-review-ai "
-                         "(default: prefer PATH, fall back to uvx --from <source>)")
-    hp.add_argument("--from", dest="source", default=DEFAULT_SOURCE,
-                    help="package source for the uvx fallback launcher "
-                         "(default: %(default)s)")
-    hp.add_argument("--review", action="store_true",
-                    help="also review each commit's change impact with an LLM "
-                         "(post-commit hook only)")
-    hp.add_argument("--platform", default="claude-code",
-                    choices=["claude-code", "codex"],
-                    help="AI platform running the review LLM; sets the default "
-                         "review command (default: %(default)s)")
-    hp.add_argument("--review-launch", default=None,
-                    help="override the platform's default review command, e.g. "
-                         "'codex exec'")
-    hp.add_argument("--review-out", default=None,
-                    help="review report path "
-                         "(default: <repo>/.code-review-ai/last-review.md)")
-    sp = sub.add_parser("communities")
-    _add_common(sp)
-    sp.add_argument("--symbol", default=None)
-    gp = sub.add_parser("graph")
-    _add_common(gp)
-    gp.add_argument("-o", "--out", default="graph.html")
-    gp.add_argument("-n", "--max-nodes", type=int, default=200)
-    gp.add_argument("-m", "--mode", default="communities",
-                    choices=["communities", "graph", "flow"])
-    ip = sub.add_parser("install")
-    ip.add_argument("--platform", default="claude-code")
-    ip.add_argument("--scope", default="user", choices=["user", "project", "local"])
-    ip.add_argument("--from", dest="source", default=DEFAULT_SOURCE)
-    ip.add_argument("--name", default="code-review-ai")
-    ip.add_argument("--register-mcp", action="store_true",
-                    help="also register the MCP server globally (default off: "
-                         "the review hook injects it on-demand, so everyday "
-                         "sessions carry no tool-description token cost)")
 
-    args = p.parse_args(argv)
+    install_parser = sub.add_parser("install")
+    install_parser.add_argument("--platform", default="claude-code")
+    install_parser.add_argument("--scope", default="user", choices=["user", "project", "local"])
+    install_parser.add_argument("--from", dest="source", default=DEFAULT_SOURCE)
+    install_parser.add_argument("--name", default="code-review-ai")
+    install_parser.add_argument("--register-mcp", action="store_true",
+                                help="also register the MCP server globally (default off: "
+                                     "the review hook injects it on-demand, so everyday "
+                                     "sessions carry no tool-description token cost)")
+    return parser
 
-    if args.cmd == "install":
-        return _run_install(args)
 
-    # Config comes from the current project (cwd), matching the MCP server;
-    # --repo/--db only select what gets analyzed, not where config is read.
+def user_facing(command):
+    """Turn ``_USER_ERRORS`` into ``error: ...`` + exit 1 for one command."""
+
+    @functools.wraps(command)
+    def run(args, ctx) -> int:
+        try:
+            return command(args, ctx)
+        except _USER_ERRORS as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
+    return run
+
+
+def _write_json(payload: dict, output_path: str | None) -> None:
+    rendered = json.dumps(payload, indent=2, ensure_ascii=False)
+    if output_path:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(rendered + "\n", encoding="utf-8")
+    else:
+        print(rendered)
+
+
+# ---------------------------------------------------------------- review ----
+
+_REVIEW_PROGRESS: dict[str, str] = {
+    "full_rebuild_required": "索引版本或配置已变化，开始全量重建",
+    "source_scan_started": "扫描可索引源文件…",
+    "resolve_started": "解析调用关系：{symbols} 个符号",
+    "clear_previous_index": "清理并压缩旧索引…",
+    "communities_started": "计算代码社区…",
+    "incremental_sync_started": "检查增量索引变更…",
+    "incremental_sync_finished": "增量索引同步完成",
+}
+
+
+def _format_progress(event: str, data: dict) -> str:
+    """One progress line for a review event (unknown events print verbatim)."""
+    if event == "model_request_started":
+        return f"模型第 {data['turn']} 轮推理中…"
+    if event == "model_response_received":
+        return f"模型第 {data['turn']} 轮响应：{data['tool_calls']} 个工具调用"
+    if event == "source_scan_finished":
+        return f"扫描完成：{data['files']} 个源文件"
+    if event == "parse_started":
+        return f"解析源文件：{data['files']} 个"
+    if event == "parse_finished":
+        return f"解析完成：{data['nodes']} 个符号，{data['raw_calls']} 个原始调用"
+    if event == "resolve_finished":
+        return f"调用图就绪：{data['edges']} 条边"
+    if event == "write_graph_started":
+        return f"写入图数据库：{data['nodes']} 个节点，{data['edges']} 条边"
+    if event == "flows_started":
+        return f"构建调用流：{data['call_edges']} 条调用边"
+    if event == "rebuild_finished":
+        return (f"索引重建完成：{data['nodes']} 个节点，{data['edges']} 条边，"
+                f"{data['total_ms']} ms")
+    if event == "pre_tool":
+        return f"请求工具：{data.get('name')}"
+    if event == "post_tool":
+        return (f"工具完成：{data.get('name')} ({data.get('response_chars')} 字符，"
+                f"{data.get('status')})")
+    if event == "run_finished":
+        outcome = "失败" if data.get("failure_reason") else "完成"
+        return f"评审{outcome}：{data.get('finding_count')} 条发现"
+    template = _REVIEW_PROGRESS.get(event)
+    return template.format(**data) if template else event
+
+
+def _review_progress(event: str, data: dict, *, quiet: bool) -> None:
+    """The CLI's one-line progress, on stderr so stdout stays the JSON payload."""
+    if quiet:
+        return
+    print(f"[review] {_format_progress(event, data)}", file=sys.stderr, flush=True)
+
+
+def _review_hooks(quiet: bool):
+    """Subscribe the progress printer to every event the review loop emits."""
+    from code_review_ai.review_loop import (Hooks, POINT_MODEL_REQUEST_STARTED,
+                                            POINT_MODEL_RESPONSE_RECEIVED,
+                                            POINT_POST_TOOL, POINT_PRE_TOOL,
+                                            POINT_RUN_FINISHED)
+    hooks = Hooks()
+    printer = functools.partial(_review_progress, quiet=quiet)
+    for point in (POINT_MODEL_REQUEST_STARTED, POINT_MODEL_RESPONSE_RECEIVED,
+                  POINT_PRE_TOOL, POINT_POST_TOOL, POINT_RUN_FINISHED):
+        hooks.on(point, printer)
+    return hooks
+
+
+def _review_settings(args, cfg) -> tuple[str, str | None, str]:
+    """Resolve the model, base URL and key variable a review run needs."""
+    from code_review_ai.review_loop.runner import resolve_setting
+    model_name = args.model or resolve_setting(cfg.repo_path, "CRAI_REVIEW_MODEL")
+    if not model_name:
+        raise ValueError("--model or CRAI_REVIEW_MODEL is required")
+    base_url = args.base_url or resolve_setting(cfg.repo_path, "CRAI_REVIEW_BASE_URL")
+    # Every built-in agent uses one conventional local key. A caller may still
+    # explicitly select another process/.env variable with --api-key-env, but
+    # no second indirection is needed in .env.
+    return model_name, base_url, args.api_key_env or "OPENAI_API_KEY"
+
+
+def _run_review_command(args, ctx, model_name, base_url, api_key_env, hooks) -> dict:
+    """Sync the index, summarize the change, run the loop, return its payload."""
+    from code_review_ai.review_loop.payload import loop_result_payload
+    from code_review_ai.review_loop.runner import resolve_api_key, run_review
+    started_at = time.perf_counter()
+    resolve_api_key(ctx.cfg.repo_path, api_key_env)
+
+    if not args.no_progress:
+        print("[review] 正在同步代码索引…", file=sys.stderr, flush=True)
+    # A review must never query a stale graph. sync performs the smallest
+    # necessary update (or a full rebuild when required).
+    sync(ctx.cfg, ctx.conn,
+         progress=functools.partial(_review_progress, quiet=args.no_progress))
+    if not args.no_progress:
+        print("[review] 索引同步完成", file=sys.stderr, flush=True)
+
+    summary = build_change_summary(ctx.cfg, ctx.conn,
+                                   symbols=args.symbols, files=args.files)
+    result = run_review(ctx.cfg, ctx.conn, prompt=_CLI_REVIEW_PROMPT, summary=summary,
+                        model_name=model_name, base_url=base_url,
+                        api_key_env=api_key_env, hooks=hooks)
+    if not args.no_progress:
+        elapsed = time.perf_counter() - started_at
+        print(f"[review] 总耗时：{elapsed:.1f}s", file=sys.stderr, flush=True)
+    return loop_result_payload(result, model_name)
+
+
+@user_facing
+def _cmd_review(args, ctx) -> int:
+    try:
+        model_name, base_url, api_key_env = _review_settings(args, ctx.cfg)
+        payload = _run_review_command(args, ctx, model_name, base_url, api_key_env,
+                                      _review_hooks(args.no_progress))
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return _BAD_CONFIG
+    _write_json(payload, args.out)
+    return 0 if payload.get("failure_reason") is None else 1
+
+
+def _cmd_install(args, ctx) -> int:
+    """Deploy skills/docs; optionally register the MCP server globally."""
+    result = install(platform=args.platform, source=args.source,
+                     scope=args.scope, name=args.name,
+                     register_mcp=args.register_mcp)
+    print(result.message)
+    return 0 if result.success else 1
+
+
+COMMANDS = {
+    "review": _cmd_review,
+    "install": _cmd_install,
+}
+
+
+def _context(args) -> Context:
+    """Config comes from the current project (cwd), matching the MCP server;
+    --repo/--db only select what gets analyzed, not where config is read."""
     cfg = load_config()
     cfg.repo_path = args.repo
     cfg.db_path = args.db
-    conn = _conn(args.db)
+    return Context(cfg=cfg, conn=_conn(args.db))
 
-    if args.cmd == "review":
-        from code_review_ai.review_loop import (Hooks,
-                                                POINT_MODEL_REQUEST_STARTED,
-                                                POINT_MODEL_RESPONSE_RECEIVED,
-                                                POINT_POST_TOOL,
-                                                POINT_PRE_TOOL,
-                                                POINT_RUN_FINISHED)
-        from code_review_ai.review_loop.payload import loop_result_payload
-        from code_review_ai.review_loop.runner import (resolve_api_key,
-                                                       resolve_setting,
-                                                       run_review)
-        try:
-            model_name = args.model or resolve_setting(
-                cfg.repo_path, "CRAI_REVIEW_MODEL")
-            if not model_name:
-                raise ValueError("--model or CRAI_REVIEW_MODEL is required")
-            base_url = args.base_url or resolve_setting(
-                cfg.repo_path, "CRAI_REVIEW_BASE_URL")
-            # Every built-in agent uses one conventional local key. A caller
-            # may still explicitly select another process/.env variable with
-            # --api-key-env, but no second indirection is needed in .env.
-            api_key_env = args.api_key_env or "OPENAI_API_KEY"
-            resolve_api_key(cfg.repo_path, api_key_env)
-            started_at = time.perf_counter()
 
-            def review_progress(event: str, data: dict[str, object]) -> None:
-                if args.no_progress:
-                    return
-                if event == "model_request_started":
-                    message = f"模型第 {data['turn']} 轮推理中…"
-                elif event == "model_response_received":
-                    message = (f"模型第 {data['turn']} 轮响应："
-                               f"{data['tool_calls']} 个工具调用")
-                elif event == "full_rebuild_required":
-                    message = "索引版本或配置已变化，开始全量重建"
-                elif event == "source_scan_started":
-                    message = "扫描可索引源文件…"
-                elif event == "source_scan_finished":
-                    message = f"扫描完成：{data['files']} 个源文件"
-                elif event == "parse_started":
-                    message = f"解析源文件：{data['files']} 个"
-                elif event == "parse_finished":
-                    message = (f"解析完成：{data['nodes']} 个符号，"
-                               f"{data['raw_calls']} 个原始调用")
-                elif event == "resolve_started":
-                    message = f"解析调用关系：{data['symbols']} 个符号"
-                elif event == "resolve_finished":
-                    message = f"调用图就绪：{data['edges']} 条边"
-                elif event == "clear_previous_index":
-                    message = "清理并压缩旧索引…"
-                elif event == "write_graph_started":
-                    message = (f"写入图数据库：{data['nodes']} 个节点，"
-                               f"{data['edges']} 条边")
-                elif event == "flows_started":
-                    message = f"构建调用流：{data['call_edges']} 条调用边"
-                elif event == "communities_started":
-                    message = "计算代码社区…"
-                elif event == "rebuild_finished":
-                    message = (f"索引重建完成：{data['nodes']} 个节点，"
-                               f"{data['edges']} 条边，{data['total_ms']} ms")
-                elif event == "incremental_sync_started":
-                    message = "检查增量索引变更…"
-                elif event == "incremental_sync_finished":
-                    message = "增量索引同步完成"
-                elif event == "pre_tool":
-                    message = f"请求工具：{data.get('name')}"
-                elif event == "post_tool":
-                    message = (f"工具完成：{data.get('name')} "
-                               f"({data.get('response_chars')} 字符，"
-                               f"{data.get('status')})")
-                elif event == "run_finished":
-                    outcome = "失败" if data.get("failure_reason") else "完成"
-                    message = (f"评审{outcome}：{data.get('finding_count')} 条发现")
-                else:
-                    message = event
-                print(f"[review] {message}", file=sys.stderr, flush=True)
-
-            hooks = Hooks()
-            for point in (POINT_MODEL_REQUEST_STARTED,
-                          POINT_MODEL_RESPONSE_RECEIVED, POINT_PRE_TOOL,
-                          POINT_POST_TOOL, POINT_RUN_FINISHED):
-                hooks.on(point, review_progress)
-
-            def execute_review() -> dict:
-                # A review must never query a stale graph. sync performs the
-                # smallest necessary update (or a full rebuild when required).
-                if not args.no_progress:
-                    print("[review] 正在同步代码索引…", file=sys.stderr, flush=True)
-                sync(cfg, conn, progress=review_progress)
-                if not args.no_progress:
-                    print("[review] 索引同步完成", file=sys.stderr, flush=True)
-                summary = build_change_summary(
-                    cfg, conn, symbols=args.symbols, files=args.files)
-                result = run_review(
-                    cfg, conn, prompt=_CLI_REVIEW_PROMPT, summary=summary,
-                    model_name=model_name, base_url=base_url,
-                    api_key_env=api_key_env, hooks=hooks)
-                if not args.no_progress:
-                    elapsed = time.perf_counter() - started_at
-                    print(f"[review] 总耗时：{elapsed:.1f}s", file=sys.stderr, flush=True)
-                return loop_result_payload(result, model_name)
-
-            # The TTY dashboard lived in the retired agent package; --visual
-            # and --no-visual now print the same one-line progress.
-            payload = execute_review()
-        except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
-        except (OSError, RuntimeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        _write_json(payload, args.out)
-        return 0 if payload.get("failure_reason") is None else 1
-
-    if args.cmd == "rebuild":
-        stats = rebuild(cfg, conn)
-        print(json.dumps({"nodes": stats.node_count, "edges": stats.edge_count,
-                          "flows": stats.flow_count, "built_at": stats.built_at,
-                          "timings_ms": stats.stage_timings}))
-    elif args.cmd == "query":
-        try:
-            changed = detect_changed_symbols(cfg, symbols=args.symbols, files=args.files)
-        except RuntimeError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        print(json.dumps(get_impact(conn, changed)))
-    elif args.cmd == "test-impact":
-        try:
-            changed = detect_changed_symbols(cfg, symbols=args.symbols, files=args.files)
-        except RuntimeError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        result = get_test_impact(conn, changed)
-        if args.format == "paths":
-            print(" ".join(_normalize_test_paths(result["test_files"])))
-        else:
-            print(json.dumps(result))
-    elif args.cmd == "dead-code":
-        payload = find_dead_code(conn, cfg)
-        if args.format == "text":
-            for symbol in payload["symbols"]:
-                print(f"{symbol['file']}:{symbol['line']}\t{symbol['kind']}\t{symbol['qname']}")
-            for file_entry in payload["files"]:
-                print(f"FILE\t{file_entry['path']}\t{file_entry['qname']}"
-                      f"\t{file_entry['symbol_count']} symbols")
-        else:
-            print(json.dumps(payload))
-    elif args.cmd == "summary":
-        try:
-            payload = build_change_summary(cfg, conn,
-                                           symbols=args.symbols, files=args.files)
-        except RuntimeError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        print(json.dumps(payload))
-    elif args.cmd == "context-plan":
-        try:
-            payload = plan_context(
-                cfg, conn, files=args.files, max_chars=args.max_chars)
-        except (OSError, ValueError, RuntimeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        _write_json(payload, args.out)
-    elif args.cmd == "query-graph":
-        try:
-            payload = query_graph(conn, args.qualified_name,
-                                  edge_kind=args.edge_kind, direction=args.direction)
-        except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        print(json.dumps(payload))
-    elif args.cmd == "search":
-        for r in fts_search(conn, args.query, limit=args.limit):
-            signature = f"  {r['signature']}" if r.get("signature") else ""
-            print(f"{r['qname']}  {r['kind']}  {r['file']}:{r['line']}-{r['end_line']}{signature}")
-    elif args.cmd == "communities":
-        from code_review_ai.community import list_communities, get_community
-        if args.symbol:
-            print(json.dumps(get_community(conn, args.symbol), indent=2, ensure_ascii=False))
-        else:
-            for c in list_communities(conn):
-                print(f"{c['id']}  {c['label']}  nodes={c['node_count']}  modularity={c['modularity']}")
-    elif args.cmd == "update":
-        print(json.dumps(update_nodes_edges(cfg, conn)))
-    elif args.cmd == "sync":
-        print(json.dumps(sync(cfg, conn)))
-    elif args.cmd == "install-hooks":
-        from code_review_ai.hooks import install_hooks
-        for path in install_hooks(cfg.repo_path, cfg.db_path, args.launch,
-                                  with_review=args.review,
-                                  platform=args.platform,
-                                  review_launch=args.review_launch,
-                                  review_out=args.review_out,
-                                  source=args.source):
-            print(f"installed {path}")
-    elif args.cmd == "graph":
-        export_graph(args.db, args.out, args.max_nodes, args.mode)
-    return 0
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    # `install` writes user-scope files only: it must not need a project config
+    # or create an index in whatever directory it is run from.
+    if args.cmd == "install":
+        return COMMANDS["install"](args, None)
+    ctx = _context(args)
+    try:
+        return COMMANDS[args.cmd](args, ctx)
+    finally:
+        ctx.conn.close()
 
 
 if __name__ == "__main__":

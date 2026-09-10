@@ -97,23 +97,12 @@ args = ["--from", "git+https://github.com/Monkey-D-sj/code-review-ai", "code-rev
 
 ## CLI (manual use)
 
-```bash
-code-review-ai rebuild --repo .                        # build index
-code-review-ai query   --symbols auth::login           # impact for given symbols
-code-review-ai query   --files path/to/file.py         # impact via git diff of files
-code-review-ai search  "login" [--limit 50]             # full-text (FTS) or glob (*login*) symbol search
-code-review-ai communities [--symbol auth::login]       # list communities / one symbol's community
-```
-
-`rebuild`/`query`/`search`/`communities` also accept no `--repo`/`--db` (defaults: `.` and `.code-review-ai/index.db`).
-
-### Deterministic context plan (no LLM)
-
-Route a change to `local` or `graph` and build one bounded evidence package
-using only git diff, tree-sitter and the local SQLite index:
+Two commands, on purpose. Everything else the graph can answer is an MCP tool
+above, which is the interface the reviewer actually uses.
 
 ```bash
-code-review-ai context-plan --max-chars 8000 -o eval-results/context-plan.json
+code-review-ai review --repo . --db .code-review-ai/index.db -o review.json
+code-review-ai install --platform claude-code    # deploy skills + register the MCP server
 ```
 
 ### Built-in review loop
@@ -146,18 +135,6 @@ framework in between — so a run spends no tokens on framework overhead.
 `review` writes live index/model/tool progress to stderr while reserving stdout
 for the final JSON payload. Pass `--no-progress` for a quiet automation run;
 `--visual` and `--no-visual` are accepted for compatibility and have no effect.
-
-### Visualization (`graph`)
-
-Export interactive HTML graphs of the call structure:
-
-```bash
-code-review-ai graph -m communities -o communities.html   # community bubble chart (default)
-code-review-ai graph -m graph       -o callgraph.html     # raw function-level force graph
-code-review-ai graph -m flow        -o flows.html         # flow chart (BFS call chains)
-```
-
-Options: `-n` max items (200), `-m` mode (communities|graph|flow), `-o` output path.
 
 ## Eval: does the index find the bug, and what does it cost?
 

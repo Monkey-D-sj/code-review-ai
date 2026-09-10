@@ -14,22 +14,15 @@ uv run pytest                    # run all tests (testpaths = ["tests"])
 uv run pytest tests/test_flow_builder.py                 # one file
 uv run pytest tests/test_flow_builder.py::test_linear_chain   # one test
 
-uv run code-review-ai rebuild --repo . --db .code-review-ai/index.db   # build index
-uv run code-review-ai query   --symbols auth::login        # impact for given symbols
-uv run code-review-ai query   --files path/to/file.py      # impact via git diff of files
-uv run code-review-ai test-impact --symbols auth::login    # which tests cover the changed symbols -> run only those
-uv run code-review-ai summary --symbols auth::login   # change summary JSON (summary + changed_functions)
-uv run code-review-ai summary                        # same, computed from the git diff of the whole tree
-uv run code-review-ai query-graph auth::login                # graph neighborhood (in/out via resolved edges)
-uv run code-review-ai query-graph auth::login --edge-kind call --direction both
-uv run code-review-ai search  "login" [--limit 50]          # full-text (FTS) or glob (*login*) symbol search
-uv run code-review-ai communities [--symbol auth::login]    # list communities, or one symbol's community
-uv run code-review-ai install --platform claude-code        # register MCP server with Claude Code (self-install)
-uv sync --extra community                                    # opt: install leidenalg+igraph for Phase C
-uv run code-review-ai-mcp                                    # run the MCP server (stdio)
+uv run code-review-ai review --repo . --db .code-review-ai/index.db   # run the review loop
+uv run code-review-ai install --platform claude-code    # register MCP server with Claude Code
+uv sync --extra community                               # opt: install leidenalg+igraph for Phase C
+uv run code-review-ai-mcp                               # run the MCP server (stdio)
 ```
 
-`rebuild`/`query`/`search`/`communities` also accept no `--repo`/`--db` (defaults: `.` and `.code-review-ai/index.db`). Tests import `from conftest import Q` (where `Q = qname.join`) and `FIXTURES` (path to the synthetic repo in `tests/fixtures/repo`); `tests/` is on `sys.path` via the root conftest.
+The CLI is deliberately two commands; every graph query (`get_impact`, `get_change_summary`, `query_graph`, `search_symbol`, `get_symbol_detail`, `get_test_impact`, `find_dead_code`, `get_communities`, `rebuild_index`) is an MCP tool on `code-review-ai-mcp`, which is the interface the reviewer uses. To exercise one from the shell, call the library directly, e.g. `uv run python -c "from code_review_ai.changes import build_change_summary; ..."`.
+
+Tests import `from conftest import Q` (where `Q = qname.join`) and `FIXTURES` (path to the synthetic repo in `tests/fixtures/repo`); `tests/` is on `sys.path` via the root conftest.
 
 ## Architecture: the rebuild pipeline
 
@@ -77,7 +70,7 @@ Layered in `config.py`: `DEFAULTS` dict → `[tool.code-review-ai]` in `pyprojec
 
 ## Frontends
 
-MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get_impact`, `get_test_impact`, `get_change_summary`, `query_graph`, `search_symbol`, `get_symbol_detail`, `get_communities`, `get_community`. `get_impact` / `get_change_summary` return **JSON by default** — a serialization choice only (pass `toon=true` on the tool for the compact TOON text; the core functions `impact.get_impact` / `changes.build_change_summary` still return dicts). TOON is default-off: 2026-08 measurements found it saves nothing on deep-nested payloads (see `_forced_toon` in `mcp_server.py`). On startup it runs a catch-up rebuild if the index is stale (`is_stale` compares file mtimes to `build_meta.built_at`), then a daemon thread runs `watchfiles` to debounce-rebuild on `.py` changes. CLI (`code-review-ai`) mirrors `rebuild`/`query`/`test-impact`/`search`/`communities` for manual use, plus `install --platform claude-code` which self-registers the MCP server (shells out to `claude mcp add` with a `uvx --from <git-url> code-review-ai-mcp` launch command; see `installer.py`). `graph` (`export_graph.py`) renders the index as interactive HTML: `-m communities` draws the persisted community graph (bubbles sized by node count, cross-community edges read straight from `community_edges` — never re-derived), `-m graph` the raw function-level call graph, `-m flow` the BFS flow chains.
+MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get_impact`, `get_test_impact`, `get_change_summary`, `query_graph`, `search_symbol`, `get_symbol_detail`, `get_communities`, `get_community`. `get_impact` / `get_change_summary` return **JSON by default** — a serialization choice only (pass `toon=true` on the tool for the compact TOON text; the core functions `impact.get_impact` / `changes.build_change_summary` still return dicts). TOON is default-off: 2026-08 measurements found it saves nothing on deep-nested payloads (see `_forced_toon` in `mcp_server.py`). On startup it runs a catch-up rebuild if the index is stale (`is_stale` compares file mtimes to `build_meta.built_at`), then a daemon thread runs `watchfiles` to debounce-rebuild on `.py` changes. CLI (`code-review-ai`) is two commands: `review` (the built-in loop) and `install --platform claude-code`, which self-registers the MCP server (shells out to `claude mcp add` with a `uvx --from <git-url> code-review-ai-mcp` launch command; see `installer.py`). The graph queries it used to mirror — `rebuild`/`query`/`test-impact`/`search`/`communities`/`graph` — were removed 2026-09-10: MCP is the interface, and the CLI had grown a 318-line `main` with a copy-pasted branch per command. `export_graph.py` still renders the index as interactive HTML (`-m communities`/`graph`/`flow`) but now has no CLI entry point.
 
 ## Design spec & dev history
 

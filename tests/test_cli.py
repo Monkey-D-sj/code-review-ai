@@ -1,39 +1,39 @@
+import argparse
 import json
 
-from conftest import FIXTURES as FIX, Q
+from conftest import FIXTURES as FIX
 
 from code_review_ai import cli
 from code_review_ai.cli import main
 
 
-def test_cli_search(tmp_path, capsys):
-    # rebuild first, then search
-    code = main(["rebuild", "--repo", FIX,
-                 "--db", str(tmp_path / "c.db")])
-    assert code == 0
-    _ = capsys.readouterr()  # discard rebuild output
-
-    code = main(["search", "login", "--limit", "5", "--repo", FIX,
-                 "--db", str(tmp_path / "c.db")])
-    assert code == 0
-    lines = capsys.readouterr().out.strip().splitlines()
-    hit = next(line for line in lines if Q("auth", "login") in line)
-    assert "function" in hit and "auth.py" in hit
-    assert "def login" in hit  # signature 列
+def _subcommand_names() -> set[str]:
+    """Every subcommand the parser accepts (argparse exposes this only here)."""
+    actions = cli._build_parser()._actions
+    subparsers = next(action for action in actions
+                      if isinstance(action, argparse._SubParsersAction))
+    return set(subparsers.choices)
 
 
-def test_cli_summary(tmp_path, capsys):
-    code = main(["rebuild", "--repo", FIX, "--db", str(tmp_path / "c.db")])
-    assert code == 0
-    _ = capsys.readouterr()  # discard rebuild output
-    code = main(["summary", "--symbols", Q("auth", "login"),
-                 "--repo", FIX, "--db", str(tmp_path / "c.db")])
-    assert code == 0
-    data = json.loads(capsys.readouterr().out)
-    assert set(data) == {"summary", "changed_functions", "uncovered_changes",
-                         "delete_change"}
-    assert data["summary"]["changed_functions"] == 1
-    assert data["changed_functions"][0]["qname"] == Q("auth", "login")
+def test_every_subcommand_is_dispatched():
+    """The guard against a command existing in two places.
+
+    Adding a subcommand means touching the parser and the handler table; before
+    this test nothing failed if you only did one of them, which is how the
+    dispatch chain grew a branch per command with no shared shape.
+    """
+    assert set(cli.COMMANDS) == _subcommand_names()
+
+
+def test_user_facing_reports_expected_errors_instead_of_tracebacking(capsys):
+    """One error policy for every command: `error: ...` on stderr, exit 1."""
+
+    @cli.user_facing
+    def failing(args, ctx):
+        raise RuntimeError("index is missing")
+
+    assert failing(None, None) == 1
+    assert capsys.readouterr().err == "error: index is missing\n"
 
 
 def test_cli_review_syncs_then_writes_agent_contract(tmp_path, monkeypatch):
@@ -67,91 +67,26 @@ def test_cli_review_syncs_then_writes_agent_contract(tmp_path, monkeypatch):
     monkeypatch.setattr("code_review_ai.review_loop.runner.run_review", fake_review)
     code = main(["review", "--repo", FIX, "--db", str(tmp_path / "review.db"),
                  "--model", "fake-model", "--base-url", "http://provider/v1",
-                 "--symbols", Q("auth", "login"), "--out", str(output)])
+                 "--symbols", "auth::login", "--out", str(output)])
 
     assert code == 0
     assert calls["synced"] is True
     assert callable(calls["progress"])
     assert calls["model_name"] == "fake-model"
-    assert calls["symbols"] == [Q("auth", "login")]
+    assert calls["symbols"] == ["auth::login"]
     assert calls["summary"] == {"changed_functions": []}
     assert json.loads(output.read_text(encoding="utf-8"))["failure_reason"] is None
 
 
-def test_cli_query_graph(tmp_path, capsys):
-    code = main(["rebuild", "--repo", FIX, "--db", str(tmp_path / "c.db")])
-    assert code == 0
-    _ = capsys.readouterr()
-    code = main(["query-graph", Q("auth", "login"),
-                 "--repo", FIX, "--db", str(tmp_path / "c.db")])
-    assert code == 0
-    data = json.loads(capsys.readouterr().out)
-    assert data["edge_kind"] == "call"
-    assert [n["qname"] for n in data["in"]] == [Q("app", "main")]
-
-
-def test_cli_test_impact(tmp_path, capsys, monkeypatch):
-    import subprocess
-    # isolated repo with a test file (FIX has none). chdir into it so the
-    # CLI's load_config() reads no pyproject and uses the test-friendly
-    # defaults (exclude without */test*).
+def test_review_without_a_model_exits_2(tmp_path, monkeypatch, capsys):
+    """Bad configuration stays distinct from a failed run (exit 1)."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "prod.py").write_text(
-        "def login(user, pw):\n    return user\n", encoding="utf-8")
-    (tmp_path / "test_prod.py").write_text(
-        "from prod import login\n\ndef test_login():\n    login('u','p')\n",
-        encoding="utf-8")
-    for cmd in (["git", "init"], ["git", "add", "-A"], ["git", "commit", "-m", "x"]):
-        subprocess.run(cmd, cwd=tmp_path, check=True, capture_output=True)
-    db = str(tmp_path / "ti.db")
-    assert main(["rebuild", "--repo", str(tmp_path), "--db", db]) == 0
-    _ = capsys.readouterr()
-    code = main(["test-impact", "--symbols", "prod::login",
-                 "--repo", str(tmp_path), "--db", db])
-    assert code == 0
-    data = json.loads(capsys.readouterr().out)
-    assert data["test_count"] == 1
-    assert data["affected_tests"][0]["qname"] == "test_prod::test_login"
-    assert data["affected_tests"][0]["covers"] == ["prod::login"]
+    monkeypatch.delenv("CRAI_REVIEW_MODEL", raising=False)
 
+    code = main(["review", "--repo", str(tmp_path), "--db", str(tmp_path / "r.db")])
 
-def test_cli_test_impact_paths_format(tmp_path, capsys, monkeypatch):
-    """--format paths prints space-separated, shell-ready test files (forward
-    slashes, no ./ prefix) instead of JSON - for `pytest $(...)` in CI."""
-    import subprocess
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "prod.py").write_text(
-        "def login(user, pw):\n    return user\n", encoding="utf-8")
-    (tmp_path / "test_prod.py").write_text(
-        "from prod import login\n\ndef test_login():\n    login('u','p')\n",
-        encoding="utf-8")
-    for cmd in (["git", "init"], ["git", "add", "-A"], ["git", "commit", "-m", "x"]):
-        subprocess.run(cmd, cwd=tmp_path, check=True, capture_output=True)
-    db = str(tmp_path / "ti.db")
-    assert main(["rebuild", "--repo", str(tmp_path), "--db", db]) == 0
-    _ = capsys.readouterr()
-    code = main(["test-impact", "--symbols", "prod::login",
-                 "--repo", str(tmp_path), "--db", db, "--format", "paths"])
-    assert code == 0
-    out = capsys.readouterr().out.strip()
-    assert out.endswith("test_prod.py")
-    assert "\\" not in out
-    assert "test_prod::" not in out  # not JSON in paths mode
-
-
-def test_cli_update_and_sync(tmp_path, capsys):
-    from conftest import FIXTURES as FIX
-    from code_review_ai import cli
-    db = str(tmp_path / "cli.db")
-    # sync 空库 -> 全量
-    assert cli.main(["sync", "--repo", FIX, "--db", db]) == 0
-    out = capsys.readouterr().out
-    payload = json.loads(out)
-    assert payload["full_rebuild"] is True and payload["flows"] > 0
-    # update 无变化 -> 0 parse
-    assert cli.main(["update", "--repo", FIX, "--db", db]) == 0
-    out = capsys.readouterr().out
-    assert json.loads(out)["parsed_files"] == 0
+    assert code == 2
+    assert "CRAI_REVIEW_MODEL" in capsys.readouterr().err
 
 
 class _Res:
@@ -189,25 +124,3 @@ def test_cli_install_register_mcp_flag(monkeypatch):
 def test_cli_install_returns_nonzero_on_failure(monkeypatch):
     monkeypatch.setattr(cli, "install", lambda **k: _Res(False, "nope"))
     assert main(["install"]) == 1
-
-
-def test_cli_dead_code_json(tmp_path, capsys):
-    assert main(["rebuild", "--repo", FIX, "--db", str(tmp_path / "dc.db")]) == 0
-    _ = capsys.readouterr()
-    code = main(["dead-code", "--repo", FIX, "--db", str(tmp_path / "dc.db")])
-    assert code == 0
-    data = json.loads(capsys.readouterr().out)
-    assert set(data) == {"symbols", "files", "meta"}
-    assert any(symbol["qname"] == Q("util", "hash_pw") for symbol in data["symbols"])
-    assert not any(symbol["qname"] == Q("app", "main") for symbol in data["symbols"])
-
-
-def test_cli_dead_code_text(tmp_path, capsys):
-    assert main(["rebuild", "--repo", FIX, "--db", str(tmp_path / "dc.db")]) == 0
-    _ = capsys.readouterr()
-    code = main(["dead-code", "--format", "text",
-                 "--repo", FIX, "--db", str(tmp_path / "dc.db")])
-    assert code == 0
-    out = capsys.readouterr().out
-    assert Q("util", "hash_pw") in out
-    assert "FILE" in out
