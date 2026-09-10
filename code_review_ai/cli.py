@@ -3,10 +3,12 @@
 Everything else the graph can answer is an MCP tool (`code-review-ai-mcp`),
 which is the interface the reviewer actually uses; the CLI stays small on
 purpose. `install` writes user-scope skills/MCP registration, `review` runs the
-built-in read-only review loop against the working tree.
+built-in read-only review loop against the working tree -- with the index
+(`--arm graph`, the default) or without it (`--arm nograph`).
 
-The eval harness (`benchmarks/review_loop_case_compare.py`) drives the same
-loop through `review_loop.runner` directly rather than through this CLI.
+The eval harness (`benchmarks/review_loop_case_compare.py`) drives both arms
+through this command rather than through a second copy of the loop, so what it
+measures is what a user runs.
 """
 
 import argparse
@@ -16,15 +18,18 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
-from code_review_ai.changes import build_change_summary
+from code_review_ai.changes import build_change_summary, build_diff_text
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.installer import DEFAULT_SOURCE, install
 from code_review_ai.update import sync
 
 # Framing for the CLI's one-shot review; the loop's own policy (worksheet,
-# evidence rules, read-only guard) is injected by review_loop.runner.
+# evidence rules, read-only guard) is injected by review_loop.runner. Both arms
+# get this same prompt: the arm selection must be the only difference between a
+# graph run and a no-index run, or their costs are not comparable.
 _CLI_REVIEW_PROMPT = "评审本次变更引入的具体回归，逐行核对 worksheet 中的变更符号。"
 
 # Failures a user can act on (missing index, unreadable repo, bad arguments)
@@ -34,13 +39,33 @@ _USER_ERRORS = (OSError, ValueError, RuntimeError)
 # Review distinguishes bad configuration (exit 2) from a failed run (exit 1).
 _BAD_CONFIG = 2
 
+# Which driver a review arm runs (see review_loop.runner).
+GRAPH_ARM = "graph"
+NOINDEX_ARM = "nograph"
+
 
 @dataclass
 class Context:
-    """What a command that touches the index needs."""
+    """What a command that touches the index needs.
+
+    The connection is opened on first use: a no-index review answers from the
+    diff alone, so running one must not create an index as a side effect.
+    """
 
     cfg: object
-    conn: object
+    db_path: str
+    conn: object = None
+
+    def connect(self):
+        """The index connection, opened on first use."""
+        if self.conn is None:
+            self.conn = _conn(self.db_path)
+        return self.conn
+
+    def close(self) -> None:
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
 
 
 def _conn(db_path):
@@ -57,8 +82,16 @@ def _build_parser() -> argparse.ArgumentParser:
                             help="run the built-in read-only review loop")
     review.add_argument("--repo", default=".")
     review.add_argument("--db", default=".code-review-ai/index.db")
+    review.add_argument("--arm", choices=(GRAPH_ARM, NOINDEX_ARM), default=GRAPH_ARM,
+                        help="graph: index-backed worksheet plus get_impact "
+                             "(default); nograph: review the diff with read_file/"
+                             "search_code only, no index")
     review.add_argument("--symbols", nargs="*")
     review.add_argument("--files", nargs="*")
+    review.add_argument("--max-turns", type=int,
+                        help="stop the review after N model turns")
+    review.add_argument("--max-tokens", type=int,
+                        help="stop the review after N total tokens")
     review.add_argument("--model", help="OpenAI-compatible model name")
     review.add_argument("--base-url",
                         help="OpenAI-compatible API base URL (optional for OpenAI)")
@@ -179,7 +212,15 @@ def _review_hooks(quiet: bool):
     return hooks
 
 
-def _review_settings(args, cfg) -> tuple[str, str | None, str]:
+class _ModelSettings(NamedTuple):
+    """The provider settings one review run needs."""
+
+    model_name: str
+    base_url: str | None
+    api_key_env: str
+
+
+def _review_settings(args, cfg) -> _ModelSettings:
     """Resolve the model, base URL and key variable a review run needs."""
     from code_review_ai.review_loop.runner import resolve_setting
     model_name = args.model or resolve_setting(cfg.repo_path, "CRAI_REVIEW_MODEL")
@@ -189,41 +230,71 @@ def _review_settings(args, cfg) -> tuple[str, str | None, str]:
     # Every built-in agent uses one conventional local key. A caller may still
     # explicitly select another process/.env variable with --api-key-env, but
     # no second indirection is needed in .env.
-    return model_name, base_url, args.api_key_env or "OPENAI_API_KEY"
+    return _ModelSettings(model_name, base_url,
+                          args.api_key_env or "OPENAI_API_KEY")
 
 
-def _run_review_command(args, ctx, model_name, base_url, api_key_env, hooks) -> dict:
-    """Sync the index, summarize the change, run the loop, return its payload."""
-    from code_review_ai.review_loop.payload import loop_result_payload
-    from code_review_ai.review_loop.runner import resolve_api_key, run_review
-    started_at = time.perf_counter()
-    resolve_api_key(ctx.cfg.repo_path, api_key_env)
+def _sync_index(args, ctx, conn) -> None:
+    """Bring the index current before the graph arm reads it.
 
+    A review must never query a stale graph. sync performs the smallest
+    necessary update (or a full rebuild when required).
+    """
     if not args.no_progress:
         print("[review] 正在同步代码索引…", file=sys.stderr, flush=True)
-    # A review must never query a stale graph. sync performs the smallest
-    # necessary update (or a full rebuild when required).
-    sync(ctx.cfg, ctx.conn,
+    sync(ctx.cfg, conn,
          progress=functools.partial(_review_progress, quiet=args.no_progress))
     if not args.no_progress:
         print("[review] 索引同步完成", file=sys.stderr, flush=True)
 
-    summary = build_change_summary(ctx.cfg, ctx.conn,
-                                   symbols=args.symbols, files=args.files)
-    result = run_review(ctx.cfg, ctx.conn, prompt=_CLI_REVIEW_PROMPT, summary=summary,
-                        model_name=model_name, base_url=base_url,
-                        api_key_env=api_key_env, hooks=hooks)
+
+def _graph_review(args, ctx, settings: _ModelSettings, hooks) -> object:
+    """The index arm: sync, summarize the change, review the worksheet."""
+    from code_review_ai.review_loop.runner import run_review
+    conn = ctx.connect()
+    _sync_index(args, ctx, conn)
+    summary = build_change_summary(ctx.cfg, conn, symbols=args.symbols,
+                                   files=args.files)
+    return run_review(ctx.cfg, conn, prompt=_CLI_REVIEW_PROMPT, summary=summary,
+                      hooks=hooks, model_name=settings.model_name,
+                      base_url=settings.base_url,
+                      api_key_env=settings.api_key_env,
+                      max_turns=args.max_turns, max_total_tokens=args.max_tokens)
+
+
+def _noindex_review(args, ctx, settings: _ModelSettings, hooks) -> object:
+    """The no-index arm: the working-tree diff plus read/search, nothing else."""
+    from code_review_ai.review_loop.runner import run_free_review
+    return run_free_review(ctx.cfg, prompt=_CLI_REVIEW_PROMPT,
+                           diff=build_diff_text(ctx.cfg, args.files), hooks=hooks,
+                           model_name=settings.model_name,
+                           base_url=settings.base_url,
+                           api_key_env=settings.api_key_env,
+                           max_turns=args.max_turns,
+                           max_total_tokens=args.max_tokens)
+
+
+_ARM_RUNNERS = {GRAPH_ARM: _graph_review, NOINDEX_ARM: _noindex_review}
+
+
+def _run_review_command(args, ctx, settings: _ModelSettings, hooks) -> dict:
+    """Run the selected arm against the working tree, shaped as the JSON payload."""
+    from code_review_ai.review_loop.payload import loop_result_payload
+    from code_review_ai.review_loop.runner import resolve_api_key
+    started_at = time.perf_counter()
+    resolve_api_key(ctx.cfg.repo_path, settings.api_key_env)
+    result = _ARM_RUNNERS[args.arm](args, ctx, settings, hooks)
     if not args.no_progress:
         elapsed = time.perf_counter() - started_at
         print(f"[review] 总耗时：{elapsed:.1f}s", file=sys.stderr, flush=True)
-    return loop_result_payload(result, model_name)
+    return loop_result_payload(result, settings.model_name)
 
 
 @user_facing
 def _cmd_review(args, ctx) -> int:
     try:
-        model_name, base_url, api_key_env = _review_settings(args, ctx.cfg)
-        payload = _run_review_command(args, ctx, model_name, base_url, api_key_env,
+        settings = _review_settings(args, ctx.cfg)
+        payload = _run_review_command(args, ctx, settings,
                                       _review_hooks(args.no_progress))
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -253,7 +324,7 @@ def _context(args) -> Context:
     cfg = load_config()
     cfg.repo_path = args.repo
     cfg.db_path = args.db
-    return Context(cfg=cfg, conn=_conn(args.db))
+    return Context(cfg=cfg, db_path=args.db)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -266,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return COMMANDS[args.cmd](args, ctx)
     finally:
-        ctx.conn.close()
+        ctx.close()
 
 
 if __name__ == "__main__":

@@ -175,15 +175,30 @@ def tool_calls(tool_trace) -> list[str]:
             if isinstance(record, dict) and isinstance(record.get("tool"), str)]
 
 
-def row_from(result, case: EvalCase, arm: str, run_no: int) -> dict:
-    """One run's LoopResult -> the persisted row.
+def _loop_usage(usage: object) -> dict:
+    """The review payload's usage keys -> the loop's accumulator keys.
+
+    ``loop_result_payload`` publishes ``cache_read_input_tokens``, while the
+    accumulator and :func:`compute_cost` read ``cache_read``. Mapping matters:
+    without it every cached input token would be priced as a cache miss.
+    """
+    published = usage if isinstance(usage, dict) else {}
+    return {
+        "input_tokens": _int(published.get("input_tokens")),
+        "output_tokens": _int(published.get("output_tokens")),
+        "cache_read": _int(published.get("cache_read_input_tokens")),
+    }
+
+
+def row_from(payload: dict, case: EvalCase, arm: str, run_no: int) -> dict:
+    """One run's review payload (the CLI's JSON contract) -> the persisted row.
 
     The row keeps the raw findings and the tool trace, not just the derived
     numbers: the earlier harness stored only the match booleans and counts, so
     2.3 GB of its results can no longer be re-scored. Everything
     :func:`summarize` prints is recomputable from what is kept here.
     """
-    findings = [finding.model_dump() for finding in getattr(result, "findings", [])]
+    findings = payload.get("findings") or []
     run_score = score(findings, case)
     return {
         "case_id": case.id,
@@ -192,11 +207,11 @@ def row_from(result, case: EvalCase, arm: str, run_no: int) -> dict:
         "run": run_no,
         "hit": run_score.hit,
         "reported": run_score.reported,
-        "complete": bool(getattr(result, "review_complete", False)),
-        "failure": getattr(result, "failure_reason", None),
-        "usage": dict(getattr(result, "usage", None) or {}),
+        "complete": bool(payload.get("review_complete", False)),
+        "failure": payload.get("failure_reason"),
+        "usage": _loop_usage(payload.get("usage")),
         "findings": findings,
-        "tool_trace": [dict(record) for record in getattr(result, "tool_trace", [])],
+        "tool_trace": payload.get("tool_trace") or [],
     }
 
 

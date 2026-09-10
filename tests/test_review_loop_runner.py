@@ -13,10 +13,12 @@ from code_review_ai.review_loop import Hooks
 from code_review_ai.review_loop.hooks import POINT_RUN_FINISHED
 from code_review_ai.review_loop.runner import (
     build_initial_messages,
+    run_free_review,
     run_review,
     worksheet_from_summary,
 )
 from code_review_ai.review_loop.schemas import (
+    FINISH_REVIEW_TOOL,
     UPDATE_REVIEW_TOOL,
     ReviewItem,
 )
@@ -152,3 +154,57 @@ def test_run_review_resolves_worksheet_and_reports_structured_result(env):
     assert UPDATE_REVIEW_TOOL in model.schemas
     assert finished["failure_reason"] is None
     assert finished["finding_count"] == 1
+
+
+class FreeFormModel:
+    """Turn 1 reads the file, turn 2 submits one finding over finish_review."""
+
+    def bind_tools(self, schemas):
+        self.schemas = [schema["name"] for schema in schemas]
+        return self
+
+    def invoke(self, messages):
+        turn = len([m for m in messages if m.type == "ai"])
+        if turn == 0:
+            return AIMessage(content="", tool_calls=[
+                {"name": "read_file", "args": {"path": "app.py",
+                                               "start_line": 1, "end_line": 3},
+                 "id": "read-1"}])
+        return AIMessage(content="", tool_calls=[
+            {"name": FINISH_REVIEW_TOOL,
+             "args": {"findings": [{"file": "app.py", "line": 2,
+                                    "title": "leaks None on empty user",
+                                    "description": "login returns None."}]},
+             "id": "submit-1"}])
+
+
+def test_run_free_review_needs_no_worksheet_and_no_index(env):
+    """The no-index arm: diff in, findings out, no graph tool and no conn."""
+    config, _conn = env
+    model = FreeFormModel()
+
+    result = run_free_review(config, prompt="review this diff", diff="DIFF-BODY",
+                             model=model, max_turns=5)
+
+    assert result.failure_reason is None
+    assert result.review_complete is True
+    assert result.items == {}  # nothing was resolved row by row
+    assert [finding.file for finding in result.findings] == ["app.py"]
+    assert "get_impact" not in model.schemas
+    assert FINISH_REVIEW_TOOL in model.schemas
+
+
+def test_run_free_review_carries_the_diff_into_the_request(env):
+    config, _conn = env
+    seen = {}
+
+    class CapturingModel(FreeFormModel):
+        def invoke(self, messages):
+            seen.setdefault("request", messages[1].content)
+            return super().invoke(messages)
+
+    run_free_review(config, prompt="review this diff", diff="+ leaked = True",
+                    model=CapturingModel(), max_turns=5)
+
+    assert "review this diff" in seen["request"]
+    assert "+ leaked = True" in seen["request"]

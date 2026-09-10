@@ -9,15 +9,14 @@ reporter.
 
 import json
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
-from code_review_ai.review_loop.schemas import Finding
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "benchmarks"))
+
+from code_review_ai.review_loop.pricing import compute_cost  # noqa: E402
 
 from eval_cases import (  # noqa: E402
     EvalCase, GoldCause, files_read, load_cases, row_from, run_batch, score,
@@ -35,18 +34,15 @@ CASE_WITH_ALTERNATE = EvalCase(
 
 
 def _finding(file, title="t", description="d", line=1):
-    return Finding(file=file, line=line, title=title, description=description)
+    """One finding as the review payload carries it."""
+    return {"file": file, "line": line, "title": title, "description": description}
 
 
-@dataclass
-class _Result:
-    """Stand-in for a LoopResult, so the batching runs without a model."""
-
-    findings: list = field(default_factory=list)
-    review_complete: bool = True
-    failure_reason: str | None = None
-    usage: dict = field(default_factory=dict)
-    tool_trace: list = field(default_factory=list)
+def _payload(findings=(), **overrides) -> dict:
+    """The CLI's JSON output shape, as ``row_from`` receives it."""
+    return {"findings": list(findings), "review_complete": True,
+            "failure_reason": None, "usage": {}, "tool_trace": [],
+            **overrides}
 
 
 class _FindingObject:
@@ -67,7 +63,7 @@ def _batch(cases=None, findings_for=None, arms=("graph", "nograph"), runs=2):
 
     def execute(arm, case, _prepared):
         calls.append((arm, case.id))
-        return _Result(findings=(findings_for or {}).get(arm, []))
+        return _payload((findings_for or {}).get(arm, []))
 
     rows = run_batch(cases, arms=arms, runs=runs, prepare=prepare,
                      execute=execute,
@@ -167,9 +163,9 @@ class TestTraceDerivations:
 class TestRowAndBatch:
     def test_row_keeps_the_raw_evidence_and_the_score(self):
         row = row_from(
-            _Result(findings=[_finding("app/x.py")],
-                    usage={"input_tokens": 10, "output_tokens": 2},
-                    tool_trace=[{"tool": "read_file", "input": {"path": "a.py"}}]),
+            _payload([_finding("app/x.py")],
+                     usage={"input_tokens": 10, "output_tokens": 2},
+                     tool_trace=[{"tool": "read_file", "input": {"path": "a.py"}}]),
             CASE, "graph", 1)
 
         assert row["hit"] is True and row["reported"] == 1
@@ -177,6 +173,29 @@ class TestRowAndBatch:
         assert row["tool_trace"][0]["tool"] == "read_file"
         assert row["usage"]["input_tokens"] == 10
         assert row["case_id"] == "synth" and row["difficulty"] == "hard"
+
+    def test_row_maps_the_published_usage_keys_onto_the_loop_ones(self):
+        # The payload publishes cache_read_input_tokens; compute_cost and the
+        # cost columns read cache_read. Unmapped, every cached input token
+        # would be priced as a miss -- 30x over, silently.
+        row = row_from(_payload(usage={"input_tokens": 100, "output_tokens": 5,
+                                       "cache_read_input_tokens": 80}),
+                       CASE, "graph", 1)
+
+        assert row["usage"] == {"input_tokens": 100, "output_tokens": 5,
+                                "cache_read": 80}
+        assert summarize([row])["graph"]["mean_cost_yuan"] == round(
+            compute_cost(row["usage"]), 6)
+
+    def test_row_records_a_cli_that_produced_no_payload(self):
+        # _run_arm's stand-in payload: the crash costs its own row, and the
+        # batch's summary counts it as an error rather than a miss.
+        row = row_from(_payload(review_complete=False, failure_reason="cli exit 2:"),
+                       CASE, "nograph", 1)
+
+        assert row["failure"] == "cli exit 2:"
+        assert row["complete"] is False and row["hit"] is False
+        assert summarize([row])["nograph"]["errors"] == 1
 
     def test_each_case_is_materialized_once_however_many_runs(self):
         _rows, prepared, _released, _calls = _batch(runs=3)
@@ -216,8 +235,8 @@ class TestCallerOwnedRows:
         seen: list[int] = []
         rows = run_batch([CASE, CASE_WITH_ALTERNATE], arms=("graph",), runs=2,
                          rows=rows, prepare=lambda case: case,
-                         execute=lambda arm, case, prepared: _Result(
-                             findings=[_finding("app/x.py")]),
+                         execute=lambda arm, case, prepared: _payload(
+                             [_finding("app/x.py")]),
                          on_row=lambda row: seen.append(len(rows)))
 
         # 2 cases x 1 arm x 2 runs: the count grows as each row lands.
@@ -228,7 +247,7 @@ class TestCallerOwnedRows:
     def test_without_a_caller_list_it_still_returns_every_row(self):
         rows = run_batch([CASE], arms=("graph",), runs=1,
                          prepare=lambda case: case,
-                         execute=lambda arm, case, prepared: _Result())
+                         execute=lambda arm, case, prepared: _payload())
 
         assert len(rows) == 1
 
@@ -246,7 +265,7 @@ class TestSummarize:
 
     def test_a_failed_run_counts_as_a_miss_and_as_an_error(self):
         def execute(_arm, _case, _prepared):
-            return _Result(failure_reason="no submission")
+            return _payload(failure_reason="no submission")
 
         rows = run_batch([CASE], arms=("graph",), runs=1,
                          prepare=lambda case: case, execute=execute)
@@ -259,10 +278,10 @@ class TestSummarize:
                  {"tool": "get_impact", "input": {}}]
 
         def execute(_arm, _case, _prepared):
-            return _Result(findings=[_finding("app/x.py")],
-                           usage={"input_tokens": 100, "output_tokens": 40,
-                                  "cache_read": 60},
-                           tool_trace=trace)
+            return _payload([_finding("app/x.py")],
+                            usage={"input_tokens": 100, "output_tokens": 40,
+                                   "cache_read_input_tokens": 60},
+                            tool_trace=trace)
 
         rows = run_batch([CASE], arms=("graph",), runs=2,
                          prepare=lambda case: case, execute=execute)

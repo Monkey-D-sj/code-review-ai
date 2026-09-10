@@ -5,8 +5,8 @@ import subprocess
 import pytest
 
 from code_review_ai.config import load_config
-from code_review_ai.changes import (_resolve_diff_base,
-                                    build_change_summary, detect_changed_symbols)
+from code_review_ai.changes import (_resolve_diff_base, build_change_summary,
+                                    build_diff_text, detect_changed_symbols)
 
 from conftest import FIXTURES as FIX, Q
 
@@ -104,6 +104,44 @@ def test_git_diff_failure_is_surfaced_not_swallowed(monkeypatch):
     monkeypatch.setattr(ch, "_git_diff", bad_diff)
     with pytest.raises(RuntimeError, match="bad revision"):
         detect_changed_symbols(cfg, files=["auth.py"])
+
+
+def test_build_diff_text_returns_the_working_tree_patch(tmp_path):
+    """The no-index review reads this text, so it must carry the change itself."""
+    repo = _git_repo(tmp_path)
+    _commit(repo, "a.py", "x = 1\n")
+    (repo / "a.py").write_text("x = 2\n", encoding="utf-8")
+    cfg = _cfg(repo)
+    cfg.diff_base = "HEAD"
+
+    diff = build_diff_text(cfg)
+
+    assert "-x = 1" in diff and "+x = 2" in diff
+    assert "a.py" in diff
+
+
+def test_build_diff_text_narrows_to_files_and_keeps_reader_context(tmp_path):
+    repo = _git_repo(tmp_path)
+    _commit(repo, "a.py", "x = 1\n")
+    _commit(repo, "b.py", "y = 1\n")
+    (repo / "a.py").write_text("x = 2\n", encoding="utf-8")
+    (repo / "b.py").write_text("y = 2\n", encoding="utf-8")
+    cfg = _cfg(repo)
+    cfg.diff_base = "HEAD"
+
+    diff = build_diff_text(cfg, files=["a.py"])
+
+    assert "a.py" in diff and "b.py" not in diff
+    # A reader gets neighbouring lines; the index's own diff asks for 0.
+    assert "@@ -1,1 +1,1 @@" not in diff
+
+
+def test_build_diff_text_surfaces_a_git_failure(tmp_path):
+    cfg = _cfg(_git_repo(tmp_path))
+    cfg.diff_base = "origin/main"
+
+    with pytest.raises(RuntimeError, match="git diff failed"):
+        build_diff_text(cfg)
 
 
 def test_deleted_symbol_reported(tmp_path, monkeypatch):

@@ -103,6 +103,15 @@ code-review-ai review --repo . --db .code-review-ai/index.db -o review.json
 code-review-ai install --platform claude-code    # deploy skills + register the MCP server
 ```
 
+`review --arm` picks how the review is done:
+
+- `--arm graph` (default) — index-backed: the change summary becomes a worksheet
+  of changed symbols, and `get_impact` supplies the call graph.
+- `--arm nograph` — review the diff alone with `read_file` / `search_code`. No
+  index is needed or created, so this works on a repo that was never indexed.
+
+Both write the same JSON payload. `--max-turns` / `--max-tokens` bound a run.
+
 ### Built-in review loop
 
 The package also includes a provider-neutral, read-only review loop. It talks
@@ -136,23 +145,24 @@ for the final JSON payload. Pass `--no-progress` for a quiet automation run;
 
 ## Eval: does the index find the bug, and what does it cost?
 
-`benchmarks/review_loop_case_compare.py` runs the review loop over the 21
-bug-injection cases in `benchmarks/case-backend-cases.json`, twice per run:
+`benchmarks/review_loop_case_compare.py` runs the 21 bug-injection cases in
+`benchmarks/case-backend-cases.json` through both arms of `review` — the same
+command a user runs, so the harness cannot drift from the product:
 
-- **`graph`** — worksheet mode: the index's change summary (changed symbols →
-  candidate rows) plus `get_impact`'s call graph, resolved through
-  `update_review_item`.
-- **`nograph`** — free-form with no index tooling: `read_file` / `search_code`
-  plus `finish_review`, seeing only the diff. That is a no-graph reviewer's
-  input.
+- **`graph`** — `review --arm graph`: worksheet mode, the index's change summary
+  (changed symbols → candidate rows) plus `get_impact`'s call graph, resolved
+  through `update_review_item`.
+- **`nograph`** — `review --arm nograph`: free-form with no index tooling,
+  `read_file` / `search_code` plus `finish_review`, seeing only the diff.
 
-Both arms share one model instance and one 25-turn / 150k-token budget, so the
-cost columns are directly comparable. Scoring is one rule: a run hit if a
-reported finding lands on the gold fix site (`fix_file`, or an alternate file —
-the same regression can be repaired on either side of the broken contract).
-Whether the index earns its keep is not a second score; it is read off the cost
-columns — tokens, files read, tool calls. Finding the defect is the result;
-paying less for the same result is the product.
+The arm is the only difference between a run and its counterpart, prompt
+included. Both run under the same 25-turn / 150k-token budget, so the cost
+columns are directly comparable. Scoring is one rule: a run hit if a reported
+finding lands on the gold fix site (`fix_file`, or an alternate file — the same
+regression can be repaired on either side of the broken contract). Whether the
+index earns its keep is not a second score; it is read off the cost columns —
+tokens, files read, tool calls. Finding the defect is the result; paying less
+for the same result is the product.
 
 ```bash
 uv run --no-sync python benchmarks/review_loop_case_compare.py --runs 3

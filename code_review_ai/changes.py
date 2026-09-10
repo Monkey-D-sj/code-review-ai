@@ -80,6 +80,26 @@ def _git_diff(base: str, files: list[str] | None,
     return diff_ranges_from_text(out.stdout)
 
 
+def build_diff_text(config: Config, files: list[str] | None = None,
+                    *, unified: int = 3) -> str:
+    """The working-tree diff as text, against the same resolved base.
+
+    ``_git_diff`` returns parsed hunk ranges because the index only needs
+    positions; a review with no index reads the diff itself. ``unified`` is the
+    context width: the index wants 0, a reader wants neighbours.
+    """
+    args = ["git", "diff", f"--unified={unified}", _resolve_diff_base(config)]
+    if files:
+        args += ["--"] + files
+    out = subprocess.run(args, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", cwd=config.repo_path)
+    if out.returncode != 0:
+        raise RuntimeError(
+            f"git diff failed (exit {out.returncode}): {out.stderr.strip()}"
+        )
+    return out.stdout
+
+
 def _overlaps(start: int, end: int, hunks: list[tuple[int, int]]) -> bool:
     """True if node range [start, end] overlaps any hunk (start, count)."""
     return any(not (end < s or start > s + c - 1) for s, c in hunks)

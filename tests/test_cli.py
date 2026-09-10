@@ -36,6 +36,18 @@ def test_user_facing_reports_expected_errors_instead_of_tracebacking(capsys):
     assert capsys.readouterr().err == "error: index is missing\n"
 
 
+class FakeResult:
+    """Stand-in for the loop's LoopResult, so no model is ever reached."""
+
+    items: dict = {}
+    findings: list = []
+    affected_entries: list = []
+    review_complete = True
+    failure_reason = None
+    usage: dict = {}
+    tool_trace: list = []
+
+
 def test_cli_review_syncs_then_writes_agent_contract(tmp_path, monkeypatch):
     output = tmp_path / "review.json"
     calls = {}
@@ -50,15 +62,6 @@ def test_cli_review_syncs_then_writes_agent_contract(tmp_path, monkeypatch):
         return {"changed_functions": []}
 
     monkeypatch.setattr(cli, "build_change_summary", fake_summary)
-
-    class FakeResult:
-        items: dict = {}
-        findings: list = []
-        affected_entries: list = []
-        review_complete = True
-        failure_reason = None
-        usage: dict = {}
-        tool_trace: list = []
 
     def fake_review(config, conn, **kwargs):
         calls.update(kwargs)
@@ -76,6 +79,55 @@ def test_cli_review_syncs_then_writes_agent_contract(tmp_path, monkeypatch):
     assert calls["symbols"] == ["auth::login"]
     assert calls["summary"] == {"changed_functions": []}
     assert json.loads(output.read_text(encoding="utf-8"))["failure_reason"] is None
+    # The graph arm is the one that opens (and here creates) the index.
+    assert (tmp_path / "review.db").exists()
+
+
+def test_cli_review_nograph_reads_the_diff_without_touching_the_index(
+        tmp_path, monkeypatch):
+    """The no-index arm: no sync, no connection, no index -- just the diff."""
+    output = tmp_path / "review.json"
+    calls = {}
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "build_diff_text", lambda cfg, files=None: "DIFF-BODY")
+    monkeypatch.setattr(cli, "sync", lambda *args, **kwargs: calls.update(synced=True))
+
+    def fake_free_review(config, conn=None, **kwargs):
+        calls["conn"] = conn
+        calls.update(kwargs)
+        return FakeResult()
+
+    monkeypatch.setattr("code_review_ai.review_loop.runner.run_free_review",
+                        fake_free_review)
+    code = main(["review", "--arm", "nograph", "--repo", str(tmp_path),
+                 "--db", str(tmp_path / "index.db"),
+                 "--model", "fake-model", "--out", str(output)])
+
+    assert code == 0
+    assert "synced" not in calls
+    assert calls["conn"] is None
+    assert calls["diff"] == "DIFF-BODY"
+    assert calls["max_turns"] is None and calls["max_total_tokens"] is None
+    # A diff-only review must not create the index it says it does not need.
+    assert not (tmp_path / "index.db").exists()
+
+
+def test_cli_review_passes_its_budget_to_the_arm(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "build_diff_text", lambda cfg, files=None: "")
+    calls = {}
+
+    def fake_free_review(config, conn=None, **kwargs):
+        calls.update(kwargs)
+        return FakeResult()
+
+    monkeypatch.setattr("code_review_ai.review_loop.runner.run_free_review",
+                        fake_free_review)
+    main(["review", "--arm", "nograph", "--repo", str(tmp_path),
+          "--db", str(tmp_path / "i.db"), "--model", "m",
+          "--max-turns", "25", "--max-tokens", "150000"])
+
+    assert calls["max_turns"] == 25 and calls["max_total_tokens"] == 150_000
 
 
 def test_review_without_a_model_exits_2(tmp_path, monkeypatch, capsys):
