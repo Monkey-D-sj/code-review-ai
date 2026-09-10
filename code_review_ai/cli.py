@@ -36,6 +36,13 @@ from code_review_ai.context_planner import (
 # evidence rules, read-only guard) is injected by review_loop.runner.
 _CLI_REVIEW_PROMPT = "评审本次变更引入的具体回归，逐行核对 worksheet 中的变更符号。"
 
+# Default agent for the eval harness: this repo's own review loop, launched with
+# the interpreter running the CLI -- an absolute path, which also sidesteps the
+# Windows trap where a bare `python` resolves to the uv base interpreter. A JSON
+# array keeps shell quoting out of the picture (see parse_agent_command).
+_DEFAULT_AGENT_COMMAND = json.dumps(
+    [sys.executable, "-m", "code_review_ai.agent_adapter", "review_loop"])
+
 
 def _conn(db_path):
     conn = connect(db_path)
@@ -228,7 +235,10 @@ def main(argv: list[str] | None = None) -> int:
                          "case (cases must have empty repo_url); built by its "
                          "build_repo.py if it has no history yet")
     fe.add_argument("--work-dir", default="eval-results/full-agent-eval")
-    fe.add_argument("--agent-command")
+    fe.add_argument("--agent-command", default=_DEFAULT_AGENT_COMMAND,
+                    help="command that reads the eval prompt from stdin and "
+                         "writes the required JSON object to stdout "
+                         "(default: this repo's own review loop)")
     fe.add_argument("--model",
                     help="Claude model for the agent run; passed to the agent "
                          "via CRAI_EVAL_MODEL so every arm uses the same model")
@@ -337,8 +347,6 @@ def main(argv: list[str] | None = None) -> int:
                     cases, args.repos_dir, args.work_dir,
                     local_repo=args.local_repo)
             else:
-                if not args.agent_command:
-                    raise ValueError("--agent-command is required unless --dry-run")
                 payload = run_full_agent_eval(
                     cases, args.repos_dir, args.work_dir,
                     parse_agent_command(args.agent_command),

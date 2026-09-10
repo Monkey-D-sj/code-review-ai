@@ -257,15 +257,17 @@ code-review-ai full-agent-eval \
 code-review-ai full-agent-eval \
   --cases benchmarks/case-backend-cases.json \
   --model deepseek-v4-flash \
-  --agent-command "python -m code_review_ai.agent_adapter claude" \
   --repetitions 3 --workers 4 \
   -o eval-results/full-agent-report.json
 ```
 
-`--model` locks every arm to the same model (forwarded to the agent via
-`CRAI_EVAL_MODEL`, so per-mode cost/token comparisons stay apples-to-apples);
-omit it to use the CLI's current default model. A `--model sonnet` inside
-`--agent-command` works too, but a standalone `--model` keeps all modes uniform.
+`--agent-command` defaults to this repo's own review loop
+(`python -m code_review_ai.agent_adapter review_loop`, launched with the
+interpreter running the CLI), so a loop-vs-loop run needs no extra flags.
+Pass any other stdin-reading agent to compare against it. `--model` locks every
+arm to the same model (forwarded to the agent via `CRAI_EVAL_MODEL`, so
+per-mode cost/token comparisons stay apples-to-apples); omit it to use the
+CLI's current default model.
 
 `benchmarks/case-backend-cases.json` holds the business-shaped project cases
 (`source_dir`-anchored under `full_agent_eval/case-backend`, no clone or
@@ -276,9 +278,9 @@ offline shape.
 
 #### Run without an LLM (`scripted` agent)
 
-The real agent command above needs a logged-in `claude` CLI and spends tokens.
-For a deterministic, no-network wiring regression that runs in CI, the same
-harness accepts a scripted agent that replaces the model with a fixed script:
+The default loop spends tokens on a real provider. For a deterministic,
+no-network wiring regression that runs in CI, the same harness accepts a
+scripted agent that replaces the model with a fixed script:
 
 ```bash
 code-review-ai full-agent-eval \
