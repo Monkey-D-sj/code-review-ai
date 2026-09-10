@@ -151,8 +151,8 @@ def worksheet_from_summary(summary: dict) -> list[ReviewItem]:
     return items
 
 
-def build_initial_messages(prompt: str, summary: dict, items: list[ReviewItem],
-                           *, diff: str = "") -> list[BaseMessage]:
+def build_initial_messages(prompt: str, summary: dict,
+                           items: list[ReviewItem]) -> list[BaseMessage]:
     """The review request: policy as system, prompt + summary + worksheet as user.
 
     The worksheet renders as the bare qname roster. Its file/start/end were
@@ -160,6 +160,11 @@ def build_initial_messages(prompt: str, summary: dict, items: list[ReviewItem],
     this a second copy of the summary; what the model needs from it is the
     ordered list of rows it must resolve. (The coordinates still live on
     ``ReviewItem`` -- the payload derives ``affected_files`` from them.)
+
+    There is no separate DIFF section: with ``summary_source = "diff"`` every
+    changed function carries its own hunks, so a whole-tree diff here said the
+    same thing again, at whole-repo scale. The no-index arm renders its diff
+    itself (see :func:`run_free_review`) because it has no summary to carry it.
     """
     roster = [item.qname for item in items]
     user = f"""{prompt}
@@ -170,9 +175,6 @@ CHANGE SUMMARY (deterministic, do not regenerate)
 CANDIDATE WORKSHEET (deterministic; resolve every qname below -- its file, line
 range and diff are in the summary above)
 {json.dumps(roster, ensure_ascii=False)}
-
-DIFF
-{diff or '(no working-tree diff was supplied)'}
 
 对每个 candidate 逐个查证并调用 update_review_item 给出决定：
 - confirmed：附 finding，严格符合 {json.dumps(_FINDING_SHAPE, ensure_ascii=False)}；
@@ -203,7 +205,6 @@ def run_review(
     *,
     prompt: str,
     summary: dict,
-    diff: str = "",
     hooks=None,
     model: BaseChatModel | None = None,
     model_name: str | None = None,
@@ -222,7 +223,8 @@ def run_review(
     the loop once the provider-reported total exceeds it; ``max_empty_turns``
     bounds the nudges an unresolved empty-turn stop receives before failing.
     ``tool_names`` narrows the repo-facing tools (``None`` = all of them) so an
-    arm can run without graph retrieval.
+    arm can run without graph retrieval. The change itself reaches the model
+    through ``summary`` (per-function hunks), not as a separate diff.
     Returns the resolved worksheet (``items``, ``findings``,
     ``affected_entries``, ``review_complete``), plus ``usage`` and the yuan
     ``cost`` computed from it at the DeepSeek per-million rates (see
@@ -236,7 +238,7 @@ def run_review(
     if max_empty_turns is None:
         max_empty_turns = MAX_EMPTY_TURNS
     items = worksheet_from_summary(summary)
-    messages = build_initial_messages(prompt, summary, items, diff=diff)
+    messages = build_initial_messages(prompt, summary, items)
     tools = [*_repo_tools(config, conn, tool_names), update_review_tool()]
     result = run_loop(model, tools, candidates=items, initial_messages=messages,
                       hooks=hooks, max_turns=max_turns,
