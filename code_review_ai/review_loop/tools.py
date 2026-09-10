@@ -13,7 +13,9 @@ classifies as ``error``; usable output returns plain text/JSON (``success``).
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -272,6 +274,68 @@ class ImpactArgs(BaseModel):
         return self
 
 
+def _relative_file(file_path: str, repo_root: str) -> str:
+    """A repo-relative, forward-slash path for the agent's evidence.
+
+    The index stores ``os.path.join(repo_path, rel)`` (``indexer._parse_files``),
+    so a run with ``--repo .`` yields ``./app/x.py`` and one with an absolute
+    repo path yields ``<root>/app/x.py`` -- neither is what a finding's ``file``
+    has to be. A path that cannot be relativized (another drive, or a file
+    outside the repo) is returned normalized rather than invented.
+    """
+    normalized = str(file_path or "").replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    if not repo_root or not Path(normalized).is_absolute():
+        return normalized
+    try:
+        relative = os.path.relpath(normalized, repo_root).replace("\\", "/")
+    except ValueError:
+        return normalized
+    return normalized if relative.startswith("..") else relative
+
+
+def _relativize_files(result: list[dict], repo_root: str) -> None:
+    """Rewrite every evidence ``file`` in place; the payload is already a copy."""
+    for entry in result:
+        for direction in ("upstream", "downstream"):
+            for neighbor in entry.get(direction) or ():
+                if isinstance(neighbor, dict) and "file" in neighbor:
+                    neighbor["file"] = _relative_file(neighbor["file"], repo_root)
+
+
+def _direction_notes(entry: dict) -> list[str]:
+    """What the bare counts would misread.
+
+    An empty direction is a gap in the *index*, not in the evidence, and the
+    uncertainty list is a record of that gap -- not a worklist. Unannotated,
+    both read as "keep digging": a run that had already found its regression
+    spent its remaining budget searching for the expressions uncertainty named.
+    """
+    notes: list[str] = []
+    if not entry.get("downstream"):
+        notes.append("downstream 为空：该符号调用的目标无法静态解析（见 uncertainty），"
+                     "不代表证据缺失；消费其返回值与行为的是 upstream 里的调用方。")
+    if not entry.get("upstream"):
+        notes.append("upstream 为空：索引没有解析到调用该符号的调用方（可能是动态派发"
+                     "或入口），不代表它没被使用。")
+    if entry.get("uncertainty"):
+        notes.append("uncertainty 是索引的解析缺口记录，不是待办清单：不要为了消解它去"
+                     "搜索或读文件。")
+    return notes
+
+
+def _for_agent(result: list[dict], repo_root: str) -> list[dict]:
+    """The get_impact payload as the review agent should read it."""
+    shaped = copy.deepcopy(result)
+    _relativize_files(shaped, repo_root)
+    for entry in shaped:
+        notes = _direction_notes(entry)
+        if notes:
+            entry["notes"] = notes
+    return shaped
+
+
 def _run_impact(config: Config, conn, symbols: list[str] | None,
                 files: list[str] | None) -> str:
     try:
@@ -280,7 +344,7 @@ def _run_impact(config: Config, conn, symbols: list[str] | None,
                             include_call_sites=True, max_level=1)
     except (RuntimeError, ValueError) as exc:
         return _error_json(str(exc))
-    return json.dumps(result, ensure_ascii=False)
+    return json.dumps(_for_agent(result, config.repo_path), ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
