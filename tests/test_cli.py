@@ -46,6 +46,7 @@ class FakeResult:
     failure_reason = None
     usage: dict = {}
     tool_trace: list = []
+    assistant_turns: list = []
 
 
 def test_cli_review_syncs_then_writes_agent_contract(tmp_path, monkeypatch):

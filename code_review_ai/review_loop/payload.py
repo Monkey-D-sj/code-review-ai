@@ -22,6 +22,7 @@ def loop_result_payload(result, model_name: str | None = None) -> dict:
                        if isinstance(record.get("tool"), str)],
         "tool_call_count": len(result.tool_trace),
         "tool_trace": [dict(record) for record in result.tool_trace],
+        "assistant_turns": [turn.model_dump() for turn in result.assistant_turns],
         "review_complete": result.review_complete,
         "usage": {"input_tokens": _token_count(usage, "input_tokens"),
                   "output_tokens": _token_count(usage, "output_tokens"),
