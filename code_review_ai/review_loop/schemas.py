@@ -118,13 +118,24 @@ class AssistantTurn(BaseModel):
     *names*, in request order, with no tool-call id and no index into the
     trace: the two lists line up only by **position within a turn** -- the k-th
     name of turn N is the k-th trace record produced while executing turn N.
-    That is exact under ``run_loop``, which executes and traces every call of a
-    turn before it checks completion. The free arm does not hold it:
-    ``run_free_loop`` short-circuits on ``finish_review``, so a turn requesting
-    ``[finish_review, read_file]`` records two names here but traces only the
-    one call it executed before the run stopped -- the final turn can end up
-    with more names than trace records. A consumer that must pair across arms
-    should key on the trace's ``tool_call_id`` instead of on position.
+
+    Every call that executes produces exactly one record, in order (each of
+    ``_execute_call``, ``_apply_update`` and ``_apply_finish`` ends in a single
+    ``_reply_call``). The pairing is therefore **prefix-correct but not
+    total**: a trace record always sits where its name does, and names can
+    outnumber records only as a *trailing* run of never-executed calls. Walk
+    both lists in step and stop when the records run out; never shift a later
+    record onto an earlier name.
+
+    Two break points create that tail, and they apply to both arms: the token
+    budget (``max_total_tokens`` / ``--max-tokens``) is checked after the turn
+    is recorded and before any of its calls execute, and ``run_free_loop``
+    stops at an accepted ``finish_review``, leaving the calls that same turn
+    requested after it unexecuted (a turn asking for ``[finish_review,
+    read_file]`` records two names and one record).
+
+    Carrying ``tool_call_id`` would make the pairing exact rather than
+    positional; ``tool_calls`` does not have it yet.
     """
 
     model_config = ConfigDict(extra="forbid")

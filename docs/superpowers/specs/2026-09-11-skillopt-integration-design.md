@@ -180,12 +180,24 @@ conversation.append({"role": "system",
 **`env_feedback` 的配对是位置性的，不是 id 绑定的。** `assistant_turns[i]`
 的 `tool_calls` 只有工具**名字**、没有 `tool_call_id`，`tool_trace` 的记录则只有
 `tool_call_id`、没有轮次号；两者只能按「第 N 轮的第 k 个调用 ↔ 执行该轮时产生的第 k 条
-trace」对齐。本节指定的 `--arm graph` 下这个配对是**精确**的：`run_loop`
-每轮先把该轮所有调用执行并写入 trace，之后才判断是否完成。`--arm nograph` 则不成立——
-`run_free_loop` 在 `finish_review` 处短路（`loop.py`），一轮请求
-`[finish_review, read_file]` 会在 `assistant_turns` 里记两个名字、却只产生一条 trace，
-最后的轮次因此错位。若消费者需要支持 free arm，应按 `tool_trace` 的 `tool_call_id`
-建立映射，而不是按位置。
+trace」对齐。
+
+这个配对是**前缀正确、但非全覆盖**的：每一次**被执行**的调用恰好产生一条 trace
+（`_execute_call` / `_apply_update` / `_apply_finish` 三条路径都以一次 `_reply_call`
+收尾），所以已有记录的位置永远与它的名字一致；名字多于记录**只可能**出现在末轮的
+**尾部**——那是被记录、但未被执行的调用。消费方应按顺序并行推进两个列表，记录用尽即止，
+**不得把靠后的记录错配到靠前的名字上**。
+
+产生该尾部有两个断点，两个 arm 都存在：token 预算（`max_total_tokens` / CLI
+`--max-tokens`）在**记录该轮之后、执行其调用之前**检查，触发时该轮有名字而无记录；
+`run_free_loop` 在被接受的 `finish_review` 处停止，同一轮排在它后面的调用不再执行
+（请求 `[finish_review, read_file]` 的一轮记两个名字、产生一条记录）。
+
+本节指定的命令只传 `--max-turns`、不传 `--max-tokens`，故 rollout 不会遇到尾部情况；
+但实现仍须按上述规则取用，不可假设两个列表等长。
+
+按 `tool_trace` 的 `tool_call_id` 建立映射可以让配对变精确而非位置性，但 `tool_calls`
+目前不带 id —— 该字段是否补上，留待本工作流 B 的 spec 决定。
 
 经 SkillOpt 的 `fmt_trajectory()`（`skillopt/gradient/reflect.py:65-106`）渲染为
 `[step N think]` / `[step N action]` / `[step N obs]`，末条渲染为 `[verification]`。
