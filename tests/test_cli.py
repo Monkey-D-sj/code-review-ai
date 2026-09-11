@@ -176,3 +176,71 @@ def test_cli_install_register_mcp_flag(monkeypatch):
 def test_cli_install_returns_nonzero_on_failure(monkeypatch):
     monkeypatch.setattr(cli, "install", lambda **k: _Res(False, "nope"))
     assert main(["install"]) == 1
+
+
+def test_review_accepts_a_policy_file_flag():
+    args = cli._build_parser().parse_args(["review", "--policy-file", "p.md"])
+
+    assert args.policy_file == "p.md"
+
+
+def test_review_policy_file_defaults_to_none():
+    args = cli._build_parser().parse_args(["review"])
+
+    assert args.policy_file is None
+
+
+def test_cli_review_passes_the_policy_file_content_to_the_arm(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "build_diff_text", lambda cfg, files=None: "")
+    policy = tmp_path / "policy.md"
+    policy.write_text("CUSTOM POLICY", encoding="utf-8")
+    calls = {}
+
+    def fake_free_review(config, conn=None, **kwargs):
+        calls.update(kwargs)
+        return FakeResult()
+
+    monkeypatch.setattr("code_review_ai.review_loop.runner.run_free_review",
+                        fake_free_review)
+    code = main(["review", "--arm", "nograph", "--repo", str(tmp_path),
+                 "--db", str(tmp_path / "i.db"), "--model", "m",
+                 "--policy-file", str(policy)])
+
+    assert code == 0
+    assert calls["policy"] == "CUSTOM POLICY"
+
+
+def test_missing_policy_file_exits_2(tmp_path, monkeypatch, capsys):
+    """A missing policy file is bad configuration, never a silent fallback.
+
+    Falling back to the built-in policy would let a caller believe it injected
+    one while the run used the original.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+
+    code = main(["review", "--repo", str(tmp_path), "--db", str(tmp_path / "r.db"),
+                 "--model", "m", "--policy-file", "does-not-exist.md"])
+
+    assert code == 2
+    assert "does-not-exist.md" in capsys.readouterr().err
+
+
+def test_empty_policy_file_exits_2(tmp_path, monkeypatch, capsys):
+    """An empty file is as dangerous as a missing one.
+
+    The runner falls back with `policy or _POLICY`, so `""` is indistinguishable
+    from `None`: an empty file would silently run the baseline while the caller
+    believed it was evaluating an injected policy.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+    empty = tmp_path / "empty.md"
+    empty.write_text("   \n", encoding="utf-8")
+
+    code = main(["review", "--repo", str(tmp_path), "--db", str(tmp_path / "r.db"),
+                 "--model", "m", "--policy-file", str(empty)])
+
+    assert code == 2
+    assert "empty.md" in capsys.readouterr().err

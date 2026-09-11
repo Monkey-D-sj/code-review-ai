@@ -97,6 +97,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="OpenAI-compatible API base URL (optional for OpenAI)")
     review.add_argument("--api-key-env",
                         help="environment variable holding the API key")
+    review.add_argument("--policy-file",
+                        help="markdown file to use as the review policy (the "
+                             "system prompt); defaults to the built-in policy")
     review.add_argument("--no-progress", action="store_true",
                         help="suppress live review progress on stderr")
     # Kept for compatibility: the TTY dashboard lived in the retired agent
@@ -234,6 +237,28 @@ def _review_settings(args, cfg) -> _ModelSettings:
                           args.api_key_env or "OPENAI_API_KEY")
 
 
+def _resolve_policy(args) -> str | None:
+    """The policy markdown for this run, or ``None`` to use the built-in one.
+
+    A missing or empty file raises ``ValueError`` so ``_cmd_review`` maps it to
+    ``_BAD_CONFIG`` (exit 2). Falling back silently would let a caller believe
+    it injected a policy while the run used the built-in one -- the failure
+    would then look like "the policy made no difference", which is the hardest
+    kind to diagnose. Empty matters as much as missing: the runner's fallback
+    is ``policy or _POLICY``, so ``""`` is indistinguishable from ``None`` and
+    an empty file would run the baseline while reporting an optimized run.
+    """
+    if not args.policy_file:
+        return None
+    path = Path(args.policy_file)
+    if not path.is_file():
+        raise ValueError(f"--policy-file {args.policy_file} does not exist")
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        raise ValueError(f"--policy-file {args.policy_file} is empty")
+    return text
+
+
 def _sync_index(args, ctx, conn) -> None:
     """Bring the index current before the graph arm reads it.
 
@@ -248,7 +273,7 @@ def _sync_index(args, ctx, conn) -> None:
         print("[review] 索引同步完成", file=sys.stderr, flush=True)
 
 
-def _graph_review(args, ctx, settings: _ModelSettings, hooks) -> object:
+def _graph_review(args, ctx, settings: _ModelSettings, hooks, policy) -> object:
     """The index arm: sync, summarize the change, review the worksheet."""
     from code_review_ai.review_loop.runner import run_review
     conn = ctx.connect()
@@ -259,10 +284,11 @@ def _graph_review(args, ctx, settings: _ModelSettings, hooks) -> object:
                       hooks=hooks, model_name=settings.model_name,
                       base_url=settings.base_url,
                       api_key_env=settings.api_key_env,
-                      max_turns=args.max_turns, max_total_tokens=args.max_tokens)
+                      max_turns=args.max_turns, max_total_tokens=args.max_tokens,
+                      policy=policy)
 
 
-def _noindex_review(args, ctx, settings: _ModelSettings, hooks) -> object:
+def _noindex_review(args, ctx, settings: _ModelSettings, hooks, policy) -> object:
     """The no-index arm: the working-tree diff plus read/search, nothing else."""
     from code_review_ai.review_loop.runner import run_free_review
     return run_free_review(ctx.cfg, prompt=_CLI_REVIEW_PROMPT,
@@ -271,7 +297,8 @@ def _noindex_review(args, ctx, settings: _ModelSettings, hooks) -> object:
                            base_url=settings.base_url,
                            api_key_env=settings.api_key_env,
                            max_turns=args.max_turns,
-                           max_total_tokens=args.max_tokens)
+                           max_total_tokens=args.max_tokens,
+                           policy=policy)
 
 
 _ARM_RUNNERS = {GRAPH_ARM: _graph_review, NOINDEX_ARM: _noindex_review}
@@ -283,7 +310,8 @@ def _run_review_command(args, ctx, settings: _ModelSettings, hooks) -> dict:
     from code_review_ai.review_loop.runner import resolve_api_key
     started_at = time.perf_counter()
     resolve_api_key(ctx.cfg.repo_path, settings.api_key_env)
-    result = _ARM_RUNNERS[args.arm](args, ctx, settings, hooks)
+    policy = _resolve_policy(args)
+    result = _ARM_RUNNERS[args.arm](args, ctx, settings, hooks, policy)
     if not args.no_progress:
         elapsed = time.perf_counter() - started_at
         print(f"[review] 总耗时：{elapsed:.1f}s", file=sys.stderr, flush=True)
