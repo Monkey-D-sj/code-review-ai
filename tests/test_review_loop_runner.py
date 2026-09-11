@@ -12,6 +12,7 @@ from code_review_ai.db import init_schema
 from code_review_ai.review_loop import Hooks
 from code_review_ai.review_loop.hooks import POINT_RUN_FINISHED
 from code_review_ai.review_loop.runner import (
+    _POLICY,
     build_initial_messages,
     run_free_review,
     run_review,
@@ -29,6 +30,7 @@ class ScriptedReviewModel:
 
     def __init__(self):
         self.saw_system = False
+        self.system_content = ""
         self.saw_tool_reply = False
 
     def bind_tools(self, schemas):
@@ -41,6 +43,7 @@ class ScriptedReviewModel:
         for message in messages:
             if isinstance(message, SystemMessage):
                 self.saw_system = True
+                self.system_content = message.content
             if isinstance(message, ToolMessage):
                 self.saw_tool_reply = True
         turn = len([m for m in messages if m.type == "ai"])
@@ -228,3 +231,42 @@ def test_run_free_review_carries_the_diff_into_the_request(env):
 
     assert "review this diff" in seen["request"]
     assert "+ leaked = True" in seen["request"]
+
+
+def test_build_initial_messages_uses_the_injected_policy():
+    items = [ReviewItem(qname="app::login")]
+
+    messages = build_initial_messages("review auth", {"changed_functions": []}, items,
+                                      policy="CUSTOM POLICY TEXT")
+
+    assert messages[0].content == "CUSTOM POLICY TEXT"
+
+
+def test_build_initial_messages_defaults_to_the_builtin_policy():
+    items = [ReviewItem(qname="app::login")]
+
+    messages = build_initial_messages("review auth", {"changed_functions": []}, items)
+
+    assert messages[0].content == _POLICY
+
+
+def test_run_review_threads_the_policy_into_the_request(env):
+    config, conn = env
+    model = ScriptedReviewModel()
+    summary = {"changed_functions": [{"qname": "app::login", "file": "app.py",
+                                      "start_line": 1, "end_line": 3}]}
+
+    run_review(config, conn, prompt="p", summary=summary, model=model,
+               policy="CUSTOM POLICY TEXT")
+
+    assert model.system_content == "CUSTOM POLICY TEXT"
+
+
+def test_run_free_review_threads_the_policy_into_the_request(env):
+    config, conn = env
+    model = ScriptedReviewModel()
+
+    run_free_review(config, prompt="p", diff="DIFF-BODY", model=model,
+                    policy="CUSTOM POLICY TEXT")
+
+    assert model.system_content == "CUSTOM POLICY TEXT"

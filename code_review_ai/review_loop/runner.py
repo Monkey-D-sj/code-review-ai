@@ -152,7 +152,8 @@ def worksheet_from_summary(summary: dict) -> list[ReviewItem]:
 
 
 def build_initial_messages(prompt: str, summary: dict,
-                           items: list[ReviewItem]) -> list[BaseMessage]:
+                           items: list[ReviewItem],
+                           policy: str | None = None) -> list[BaseMessage]:
     """The review request: policy as system, prompt + summary + worksheet as user.
 
     The worksheet renders as the bare qname roster. Its file/start/end were
@@ -165,6 +166,10 @@ def build_initial_messages(prompt: str, summary: dict,
     changed function carries its own hunks, so a whole-tree diff here said the
     same thing again, at whole-repo scale. The no-index arm renders its diff
     itself (see :func:`run_free_review`) because it has no summary to carry it.
+
+    ``policy`` replaces the built-in ``_POLICY`` as the system message when
+    given; ``None`` keeps the built-in. SkillOpt injects the policy under
+    optimization here.
     """
     roster = [item.qname for item in items]
     user = f"""{prompt}
@@ -181,7 +186,7 @@ range and diff are in the summary above)
 - dismissed：附具体 reason（为何判断为自包含/无具体回归）。
 不要留下任何未处理的 candidate 行；某行没有具体回归时用 dismissed，不要为了「找问题」
 硬造 finding。全部行决完评审会自动结束，不要输出自由格式报告或对 worksheet 的改动。"""
-    return [SystemMessage(content=_POLICY), HumanMessage(content=user)]
+    return [SystemMessage(content=policy or _POLICY), HumanMessage(content=user)]
 
 
 def _repo_tools(config: Config, conn,
@@ -214,6 +219,7 @@ def run_review(
     max_turns: int | None = None,
     max_total_tokens: int | None = None,
     max_empty_turns: int | None = None,
+    policy: str | None = None,
 ) -> LoopResult:
     """Run one structured code review from a change summary.
 
@@ -225,6 +231,7 @@ def run_review(
     ``tool_names`` narrows the repo-facing tools (``None`` = all of them) so an
     arm can run without graph retrieval. The change itself reaches the model
     through ``summary`` (per-function hunks), not as a separate diff.
+    ``policy`` overrides the built-in system policy; ``None`` keeps it.
     Returns the resolved worksheet (``items``, ``findings``,
     ``affected_entries``, ``review_complete``), plus ``usage`` and the yuan
     ``cost`` computed from it at the DeepSeek per-million rates (see
@@ -238,7 +245,7 @@ def run_review(
     if max_empty_turns is None:
         max_empty_turns = MAX_EMPTY_TURNS
     items = worksheet_from_summary(summary)
-    messages = build_initial_messages(prompt, summary, items)
+    messages = build_initial_messages(prompt, summary, items, policy=policy)
     tools = [*_repo_tools(config, conn, tool_names), update_review_tool()]
     result = run_loop(model, tools, candidates=items, initial_messages=messages,
                       hooks=hooks, max_turns=max_turns,
@@ -264,6 +271,7 @@ def run_free_review(
     api_key_env: str = _API_KEY_ENV,
     max_turns: int | None = None,
     max_total_tokens: int | None = None,
+    policy: str | None = None,
 ) -> LoopResult:
     """Run one free-form review of a diff, with no graph retrieval.
 
@@ -272,6 +280,7 @@ def run_free_review(
     ``finish_review``. There is no worksheet and no ``get_impact``, so the run
     needs no index -- ``conn`` is accepted for symmetry with :func:`run_review`
     and may be ``None``, since the tools kept here never touch the graph.
+    ``policy`` overrides the built-in system policy; ``None`` keeps it.
     Returns the same ``LoopResult`` shape, so both arms share one output
     contract (``items`` stays empty: nothing was resolved row by row).
     """
@@ -279,7 +288,7 @@ def run_free_review(
         model = create_model(config, model_name=model_name, base_url=base_url,
                              api_key_env=api_key_env)
     messages = [
-        SystemMessage(content=_FREE_POLICY),
+        SystemMessage(content=policy or _FREE_POLICY),
         HumanMessage(content=f"{prompt}\n\nDIFF\n{diff or '(no working-tree diff)'}"),
     ]
     tools = [*_repo_tools(config, conn, ["read_file", "search_code"]),
