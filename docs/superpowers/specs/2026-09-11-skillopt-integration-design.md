@@ -51,15 +51,21 @@ policy 的迭代，而不是靠人拍脑袋改措辞。
 **接口**
 
 ```python
-# review_loop/loop.py
-def run_loop(..., policy: str | None = None) -> LoopResult
-def run_free_loop(..., policy: str | None = None) -> LoopResult
+# review_loop/runner.py
+def build_initial_messages(prompt: str, summary: dict, items: list[ReviewItem],
+                           policy: str | None = None) -> list[BaseMessage]
+def run_review(config, conn, *, ..., policy: str | None = None) -> LoopResult
+def run_free_review(config, conn=None, *, ..., policy: str | None = None) -> LoopResult
 ```
 
 `policy` 为 `None` 时回落各 arm 的内置常量（`_POLICY` / `_FREE_POLICY`），
 非 `None` 时以其内容作为 system message。
 
-**链路**：`cli.py` → `runner.py` → `loop.py`。具体：
+**参数只加在 `runner.py`，不加在 `loop.py`。** review loop 不构造消息——它接收
+调用方传入的 `initial_messages`（`loop.py:453`），policy 在到达 loop 之前就已经
+成了 system message，传给 loop 是空操作。
+
+**链路**：`cli.py` → `runner.py`（构造 messages）→ `loop.py`。具体：
 
 - `build_initial_messages()`（`runner.py:154`）增加 `policy` 参数，`:184` 处
   `SystemMessage(content=_POLICY)` 改为 `SystemMessage(content=policy or _POLICY)`
