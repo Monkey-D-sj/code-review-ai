@@ -26,6 +26,7 @@ from code_review_ai.review_loop import (
     run_free_loop,
     run_loop,
 )
+from code_review_ai.review_loop.loop import TRACE_RESPONSE_EXCERPT_CHARS
 from code_review_ai.review_loop.schemas import (
     FINISH_REVIEW_TOOL,
     ReviewItem,
@@ -750,3 +751,30 @@ def test_assistant_turns_record_text_and_reasoning_per_turn():
     assert result.assistant_turns[0].content == "clean code, no regression"
     assert result.assistant_turns[0].reasoning == "thinking through callers"
     assert result.assistant_turns[0].tool_calls == []
+
+
+# ---------------------------------------------------------------------------
+# tool trace body retention (response_excerpt)
+# ---------------------------------------------------------------------------
+
+def test_tool_trace_excerpt_covers_a_short_tool_body_entirely():
+    model = FakeModel([("", [_call("echo", {"text": "hi"}, "e-1")]),
+                       ("", [_confirm_update("app::run")])])
+
+    result = _run(model, _candidates("app::run"))
+
+    record = result.tool_trace[0]
+    assert len(record["response_excerpt"]) == record["response_chars"]
+
+
+def test_tool_trace_excerpt_is_capped_and_chars_stays_the_full_length():
+    """The optimizer needs the body, but a 50-turn run over whole source files
+    would balloon the payload unbounded."""
+    model = FakeModel([("", [_call("echo", {"text": "x" * 5000}, "e-1")]),
+                       ("", [_confirm_update("app::run")])])
+
+    result = _run(model, _candidates("app::run"))
+
+    record = result.tool_trace[0]
+    assert len(record["response_excerpt"]) == TRACE_RESPONSE_EXCERPT_CHARS
+    assert record["response_chars"] > TRACE_RESPONSE_EXCERPT_CHARS

@@ -54,6 +54,10 @@ MAX_TURNS = 50
 # How many consecutive empty (no tool_calls) turns with unresolved rows are
 # tolerated before the run fails; each one before the cap is nudged instead.
 MAX_EMPTY_TURNS = 2
+# How much of a tool's returned content the trace keeps. The optimizer needs to
+# see what the agent actually read; unbounded, a 50-turn run over whole source
+# files would balloon every payload that carries the trace.
+TRACE_RESPONSE_EXCERPT_CHARS = 2000
 
 
 @dataclass
@@ -70,6 +74,7 @@ class _LoopState:
     max_empty_turns: int = MAX_EMPTY_TURNS
     empty_turns: int = 0  # consecutive empty turns with rows still unresolved
     turn: int = 0
+    trace_response_excerpt_chars: int = TRACE_RESPONSE_EXCERPT_CHARS
 
     def emit(self, point: str, **context: object) -> None:
         self.hooks.emit(point, **context)
@@ -126,13 +131,15 @@ def _execute_tool(spec: ToolSpec, kwargs: dict) -> str:
 
 
 def _trace_record(call: ToolCall, tool_call_id: str, status: ToolCallStatus, *,
-                  response_chars: int = 0) -> ToolTrace:
+                  response_chars: int = 0,
+                  response_excerpt: str = "") -> ToolTrace:
     return {
         "tool_call_id": tool_call_id,
         "tool": call["name"],
         "input": call["args"],
         "status": status,
         "response_chars": response_chars,
+        "response_excerpt": response_excerpt,
     }
 
 
@@ -321,7 +328,8 @@ def _reply_call(state: _LoopState, call: ToolCall, name: str,
     """Record and reply to one resolved call: trace entry + one ToolMessage."""
     tool_call_id = call["id"]  # ToolCall.id is a required key
     state.result.tool_trace.append(
-        _trace_record(call, tool_call_id, status, response_chars=len(content)))
+        _trace_record(call, tool_call_id, status, response_chars=len(content),
+                      response_excerpt=content[:state.trace_response_excerpt_chars]))
     state.messages.append(ToolMessage(
         content=content,
         tool_call_id=tool_call_id,
@@ -454,6 +462,7 @@ def run_free_loop(
     hooks: Hooks | None = None,
     max_turns: int = MAX_TURNS,
     max_total_tokens: int | None = None,
+    trace_response_excerpt_chars: int = TRACE_RESPONSE_EXCERPT_CHARS,
 ) -> LoopResult:
     """Free-form review: no worksheet, the model owns the report.
 
@@ -473,6 +482,7 @@ def run_free_loop(
         hooks=hooks if hooks is not None else Hooks(),
         max_turns=max_turns,
         max_empty_turns=0,  # no worksheet rows, so no empty-turn nudging
+        trace_response_excerpt_chars=trace_response_excerpt_chars,
     )
     while True:
         if state.turn >= state.max_turns:
@@ -521,6 +531,7 @@ def run_loop(
     max_turns: int = MAX_TURNS,
     max_total_tokens: int | None = None,
     max_empty_turns: int = MAX_EMPTY_TURNS,
+    trace_response_excerpt_chars: int = TRACE_RESPONSE_EXCERPT_CHARS,
 ) -> LoopResult:
     """Run the review loop until every candidate row is resolved.
 
@@ -544,6 +555,7 @@ def run_loop(
         hooks=hooks if hooks is not None else Hooks(),
         max_turns=max_turns,
         max_empty_turns=max_empty_turns,
+        trace_response_excerpt_chars=trace_response_excerpt_chars,
     )
     while True:
         if state.turn >= state.max_turns:

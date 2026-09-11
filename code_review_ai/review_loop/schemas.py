@@ -31,6 +31,11 @@ class ToolTrace(TypedDict):
     Records are appended in execution order, so list position is the ordinal --
     no explicit sequence number is stored. ``tool_call_id`` is the tool call's
     ``id``, which ``ToolCall`` guarantees is present.
+
+    ``response_chars`` is the returned content's full length; ``response_excerpt``
+    the content itself, truncated to the loop's configured cap. Both are kept so
+    a consumer can tell "the tool returned 40k chars and here are the first 2000"
+    from "the tool returned 1200 chars total".
     """
 
     tool_call_id: str
@@ -38,6 +43,7 @@ class ToolTrace(TypedDict):
     input: object
     status: ToolCallStatus
     response_chars: int
+    response_excerpt: str
 
 
 Usage = dict[str, int]
