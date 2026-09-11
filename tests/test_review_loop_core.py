@@ -777,4 +777,19 @@ def test_tool_trace_excerpt_is_capped_and_chars_stays_the_full_length():
 
     record = result.tool_trace[0]
     assert len(record["response_excerpt"]) == TRACE_RESPONSE_EXCERPT_CHARS
-    assert record["response_chars"] > TRACE_RESPONSE_EXCERPT_CHARS
+    # The exact length, not just "more than the cap": the loose form would admit
+    # a silently-truncated response_chars (2001) as readily as the real 5005.
+    assert record["response_chars"] == len(_tool_contents(model)[0])
+
+
+def test_tool_trace_excerpt_honors_a_custom_cap():
+    """The cap is a parameter, not a constant: a caller may want a budget other
+    than the default, and nothing else exercises that."""
+    model = FakeModel([("", [_call("echo", {"text": "x" * 5000}, "e-1")]),
+                       ("", [_confirm_update("app::run")])])
+
+    result = _run(model, _candidates("app::run"), trace_response_excerpt_chars=50)
+
+    record = result.tool_trace[0]
+    assert len(record["response_excerpt"]) == 50
+    assert record["response_chars"] == len(_tool_contents(model)[0])

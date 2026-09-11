@@ -113,6 +113,18 @@ class AssistantTurn(BaseModel):
     reply requested. Recorded for every model turn so a failed/empty run can be
     reconstructed after the fact (the empty-turn replies are otherwise dropped
     from the sent history).
+
+    **Alignment with ``LoopResult.tool_trace``.** ``tool_calls`` carries tool
+    *names*, in request order, with no tool-call id and no index into the
+    trace: the two lists line up only by **position within a turn** -- the k-th
+    name of turn N is the k-th trace record produced while executing turn N.
+    That is exact under ``run_loop``, which executes and traces every call of a
+    turn before it checks completion. The free arm does not hold it:
+    ``run_free_loop`` short-circuits on ``finish_review``, so a turn requesting
+    ``[finish_review, read_file]`` records two names here but traces only the
+    one call it executed before the run stopped -- the final turn can end up
+    with more names than trace records. A consumer that must pair across arms
+    should key on the trace's ``tool_call_id`` instead of on position.
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -177,6 +177,16 @@ conversation.append({"role": "system",
     "content": f"命中={hard} 漏报站点={fix_file} 机制词={mechanism_terms}"})
 ```
 
+**`env_feedback` 的配对是位置性的，不是 id 绑定的。** `assistant_turns[i]`
+的 `tool_calls` 只有工具**名字**、没有 `tool_call_id`，`tool_trace` 的记录则只有
+`tool_call_id`、没有轮次号；两者只能按「第 N 轮的第 k 个调用 ↔ 执行该轮时产生的第 k 条
+trace」对齐。本节指定的 `--arm graph` 下这个配对是**精确**的：`run_loop`
+每轮先把该轮所有调用执行并写入 trace，之后才判断是否完成。`--arm nograph` 则不成立——
+`run_free_loop` 在 `finish_review` 处短路（`loop.py`），一轮请求
+`[finish_review, read_file]` 会在 `assistant_turns` 里记两个名字、却只产生一条 trace，
+最后的轮次因此错位。若消费者需要支持 free arm，应按 `tool_trace` 的 `tool_call_id`
+建立映射，而不是按位置。
+
 经 SkillOpt 的 `fmt_trajectory()`（`skillopt/gradient/reflect.py:65-106`）渲染为
 `[step N think]` / `[step N action]` / `[step N obs]`，末条渲染为 `[verification]`。
 `reference_text` 放 `gold.root_causes` 的 fix site 与机制词，渲染为

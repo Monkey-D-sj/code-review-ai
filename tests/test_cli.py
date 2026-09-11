@@ -1,5 +1,6 @@
 import argparse
 import json
+from pathlib import Path
 
 from conftest import FIXTURES as FIX
 
@@ -212,6 +213,31 @@ def test_cli_review_passes_the_policy_file_content_to_the_arm(tmp_path, monkeypa
     assert calls["policy"] == "CUSTOM POLICY"
 
 
+def test_cli_review_passes_the_policy_file_content_to_the_graph_arm(
+        tmp_path, monkeypatch):
+    """The graph arm is the one the rollout uses, and its built-in policy is a
+    different constant (``_POLICY`` vs ``_FREE_POLICY``), so the nograph test
+    above does not cover it."""
+    calls = {}
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "sync", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli, "build_change_summary",
+                        lambda *args, **kwargs: {"changed_functions": []})
+    policy = tmp_path / "policy.md"
+    policy.write_text("CUSTOM POLICY", encoding="utf-8")
+
+    def fake_review(config, conn, **kwargs):
+        calls.update(kwargs)
+        return FakeResult()
+
+    monkeypatch.setattr("code_review_ai.review_loop.runner.run_review", fake_review)
+    code = main(["review", "--repo", str(tmp_path), "--db", str(tmp_path / "i.db"),
+                 "--model", "m", "--policy-file", str(policy)])
+
+    assert code == 0
+    assert calls["policy"] == "CUSTOM POLICY"
+
+
 def test_missing_policy_file_exits_2(tmp_path, monkeypatch, capsys):
     """A missing policy file is bad configuration, never a silent fallback.
 
@@ -249,7 +275,13 @@ def test_empty_policy_file_exits_2(tmp_path, monkeypatch, capsys):
 
 def test_empty_policy_argument_exits_2(tmp_path, monkeypatch, capsys):
     """`--policy-file ""` -- an unset shell variable -- must not silently
-    select the built-in policy either."""
+    select the built-in policy either.
+
+    `Path("")` normalizes to `Path(".")`, so without an explicit guard the
+    argument falls through to the `is_file()` check and reports
+    `--policy-file  does not exist` (double space) -- which points at the wrong
+    problem for the likeliest real-world mistake.
+    """
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.chdir(tmp_path)
 
@@ -257,3 +289,56 @@ def test_empty_policy_argument_exits_2(tmp_path, monkeypatch, capsys):
                  "--model", "m", "--policy-file", ""])
 
     assert code == 2
+    error = capsys.readouterr().err
+    assert "does not exist" not in error
+    assert "empty" in error
+
+
+def test_unreadable_policy_file_exits_2(tmp_path, monkeypatch, capsys):
+    """An unreadable file is bad configuration -- exit 2, like every other
+    `--policy-file` failure -- never a failed run.
+
+    `PermissionError`/`OSError` is not a `ValueError`, so an unguarded
+    `read_text` escapes `_cmd_review`'s handler and is caught by
+    `user_facing`'s `_USER_ERRORS` instead, exiting 1: the follow-on
+    workstream's rollout reads that as the agent crashing rather than as a bad
+    policy file.
+
+    The denial is raised by a `Path.read_text` that only refuses this one path,
+    rather than set with `chmod`: Windows ignores `chmod 000`, so a real
+    unreadable file would skip there and leave the `OSError` arm of the guard
+    uncovered.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+    blocked = tmp_path / "blocked.md"
+    blocked.write_text("POLICY", encoding="utf-8")
+    real_read_text = Path.read_text
+
+    def deny_blocked(self, *args, **kwargs):
+        if self == blocked:
+            raise PermissionError(13, "Permission denied")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny_blocked)
+
+    code = main(["review", "--repo", str(tmp_path), "--db", str(tmp_path / "r.db"),
+                 "--model", "m", "--policy-file", str(blocked)])
+
+    assert code == 2
+    assert "blocked.md" in capsys.readouterr().err
+
+
+def test_non_utf8_policy_file_exits_2_and_names_the_file(tmp_path, monkeypatch, capsys):
+    """A non-UTF-8 policy file is bad configuration, and the message must name
+    the file: `UnicodeDecodeError`'s own text is a codec dump that does not."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+    garbage = tmp_path / "nonutf8.md"
+    garbage.write_bytes(b"\xff\xfe")
+
+    code = main(["review", "--repo", str(tmp_path), "--db", str(tmp_path / "r.db"),
+                 "--model", "m", "--policy-file", str(garbage)])
+
+    assert code == 2
+    assert "nonutf8.md" in capsys.readouterr().err

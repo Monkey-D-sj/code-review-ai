@@ -240,25 +240,36 @@ def _review_settings(args, cfg) -> _ModelSettings:
 def _resolve_policy(args) -> str | None:
     """The policy markdown for this run, or ``None`` to use the built-in one.
 
-    A missing, empty, or empty-argument path raises ``ValueError`` so
-    ``_cmd_review`` maps it to ``_BAD_CONFIG`` (exit 2). Falling back silently
-    would let a caller believe it injected a policy while the run used the
-    built-in one -- the failure would then look like "the policy made no
-    difference", which is the hardest kind to diagnose.
+    Every way this can fail raises ``ValueError`` so ``_cmd_review`` maps it to
+    ``_BAD_CONFIG`` (exit 2): a missing file, an unreadable one, one that is not
+    UTF-8, an empty one, and an empty *argument*. Falling back silently would
+    let a caller believe it injected a policy while the run used the built-in
+    one -- the failure would then look like "the policy made no difference",
+    which is the hardest kind to diagnose. Letting a read error escape as an
+    ``OSError`` instead would be worse: ``user_facing`` catches those too, but
+    at exit 1, so a bad policy file would be indistinguishable from a crashed
+    run.
 
     Empty matters as much as missing. The runner's fallback is
     ``policy or _POLICY``, so ``""`` is indistinguishable from ``None``: an
-    empty file would run the baseline while reporting an optimized run. The
-    same holds for an empty *argument* -- ``--policy-file "$POLICY_PATH"`` with
-    the variable unset -- which is why the guard tests ``is None`` rather than
-    falsiness, so ``""`` falls through to the path checks below.
+    empty file would run the baseline while reporting an optimized run.
     """
     if args.policy_file is None:
         return None
+    if not args.policy_file.strip():
+        # Path("") is Path("."), so without this the argument would fall
+        # through to is_file() and report "does not exist" -- blaming the wrong
+        # problem for `--policy-file "$POLICY_PATH"` with the variable unset.
+        raise ValueError(
+            "--policy-file was given an empty path (an unset shell variable?); "
+            "pass a path or omit the flag")
     path = Path(args.policy_file)
     if not path.is_file():
         raise ValueError(f"--policy-file {args.policy_file} does not exist")
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"--policy-file {args.policy_file} is unreadable: {exc}") from exc
     if not text.strip():
         raise ValueError(f"--policy-file {args.policy_file} is empty")
     return text

@@ -167,9 +167,12 @@ def build_initial_messages(prompt: str, summary: dict,
     same thing again, at whole-repo scale. The no-index arm renders its diff
     itself (see :func:`run_free_review`) because it has no summary to carry it.
 
-    ``policy`` replaces the built-in ``_POLICY`` as the system message when
-    given; ``None`` keeps the built-in. SkillOpt injects the policy under
-    optimization here.
+    A *falsy* ``policy`` -- ``None`` or ``""`` -- keeps the built-in ``_POLICY``
+    as the system message (the expression is ``policy or _POLICY``); any other
+    value replaces it. The CLI never reaches here with ``""``: it rejects an
+    empty file and an empty ``--policy-file`` argument before dispatch, so the
+    two cases are indistinguishable only to a direct library caller. SkillOpt
+    injects the policy under optimization here.
     """
     roster = [item.qname for item in items]
     user = f"""{prompt}
@@ -231,7 +234,8 @@ def run_review(
     ``tool_names`` narrows the repo-facing tools (``None`` = all of them) so an
     arm can run without graph retrieval. The change itself reaches the model
     through ``summary`` (per-function hunks), not as a separate diff.
-    ``policy`` overrides the built-in system policy; ``None`` keeps it.
+    A falsy ``policy`` (``None`` or ``""``) keeps the built-in system policy;
+    any other value replaces it (see :func:`build_initial_messages`).
     Returns the resolved worksheet (``items``, ``findings``,
     ``affected_entries``, ``review_complete``), plus ``usage`` and the yuan
     ``cost`` computed from it at the DeepSeek per-million rates (see
@@ -280,7 +284,8 @@ def run_free_review(
     ``finish_review``. There is no worksheet and no ``get_impact``, so the run
     needs no index -- ``conn`` is accepted for symmetry with :func:`run_review`
     and may be ``None``, since the tools kept here never touch the graph.
-    ``policy`` overrides the built-in system policy; ``None`` keeps it.
+    A falsy ``policy`` (``None`` or ``""``) keeps the built-in system policy
+    (``_FREE_POLICY``, not ``_POLICY``); any other value replaces it.
     Returns the same ``LoopResult`` shape, so both arms share one output
     contract (``items`` stays empty: nothing was resolved row by row).
     """
