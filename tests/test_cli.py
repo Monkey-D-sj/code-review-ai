@@ -244,3 +244,15 @@ def test_empty_policy_file_exits_2(tmp_path, monkeypatch, capsys):
 
     assert code == 2
     assert "empty.md" in capsys.readouterr().err
+
+
+def test_empty_policy_argument_exits_2(tmp_path, monkeypatch, capsys):
+    """`--policy-file ""` -- an unset shell variable -- must not silently
+    select the built-in policy either."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+
+    code = main(["review", "--repo", str(tmp_path), "--db", str(tmp_path / "r.db"),
+                 "--model", "m", "--policy-file", ""])
+
+    assert code == 2

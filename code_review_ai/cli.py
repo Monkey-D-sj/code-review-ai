@@ -240,15 +240,20 @@ def _review_settings(args, cfg) -> _ModelSettings:
 def _resolve_policy(args) -> str | None:
     """The policy markdown for this run, or ``None`` to use the built-in one.
 
-    A missing or empty file raises ``ValueError`` so ``_cmd_review`` maps it to
-    ``_BAD_CONFIG`` (exit 2). Falling back silently would let a caller believe
-    it injected a policy while the run used the built-in one -- the failure
-    would then look like "the policy made no difference", which is the hardest
-    kind to diagnose. Empty matters as much as missing: the runner's fallback
-    is ``policy or _POLICY``, so ``""`` is indistinguishable from ``None`` and
-    an empty file would run the baseline while reporting an optimized run.
+    A missing, empty, or empty-argument path raises ``ValueError`` so
+    ``_cmd_review`` maps it to ``_BAD_CONFIG`` (exit 2). Falling back silently
+    would let a caller believe it injected a policy while the run used the
+    built-in one -- the failure would then look like "the policy made no
+    difference", which is the hardest kind to diagnose.
+
+    Empty matters as much as missing. The runner's fallback is
+    ``policy or _POLICY``, so ``""`` is indistinguishable from ``None``: an
+    empty file would run the baseline while reporting an optimized run. The
+    same holds for an empty *argument* -- ``--policy-file "$POLICY_PATH"`` with
+    the variable unset -- which is why the guard tests ``is None`` rather than
+    falsiness, so ``""`` falls through to the path checks below.
     """
-    if not args.policy_file:
+    if args.policy_file is None:
         return None
     path = Path(args.policy_file)
     if not path.is_file():
