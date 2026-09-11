@@ -230,12 +230,29 @@ def test_empty_policy_file_exits_2(tmp_path, monkeypatch, capsys):
 
     assert code == 2
     assert "empty.md" in capsys.readouterr().err
+
+
+def test_empty_policy_argument_exits_2(tmp_path, monkeypatch, capsys):
+    """`--policy-file ""` -- an unset shell variable -- must not silently
+    select the built-in policy either."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+
+    code = main(["review", "--repo", str(tmp_path), "--db", str(tmp_path / "r.db"),
+                 "--model", "m", "--policy-file", ""])
+
+    assert code == 2
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `uv run pytest tests/test_cli.py -v -k "policy"`
-Expected: 4 个 FAIL —— 前两个 `AttributeError: 'Namespace' object has no attribute 'policy_file'`；后两个 argparse 报 `unrecognized arguments: --policy-file`。
+Run: `uv run python -m pytest tests/test_cli.py -v -k "policy"`
+Expected: 6 个测试全部失败，失败原因分三类 —— `-k "policy"` 会同时选中两个 parse 测试和四个 `main()` 测试：
+- `test_review_policy_file_defaults_to_none`：`args.policy_file` 不存在 → `AttributeError`
+- `test_review_accepts_a_policy_file_flag`：argparse 不认识 `--policy-file` → `SystemExit`
+- 其余四个：要么 argparse 提前退出，要么断言 `calls["policy"]` / 期望 exit 2 而落空
+
+（本机 `uv run pytest` 有 uv trampoline 报错，用等价的 `uv run python -m pytest`。）
 
 - [ ] **Step 3: 实现**
 
@@ -253,15 +270,20 @@ Expected: 4 个 FAIL —— 前两个 `AttributeError: 'Namespace' object has no
 def _resolve_policy(args) -> str | None:
     """The policy markdown for this run, or ``None`` to use the built-in one.
 
-    A missing or empty file raises ``ValueError`` so ``_cmd_review`` maps it to
-    ``_BAD_CONFIG`` (exit 2). Falling back silently would let a caller believe
-    it injected a policy while the run used the built-in one -- the failure
-    would then look like "the policy made no difference", which is the hardest
-    kind to diagnose. Empty matters as much as missing: the runner's fallback
-    is ``policy or _POLICY``, so ``""`` is indistinguishable from ``None`` and
-    an empty file would run the baseline while reporting an optimized run.
+    A missing, empty, or empty-argument path raises ``ValueError`` so
+    ``_cmd_review`` maps it to ``_BAD_CONFIG`` (exit 2). Falling back silently
+    would let a caller believe it injected a policy while the run used the
+    built-in one -- the failure would then look like "the policy made no
+    difference", which is the hardest kind to diagnose.
+
+    Empty matters as much as missing. The runner's fallback is
+    ``policy or _POLICY``, so ``""`` is indistinguishable from ``None``: an
+    empty file would run the baseline while reporting an optimized run. The
+    same holds for an empty *argument* -- ``--policy-file "$POLICY_PATH"`` with
+    the variable unset -- which is why the guard tests ``is None`` rather than
+    falsiness, so ``""`` falls through to the path checks below.
     """
-    if not args.policy_file:
+    if args.policy_file is None:
         return None
     path = Path(args.policy_file)
     if not path.is_file():
