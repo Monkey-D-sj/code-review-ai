@@ -1,5 +1,7 @@
 import argparse
+import io
 import json
+import sys
 from pathlib import Path
 
 from conftest import FIXTURES as FIX
@@ -342,3 +344,26 @@ def test_non_utf8_policy_file_exits_2_and_names_the_file(tmp_path, monkeypatch, 
 
     assert code == 2
     assert "nonutf8.md" in capsys.readouterr().err
+
+
+def test_json_on_stdout_survives_a_non_utf8_console(monkeypatch):
+    """stdout is the CLI's machine interface, and callers decode it -- but it
+    is written with the *console's* code page, not a fixed one. On a Chinese
+    Windows install that is GBK, and the payload carries the model's output
+    verbatim, so a single non-breaking space ends the run:
+
+        error: 'gbk' codec can't encode character '\xa0'
+
+    That is a real crash, not a hypothetical: it cost one case its result in a
+    21-case benchmark batch, non-deterministically, depending on what the model
+    happened to write.
+    """
+    narrow = io.TextIOWrapper(io.BytesIO(), encoding="gbk")
+    monkeypatch.setattr(sys, "stdout", narrow)
+    payload = {"findings": [{"file": "a.py", "note": "width\u00a0here"}]}
+
+    cli._write_json(payload, None)
+    narrow.flush()
+    printed = narrow.buffer.getvalue().decode("gbk")
+
+    assert json.loads(printed) == payload

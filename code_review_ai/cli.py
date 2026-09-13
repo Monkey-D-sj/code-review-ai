@@ -139,13 +139,23 @@ def user_facing(command):
 
 
 def _write_json(payload: dict, output_path: str | None) -> None:
-    rendered = json.dumps(payload, indent=2, ensure_ascii=False)
+    """Write the review payload to ``output_path``, or to stdout when unset.
+
+    The two destinations differ in escaping on purpose -- see the stdout branch.
+    """
     if output_path:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(rendered + "\n", encoding="utf-8")
-    else:
-        print(rendered)
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8")
+        return
+    # stdout is encoded with the *console's* code page, not a fixed one, and
+    # this payload carries the model's output verbatim: on a Chinese Windows
+    # install (GBK) one non-breaking space inside a finding aborts the whole
+    # run with UnicodeEncodeError. ASCII-escaped JSON cannot fail on any code
+    # page, and it decodes to exactly the same value, so callers -- which
+    # already decode stdout themselves -- see no difference.
+    print(json.dumps(payload, indent=2, ensure_ascii=True))
 
 
 # ---------------------------------------------------------------- review ----
