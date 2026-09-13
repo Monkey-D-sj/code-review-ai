@@ -1,0 +1,189 @@
+{
+  "manifest_version": 1,
+  "family": "cross-layer-field-contract",
+  "repo": "full_agent_eval/case-backend",
+  "scoring": {
+    "hit": "finding.file 与 gold.file 一致，且 finding.line 落在 gold 的 [start, end] 内",
+    "recall": "|命中| / |gold|",
+    "precision": "|命中| / |finding 总数|",
+    "neutral": "diff 自身的落点；报或不报都不计分",
+    "empty_case": "gold 为空的 case，报任何 finding 都算误报"
+  },
+  "cases": [
+    {
+      "id": "user-role-names-partial-sync",
+      "family": "cross-layer-field-contract",
+      "difficulty": 2,
+      "motive": "用户列表要展示角色名称，避免前端再查一次；UserOutSchema 新增派生的 role_names 字段",
+      "diff": "diff --git a/app/api/v1/module_system/user/schema.py b/app/api/v1/module_system/user/schema.py\nindex f8c4c66..dd1337f 100644\n--- a/app/api/v1/module_system/user/schema.py\n+++ b/app/api/v1/module_system/user/schema.py\n@@ -256,6 +256,7 @@ class UserOutSchema(CoreUserSchema, BaseSchema, UserBySchema):\n     role_ids: list[int] | None = Field(default=[], description=\"角色ID列表\")\n     position_ids: list[int] | None = Field(default=[], description=\"岗位ID列表\")\n     dept_name: str | None = Field(default=None, description=\"部门名称\")\n+    role_names: list[str] | None = Field(default=[], description=\"角色名称列表\")\n     is_superuser: bool = Field(default=False, description=\"是否超管\")\n     last_login: DateTimeStr | None = Field(default=None, description=\"最后登录时间\")\n \ndiff --git a/app/api/v1/module_system/user/service.py b/app/api/v1/module_system/user/service.py\nindex 5151ba8..cd5d5d0 100644\n--- a/app/api/v1/module_system/user/service.py\n+++ b/app/api/v1/module_system/user/service.py\n@@ -49,6 +49,7 @@ class UserService:\n         if user.dept:\n             result.dept_name = user.dept.name\n         result.role_ids = [r.id for r in user.roles]\n+        result.role_names = [r.name for r in user.roles]\n         result.position_ids = [p.id for p in user.positions]\n         return result\n \n",
+      "gold": [
+        {
+          "file": "app/api/v1/module_system/user/service.py",
+          "start": 63,
+          "end": 67,
+          "why": "get_list 的同步循环没补 role_names"
+        },
+        {
+          "file": "app/api/v1/module_system/user/service.py",
+          "start": 86,
+          "end": 92,
+          "why": "page 的同步循环没补 role_names"
+        },
+        {
+          "file": "app/api/v1/module_system/user/service.py",
+          "start": 460,
+          "end": 476,
+          "why": "export_list 的 mapping_dict 没加角色列"
+        }
+      ],
+      "neutral": [
+        {
+          "file": "app/api/v1/module_system/user/schema.py",
+          "start": 259,
+          "end": 259
+        },
+        {
+          "file": "app/api/v1/module_system/user/service.py",
+          "start": 52,
+          "end": 52
+        }
+      ],
+      "mechanism": "role_names 是派生字段，ORM 不直接提供，必须由 Service 手写同步循环填充。改动只补了 detail 一处，get_list/page 两处平行循环和导出清单都没跟。结果：详情接口有 role_names，列表/分页恒为 []，导出表没有角色列 —— 全部静默，接口一律 200。"
+    },
+    {
+      "id": "user-description-column-renamed",
+      "family": "cross-layer-field-contract",
+      "difficulty": 2,
+      "motive": "数据库列 sys_user.description 改名 remark，model 同步跟上",
+      "diff": "diff --git a/app/api/v1/module_system/user/model.py b/app/api/v1/module_system/user/model.py\nindex e98b4ad..5add131 100644\n--- a/app/api/v1/module_system/user/model.py\n+++ b/app/api/v1/module_system/user/model.py\n@@ -79,7 +79,7 @@ class UserModel(ModelMixin, UserMixin):\n     wx_login: Mapped[str | None] = mapped_column(String(32), nullable=True, comment=\"微信登录\")\n     qq_login: Mapped[str | None] = mapped_column(String(32), nullable=True, comment=\"QQ登录\")\n     status: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment=\"状态(0:启动 1:停用)\")\n-    description: Mapped[str | None] = mapped_column(Text, default=None, nullable=True, comment=\"备注\")\n+    remark: Mapped[str | None] = mapped_column(Text, default=None, nullable=True, comment=\"备注\")\n \n     dept_id: Mapped[int | None] = mapped_column(Integer, ForeignKey(\"sys_dept.id\", ondelete=\"SET NULL\", onupdate=\"CASCADE\"), nullable=True, index=True, comment=\"部门ID\")\n     dept: Mapped[\"DeptModel | None\"] = relationship(back_populates=\"users\", foreign_keys=[dept_id])\n",
+      "gold": [
+        {
+          "file": "app/api/v1/module_system/user/schema.py",
+          "start": 139,
+          "end": 139,
+          "why": "UserCreateSchema 仍叫 description，写入时该键不再对应任何列"
+        },
+        {
+          "file": "app/api/v1/module_system/user/schema.py",
+          "start": 215,
+          "end": 215,
+          "why": "UserUpdateSchema 同上"
+        },
+        {
+          "file": "app/api/v1/module_system/user/schema.py",
+          "start": 254,
+          "end": 254,
+          "why": "UserOutSchema 仍叫 description，from_attributes 取不到，恒为 None"
+        },
+        {
+          "file": "app/api/v1/module_system/user/service.py",
+          "start": 471,
+          "end": 471,
+          "why": "export_list 的 mapping_dict 仍映射 description，导出该列全空"
+        }
+      ],
+      "neutral": [
+        {
+          "file": "app/api/v1/module_system/user/model.py",
+          "start": 82,
+          "end": 82
+        }
+      ],
+      "mechanism": "列改名后 ORM 属性变成 remark，但 schema 三处、导出清单一处仍是 description。输出侧从 ORM 取不到该属性，静默变 None；写入侧 data.model_dump() 仍带 description 键，传给 UserModel(**data) 直接 TypeError —— 创建/更新报错，列表/详情/导出静默丢字段。"
+    },
+    {
+      "id": "user-employee-no-missing-export-import",
+      "family": "cross-layer-field-contract",
+      "difficulty": 3,
+      "motive": "用户表新增工号字段，支持列表展示与按工号筛选",
+      "diff": "diff --git a/app/api/v1/module_system/user/model.py b/app/api/v1/module_system/user/model.py\nindex e98b4ad..49474c8 100644\n--- a/app/api/v1/module_system/user/model.py\n+++ b/app/api/v1/module_system/user/model.py\n@@ -78,6 +78,7 @@ class UserModel(ModelMixin, UserMixin):\n     github_login: Mapped[str | None] = mapped_column(String(32), nullable=True, comment=\"Github登录\")\n     wx_login: Mapped[str | None] = mapped_column(String(32), nullable=True, comment=\"微信登录\")\n     qq_login: Mapped[str | None] = mapped_column(String(32), nullable=True, comment=\"QQ登录\")\n+    employee_no: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True, comment=\"工号\")\n     status: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment=\"状态(0:启动 1:停用)\")\n     description: Mapped[str | None] = mapped_column(Text, default=None, nullable=True, comment=\"备注\")\n \ndiff --git a/app/api/v1/module_system/user/schema.py b/app/api/v1/module_system/user/schema.py\nindex f8c4c66..05911bc 100644\n--- a/app/api/v1/module_system/user/schema.py\n+++ b/app/api/v1/module_system/user/schema.py\n@@ -256,6 +256,7 @@ class UserOutSchema(CoreUserSchema, BaseSchema, UserBySchema):\n     role_ids: list[int] | None = Field(default=[], description=\"角色ID列表\")\n     position_ids: list[int] | None = Field(default=[], description=\"岗位ID列表\")\n     dept_name: str | None = Field(default=None, description=\"部门名称\")\n+    employee_no: str | None = Field(default=None, max_length=32, description=\"工号\")\n     is_superuser: bool = Field(default=False, description=\"是否超管\")\n     last_login: DateTimeStr | None = Field(default=None, description=\"最后登录时间\")\n \n@@ -293,3 +294,4 @@ class UserQueryParam(BaseQueryParam, UserByQueryParam):\n     )\n     dept_id: int | None = Field(None, description=\"部门ID\", json_schema_extra={\"q\": \"eq\"})\n     status: int | None = Field(None, description=\"是否可用\", json_schema_extra={\"q\": \"eq\"})\n+    employee_no: str | None = Field(None, description=\"工号\", json_schema_extra={\"q\": \"like\"})\n",
+      "gold": [
+        {
+          "file": "app/api/v1/module_system/user/service.py",
+          "start": 306,
+          "end": 314,
+          "why": "batch_import 的 header_dict 没加中文表头→字段映射"
+        },
+        {
+          "file": "app/api/v1/module_system/user/service.py",
+          "start": 434,
+          "end": 442,
+          "why": "get_import_template 的 header_list 没加工号列"
+        },
+        {
+          "file": "app/api/v1/module_system/user/service.py",
+          "start": 459,
+          "end": 475,
+          "why": "export_list 的 mapping_dict 没加工号列"
+        }
+      ],
+      "neutral": [
+        {
+          "file": "app/api/v1/module_system/user/model.py",
+          "start": 81,
+          "end": 81
+        },
+        {
+          "file": "app/api/v1/module_system/user/schema.py",
+          "start": 259,
+          "end": 259
+        },
+        {
+          "file": "app/api/v1/module_system/user/schema.py",
+          "start": 297,
+          "end": 297
+        }
+      ],
+      "mechanism": "新增的 employee_no 在 model、出参 schema、查询 schema 三处都接上了（标量列由 from_attributes 自动带出，所以接口看起来正常）。但导出走的是独立的 mapping_dict、批量导入走的是独立的 header_dict 和 get_import_template.header_list —— 这三份字段清单各写一遍，都没跟。结果：页面能看能搜，导出表没有工号列，导入模板也没有工号，导入时该字段永远为空。"
+    },
+    {
+      "id": "user-employee-no-missing-column",
+      "family": "cross-layer-field-contract",
+      "difficulty": 2,
+      "motive": "用户表新增工号字段，支持列表展示与按工号筛选",
+      "diff": "diff --git a/app/api/v1/module_system/user/schema.py b/app/api/v1/module_system/user/schema.py\nindex f8c4c66..05911bc 100644\n--- a/app/api/v1/module_system/user/schema.py\n+++ b/app/api/v1/module_system/user/schema.py\n@@ -256,6 +256,7 @@ class UserOutSchema(CoreUserSchema, BaseSchema, UserBySchema):\n     role_ids: list[int] | None = Field(default=[], description=\"角色ID列表\")\n     position_ids: list[int] | None = Field(default=[], description=\"岗位ID列表\")\n     dept_name: str | None = Field(default=None, description=\"部门名称\")\n+    employee_no: str | None = Field(default=None, max_length=32, description=\"工号\")\n     is_superuser: bool = Field(default=False, description=\"是否超管\")\n     last_login: DateTimeStr | None = Field(default=None, description=\"最后登录时间\")\n \n@@ -293,3 +294,4 @@ class UserQueryParam(BaseQueryParam, UserByQueryParam):\n     )\n     dept_id: int | None = Field(None, description=\"部门ID\", json_schema_extra={\"q\": \"eq\"})\n     status: int | None = Field(None, description=\"是否可用\", json_schema_extra={\"q\": \"eq\"})\n+    employee_no: str | None = Field(None, description=\"工号\", json_schema_extra={\"q\": \"like\"})\n",
+      "gold": [
+        {
+          "file": "app/api/v1/module_system/user/model.py",
+          "start": 68,
+          "end": 82,
+          "why": "UserModel 的标量列声明区 —— 缺 employee_no 列"
+        }
+      ],
+      "neutral": [
+        {
+          "file": "app/api/v1/module_system/user/schema.py",
+          "start": 259,
+          "end": 259
+        },
+        {
+          "file": "app/api/v1/module_system/user/schema.py",
+          "start": 297,
+          "end": 297
+        }
+      ],
+      "mechanism": "schema 的入参（UserQueryParam）和出参（UserOutSchema）都加了 employee_no，model 没加列。潜伏型：不传该筛选时一切正常；一旦前端按工号筛选，_build_conditions 走到 getattr(UserModel, 'employee_no') 直接 AttributeError，被 CRUD 的 except 包成 CustomException 返回 —— 只有用到这个筛选的请求才 500。出参侧则永远为 None。"
+    },
+    {
+      "id": "user-role-names-fully-wired",
+      "family": "cross-layer-field-contract",
+      "difficulty": 1,
+      "motive": "用户列表要展示角色名称，避免前端再查一次；UserOutSchema 新增派生的 role_names 字段",
+      "diff": "diff --git a/app/api/v1/module_system/user/schema.py b/app/api/v1/module_system/user/schema.py\nindex f8c4c66..dd1337f 100644\n--- a/app/api/v1/module_system/user/schema.py\n+++ b/app/api/v1/module_system/user/schema.py\n@@ -256,6 +256,7 @@ class UserOutSchema(CoreUserSchema, BaseSchema, UserBySchema):\n     role_ids: list[int] | None = Field(default=[], description=\"角色ID列表\")\n     position_ids: list[int] | None = Field(default=[], description=\"岗位ID列表\")\n     dept_name: str | None = Field(default=None, description=\"部门名称\")\n+    role_names: list[str] | None = Field(default=[], description=\"角色名称列表\")\n     is_superuser: bool = Field(default=False, description=\"是否超管\")\n     last_login: DateTimeStr | None = Field(default=None, description=\"最后登录时间\")\n \ndiff --git a/app/api/v1/module_system/user/service.py b/app/api/v1/module_system/user/service.py\nindex 5151ba8..3803279 100644\n--- a/app/api/v1/module_system/user/service.py\n+++ b/app/api/v1/module_system/user/service.py\n@@ -49,6 +49,7 @@ class UserService:\n         if user.dept:\n             result.dept_name = user.dept.name\n         result.role_ids = [r.id for r in user.roles]\n+        result.role_names = [r.name for r in user.roles]\n         result.position_ids = [p.id for p in user.positions]\n         return result\n \n@@ -63,6 +64,7 @@ class UserService:\n             if user.dept:\n                 item.dept_name = user.dept.name\n             item.role_ids = [r.id for r in user.roles]\n+            item.role_names = [r.name for r in user.roles]\n             item.position_ids = [p.id for p in user.positions]\n         return result\n \n@@ -87,6 +89,7 @@ class UserService:\n             if user.dept:\n                 item.dept_name = user.dept.name\n             item.role_ids = [r.id for r in user.roles]\n+            item.role_names = [r.name for r in user.roles]\n             item.position_ids = [p.id for p in user.positions]\n             items.append(item)\n         page_result.items = items\n@@ -462,6 +465,7 @@ class UserService:\n             \"username\": \"用户名称\",\n             \"name\": \"用户昵称\",\n             \"dept_name\": \"部门\",\n+            \"role_names\": \"角色\",\n             \"email\": \"邮箱\",\n             \"mobile\": \"手机号\",\n             \"gender\": \"性别\",\n",
+      "gold": [],
+      "neutral": [
+        {
+          "file": "app/api/v1/module_system/user/schema.py",
+          "start": 259,
+          "end": 259
+        },
+        {
+          "file": "app/api/v1/module_system/user/service.py",
+          "start": 52,
+          "end": 52
+        }
+      ],
+      "mechanism": "与 user-role-names-partial-sync 改动形状完全相同（同样是新增 role_names 派生字段），但 detail / get_list / page 三处同步循环和导出 mapping_dict 全部补齐，没有任何回归。空 case：报任何 finding 都算误报。"
+    }
+  ]
+}
