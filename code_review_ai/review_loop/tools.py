@@ -29,10 +29,8 @@ from code_review_ai.config import Config
 from code_review_ai.impact import get_impact
 from code_review_ai.review_loop.schemas import (
     FINISH_REVIEW_TOOL,
-    ReviewItemUpdate,
     ReviewSubmission,
     ToolSpec,
-    UPDATE_REVIEW_TOOL,
 )
 
 _MAX_READ_LINES = 1_000
@@ -364,21 +362,6 @@ def finish_review_tool() -> ToolSpec:
                     "empty findings is a valid 'no concrete regression' "
                     "conclusion.",
         args_schema=ReviewSubmission,
-        run=_handled,
-    )
-
-
-def update_review_tool() -> ToolSpec:
-    """The worksheet updater: schema-only; the loop applies it to candidate rows."""
-
-    def _handled(*_args, **_kwargs) -> str:
-        raise AssertionError("update_review_item is applied by the loop, never run")
-
-    return ToolSpec(
-        name=UPDATE_REVIEW_TOOL,
-        description="Confirm (with a finding) or dismiss (with a reason) one "
-                    "candidate row of the change worksheet.",
-        args_schema=ReviewItemUpdate,
         run=_handled,
     )
 

@@ -9,14 +9,9 @@ from __future__ import annotations
 
 def loop_result_payload(result, model_name: str | None = None) -> dict:
     """Map a ``LoopResult`` onto the review command's JSON payload."""
-    confirmed = [item for item in result.items.values()
-                 if item.state == "confirmed"]
     usage = result.usage if isinstance(result.usage, dict) else {}
     return {
         "findings": [finding.model_dump() for finding in result.findings],
-        "affected_symbols": [item.qname for item in confirmed],
-        "affected_files": sorted({item.file for item in confirmed if item.file}),
-        "affected_entries": list(result.affected_entries),
         "files_read": _files_read(result.tool_trace),
         "tool_calls": [record["tool"] for record in result.tool_trace
                        if isinstance(record.get("tool"), str)],

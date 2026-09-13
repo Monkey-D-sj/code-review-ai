@@ -1,10 +1,9 @@
-"""Contracts for the review_loop worksheet flow.
+"""Contracts for the review_loop review flow.
 
-Follows ``review_agent`` on master: a deterministic worksheet is built from the
-change summary (one candidate row per changed symbol), the model only updates
-rows via ``update_review_item`` (confirmed with a finding, or dismissed with a
-reason), and the run ends once every candidate is resolved. There is no free-form
-report -- the structured rows are the result.
+The model is given a policy, the change, and whatever tools the caller offers;
+it researches the change and ends by calling ``finish_review`` with its
+structured findings (an empty list is a valid "no regression" verdict). The
+report is the whole result -- there is no per-row bookkeeping to reconcile.
 
 Depends only on ``langchain_core``/``pydantic`` -- no langgraph, no StructuredTool.
 ``ToolTrace`` mirrors ``review_agent``'s shape so trace consumers stay compatible.
@@ -16,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 ToolCallStatus = Literal[
@@ -65,9 +64,7 @@ class ToolSpec:
     """A tool the loop can execute, without LangChain StructuredTool machinery.
 
     ``args_schema`` is plain pydantic (extra forbidden); ``run`` receives the
-    validated keyword arguments and returns the content string verbatim. The
-    worksheet updater (``update_review_item``) is schema-only: the loop applies
-    it to the candidate rows itself and never calls its ``run``.
+    validated keyword arguments and returns the content string verbatim.
     """
 
     name: str
@@ -77,7 +74,12 @@ class ToolSpec:
 
 
 class Finding(BaseModel):
-    """One confirmed defect, authored by the model inside a confirmed row."""
+    """One concrete defect the model claims this change introduced.
+
+    ``file``/``line`` point at where the defect surfaces, which is often **not**
+    a line the diff touched: the change may have altered a contract whose other
+    end lives in another module.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -87,17 +89,16 @@ class Finding(BaseModel):
     description: str
 
 
-# The tool that submits a free-form review's findings. Named here so the loop,
-# the runner's tool list and the free driver agree on one constant.
+# The tool that submits the review's findings. Named here so the loop, the
+# runner's tool list and the driver agree on one constant.
 FINISH_REVIEW_TOOL = "finish_review"
 
 
 class ReviewSubmission(BaseModel):
-    """Payload of ``finish_review``: the free-form review's structured findings.
+    """Payload of ``finish_review``: the review's structured findings.
 
     Empty ``findings`` is a valid submission (the model reviewed and found no
-    concrete regression). Unlike the worksheet's confirmed rows, these findings
-    carry no evidence-gate bookkeeping -- the model owns the whole report.
+    concrete regression). The model owns the whole report.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -120,19 +121,17 @@ class AssistantTurn(BaseModel):
     name of turn N is the k-th trace record produced while executing turn N.
 
     Every call that executes produces exactly one record, in order (each of
-    ``_execute_call``, ``_apply_update`` and ``_apply_finish`` ends in a single
-    ``_reply_call``). The pairing is therefore **prefix-correct but not
-    total**: a trace record always sits where its name does, and names can
-    outnumber records only as a *trailing* run of never-executed calls. Walk
-    both lists in step and stop when the records run out; never shift a later
-    record onto an earlier name.
+    ``_execute_call`` and ``_apply_finish`` ends in a single ``_reply_call``).
+    The pairing is therefore **prefix-correct but not total**: a trace record
+    always sits where its name does, and names can outnumber records only as a
+    *trailing* run of never-executed calls. Walk both lists in step and stop
+    when the records run out; never shift a later record onto an earlier name.
 
-    Two break points create that tail, and they apply to both arms: the token
-    budget (``max_total_tokens`` / ``--max-tokens``) is checked after the turn
-    is recorded and before any of its calls execute, and ``run_free_loop``
-    stops at an accepted ``finish_review``, leaving the calls that same turn
-    requested after it unexecuted (a turn asking for ``[finish_review,
-    read_file]`` records two names and one record).
+    Two break points create that tail: the token budget (``max_total_tokens`` /
+    ``--max-tokens``) is checked after the turn is recorded and before any of
+    its calls execute, and the loop stops at an accepted ``finish_review``,
+    leaving the calls that same turn requested after it unexecuted (a turn
+    asking for ``[finish_review, read_file]`` records two names and one record).
 
     Carrying ``tool_call_id`` would make the pairing exact rather than
     positional; ``tool_calls`` does not have it yet.
@@ -146,55 +145,13 @@ class AssistantTurn(BaseModel):
     tool_calls: list[str] = Field(default_factory=list)
 
 
-FindingState = Literal["candidate", "confirmed", "dismissed"]
-
-
-class ReviewItem(BaseModel):
-    """One deterministic worksheet row, created from the change summary."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    qname: str
-    file: str | None = None
-    start_line: int | None = None
-    end_line: int | None = None
-    state: FindingState = "candidate"
-    finding: Finding | None = None
-    reason: str | None = None
-
-
-# The tool that flips candidate rows. Named here so the loop and the runner's
-# tool list agree on one constant.
-UPDATE_REVIEW_TOOL = "update_review_item"
-
-
-class ReviewItemUpdate(BaseModel):
-    """Arguments for ``update_review_item``: resolve one candidate row."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    qname: str = Field(min_length=1)
-    state: Literal["confirmed", "dismissed"]
-    finding: Finding | None = None
-    reason: str | None = None
-
-    @model_validator(mode="after")
-    def _validate_resolution(self) -> "ReviewItemUpdate":
-        if self.state == "confirmed" and self.finding is None:
-            raise ValueError("confirmed rows require a finding")
-        if self.state == "dismissed" and not (self.reason and self.reason.strip()):
-            raise ValueError("dismissed rows require a reason")
-        return self
-
-
 @dataclass
 class LoopResult:
-    """Outcome of one worksheet review run.
+    """Outcome of one review run.
 
-    ``items`` holds the final state of every candidate row (resolved when the
-    run completed), ``findings`` the confirmed rows' findings, and
-    ``affected_entries`` the deterministic entry points the runner computes.
-    ``review_complete`` is true only when every candidate was resolved.
+    ``findings`` is the model's ``finish_review`` submission -- empty when the
+    run found nothing (a valid verdict) or when it never submitted.
+    ``review_complete`` is true only when an accepted submission ended the run.
     ``usage`` aggregates the model-side tokens the provider reported across the
     run's model turns (see ``Usage``); it survives a partial run so a truncated
     review still shows what was spent. ``cost`` is the yuan estimate
@@ -202,9 +159,7 @@ class LoopResult:
     itself does not price) and it stays 0 until then.
     """
 
-    items: dict[str, ReviewItem] = field(default_factory=dict)
     findings: list[Finding] = field(default_factory=list)
-    affected_entries: list[str] = field(default_factory=list)
     review_complete: bool = False
     failure_reason: str | None = None
     usage: Usage = field(default_factory=dict)

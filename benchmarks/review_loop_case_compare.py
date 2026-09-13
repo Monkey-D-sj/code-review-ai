@@ -4,12 +4,9 @@ Both arms run the shipped CLI (``code-review-ai review --arm ...``), so what is
 measured is what a user runs, and the two arms differ in exactly one thing --
 the arm:
 
-    graph    worksheet mode -- the index's change summary (changed symbols ->
-             candidate rows) plus get_impact's call graph, resolved through
-             update_review_item.
-    nograph  free-form with no index tooling -- read_file/search_code plus
-             finish_review, seeing only the diff. That is a no-graph reviewer's
-             input.
+    graph    the diff plus the index's graph tools (get_impact and friends).
+    nograph  the same diff with read_file/search_code only, no index -- what a
+             no-graph reviewer has.
 
 Driving the CLI (rather than importing the loop here) is what keeps the
 comparison honest: both arms get the CLI's own neutral prompt and policy. An

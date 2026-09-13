@@ -146,7 +146,7 @@ class TestTraceDerivations:
         {"tool": "get_impact", "input": {"symbols": ["a::b"]}, "status": "ok"},
         {"tool": "read_file", "input": {"path": "app/x.py"}, "status": "ok"},
         {"tool": "read_file", "input": {"path": "app\\y.py"}, "status": "ok"},
-        {"tool": "update_review_item", "input": {}, "status": "ok"},
+        {"tool": "search_code", "input": {}, "status": "ok"},
     ]
 
     def test_files_read_normalizes_and_dedupes_in_first_seen_order(self):
@@ -154,7 +154,7 @@ class TestTraceDerivations:
 
     def test_tool_calls_lists_every_call_in_order(self):
         assert tool_calls(self.TRACE) == ["read_file", "get_impact", "read_file",
-                                          "read_file", "update_review_item"]
+                                          "read_file", "search_code"]
 
     def test_empty_trace_yields_nothing(self):
         assert files_read([]) == [] and tool_calls([]) == []

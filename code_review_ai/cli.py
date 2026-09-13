@@ -20,17 +20,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from code_review_ai.changes import build_change_summary, build_diff_text
+from code_review_ai.changes import build_diff_text
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.installer import DEFAULT_SOURCE, install
 from code_review_ai.update import sync
 
-# Framing for the CLI's one-shot review; the loop's own policy (worksheet,
-# evidence rules, read-only guard) is injected by review_loop.runner. Both arms
-# get this same prompt: the arm selection must be the only difference between a
-# graph run and a no-index run, or their costs are not comparable.
-_CLI_REVIEW_PROMPT = "评审本次变更引入的具体回归，逐行核对 worksheet 中的变更符号。"
+# Framing for the CLI's one-shot review; the loop's own policy (evidence rules,
+# read-only guard) is injected by review_loop.runner. Both arms get this same
+# prompt: the arm selection must be the only difference between a graph run and
+# a no-index run, or their costs are not comparable.
+_CLI_REVIEW_PROMPT = "评审本次变更引入的具体回归，找出因此会出错的所有落点。"
 
 # Failures a user can act on (missing index, unreadable repo, bad arguments)
 # rather than bugs: reported as `error: ...` with exit 1 instead of a traceback.
@@ -83,10 +83,9 @@ def _build_parser() -> argparse.ArgumentParser:
     review.add_argument("--repo", default=".")
     review.add_argument("--db", default=".code-review-ai/index.db")
     review.add_argument("--arm", choices=(GRAPH_ARM, NOINDEX_ARM), default=GRAPH_ARM,
-                        help="graph: index-backed worksheet plus get_impact "
-                             "(default); nograph: review the diff with read_file/"
+                        help="graph: the diff plus the index's graph tools "
+                             "(default); nograph: the same diff with read_file/"
                              "search_code only, no index")
-    review.add_argument("--symbols", nargs="*")
     review.add_argument("--files", nargs="*")
     review.add_argument("--max-turns", type=int,
                         help="stop the review after N model turns")
@@ -300,14 +299,13 @@ def _sync_index(args, ctx, conn) -> None:
 
 
 def _graph_review(args, ctx, settings: _ModelSettings, hooks, policy) -> object:
-    """The index arm: sync, summarize the change, review the worksheet."""
+    """The index arm: sync, then review the diff with the graph tools offered."""
     from code_review_ai.review_loop.runner import run_review
     conn = ctx.connect()
     _sync_index(args, ctx, conn)
-    summary = build_change_summary(ctx.cfg, conn, symbols=args.symbols,
-                                   files=args.files)
-    return run_review(ctx.cfg, conn, prompt=_CLI_REVIEW_PROMPT, summary=summary,
-                      hooks=hooks, model_name=settings.model_name,
+    return run_review(ctx.cfg, conn, prompt=_CLI_REVIEW_PROMPT,
+                      diff=build_diff_text(ctx.cfg, args.files), hooks=hooks,
+                      model_name=settings.model_name,
                       base_url=settings.base_url,
                       api_key_env=settings.api_key_env,
                       max_turns=args.max_turns, max_total_tokens=args.max_tokens,
@@ -315,16 +313,17 @@ def _graph_review(args, ctx, settings: _ModelSettings, hooks, policy) -> object:
 
 
 def _noindex_review(args, ctx, settings: _ModelSettings, hooks, policy) -> object:
-    """The no-index arm: the working-tree diff plus read/search, nothing else."""
-    from code_review_ai.review_loop.runner import run_free_review
-    return run_free_review(ctx.cfg, prompt=_CLI_REVIEW_PROMPT,
-                           diff=build_diff_text(ctx.cfg, args.files), hooks=hooks,
-                           model_name=settings.model_name,
-                           base_url=settings.base_url,
-                           api_key_env=settings.api_key_env,
-                           max_turns=args.max_turns,
-                           max_total_tokens=args.max_tokens,
-                           policy=policy)
+    """The no-index arm: the same diff, read/search only -- no graph, no index."""
+    from code_review_ai.review_loop.runner import NOINDEX_TOOLS, run_review
+    return run_review(ctx.cfg, prompt=_CLI_REVIEW_PROMPT,
+                      diff=build_diff_text(ctx.cfg, args.files), hooks=hooks,
+                      model_name=settings.model_name,
+                      base_url=settings.base_url,
+                      api_key_env=settings.api_key_env,
+                      tool_names=list(NOINDEX_TOOLS),
+                      max_turns=args.max_turns,
+                      max_total_tokens=args.max_tokens,
+                      policy=policy)
 
 
 _ARM_RUNNERS = {GRAPH_ARM: _graph_review, NOINDEX_ARM: _noindex_review}

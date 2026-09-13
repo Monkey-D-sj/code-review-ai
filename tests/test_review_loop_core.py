@@ -1,11 +1,10 @@
-"""Behavior tests for the worksheet review loop (review_loop.loop).
+"""Behavior tests for the review loop (review_loop.loop).
 
 No DB, no network: a scripted model returns one ``(content, tool_calls)`` pair
-per turn and stub tools echo/deny/fail on demand. The contract under test is
-worksheet mode: the model resolves candidate rows through ``update_review_item``
-(confirmed with a finding, or dismissed with a reason), and the run ends when
-every candidate is resolved. A turn with no tool calls while rows remain is an
-incomplete finish, never a report.
+per turn and stub tools echo/deny/fail on demand. The contract under test:
+the model researches with the tools and ends by calling ``finish_review`` with
+its findings; a turn with no tool calls before that is a failure, never a
+silent success.
 """
 
 from __future__ import annotations
@@ -23,16 +22,12 @@ from code_review_ai.review_loop import (
     POINT_PRE_TOOL,
     POINT_RUN_FINISHED,
     ToolSpec,
-    run_free_loop,
     run_loop,
 )
 from code_review_ai.review_loop.loop import TRACE_RESPONSE_EXCERPT_CHARS
 from code_review_ai.review_loop.schemas import (
     FINISH_REVIEW_TOOL,
-    ReviewItem,
-    ReviewItemUpdate,
     ReviewSubmission,
-    UPDATE_REVIEW_TOOL,
 )
 
 
@@ -66,30 +61,6 @@ def _call(name: str, args: dict | None = None, ident: str | None = None) -> dict
     return {"name": name, "args": args or {}, "id": ident or f"{name}-call"}
 
 
-def _update_call(qname: str, **resolution) -> dict:
-    payload = {"qname": qname, **resolution}
-    return _call(UPDATE_REVIEW_TOOL, payload, ident=f"update-{qname}")
-
-
-def _make_tools():
-    """Three action tools plus the schema-only worksheet updater."""
-    def _handled(*_args, **_kwargs) -> str:
-        raise AssertionError("update_review_item is applied by the loop, never run")
-
-    return [
-        ToolSpec(name="echo", description="echo text back", args_schema=EchoArgs,
-                 run=_echo),
-        ToolSpec(name="impact", description="stub impact", args_schema=ImpactArgs,
-                 run=lambda symbols: json.dumps({"found": symbols}, ensure_ascii=False)),
-        ToolSpec(name="boom", description="stub that fails", args_schema=BoomArgs,
-                 run=_boom),
-        ToolSpec(name=UPDATE_REVIEW_TOOL, description="resolve one candidate row",
-                 args_schema=ReviewItemUpdate, run=_handled),
-    ]
-
-
-def _candidates(*qnames: str) -> list[ReviewItem]:
-    return [ReviewItem(qname=qname) for qname in qnames]
 
 
 class FakeModel:
@@ -135,9 +106,22 @@ class FakeModel:
         return message
 
 
-def _run(model, candidates, **kwargs):
-    return run_loop(model, _make_tools(), candidates=candidates,
-                    initial_messages=[], **kwargs)
+def _tools():
+    """Three action tools plus the finish_review submitter."""
+    return [
+        ToolSpec(name="echo", description="echo text back", args_schema=EchoArgs,
+                 run=_echo),
+        ToolSpec(name="impact", description="stub impact", args_schema=ImpactArgs,
+                 run=lambda symbols: json.dumps({"found": symbols}, ensure_ascii=False)),
+        ToolSpec(name="boom", description="stub that fails", args_schema=BoomArgs,
+                 run=_boom),
+        ToolSpec(name=FINISH_REVIEW_TOOL, description="submit findings",
+                 args_schema=ReviewSubmission, run=lambda **_kw: "unused"),
+    ]
+
+
+def _run(model, **kwargs):
+    return run_loop(model, _tools(), initial_messages=[], **kwargs)
 
 
 def _tool_contents(model: FakeModel) -> list[str]:
@@ -147,133 +131,42 @@ def _tool_contents(model: FakeModel) -> list[str]:
             for message in batch if isinstance(message, ToolMessage)]
 
 
-def _confirm_update(qname: str) -> dict:
-    return _update_call(qname, state="confirmed",
-                        finding={"file": f"{qname}.py", "line": 1,
-                                 "title": "bug", "description": "broken"})
 
 
-def _dismiss_update(qname: str) -> dict:
-    return _update_call(qname, state="dismissed", reason="not a real issue")
 
-
-# ---------------------------------------------------------------------------
-# worksheet resolution
-# ---------------------------------------------------------------------------
-
-def test_all_candidates_resolved_completes_with_confirmed_findings():
-    model = FakeModel([("", [_confirm_update("app::run"),
-                             _dismiss_update("app::helper")]),
-                       ("review done.", [])])
-
-    result = _run(model, _candidates("app::run", "app::helper"))
-
-    assert result.review_complete is True
-    assert result.failure_reason is None
-    assert result.items["app::run"].state == "confirmed"
-    assert result.items["app::helper"].state == "dismissed"
-    assert [finding.title for finding in result.findings] == ["bug"]
-    assert result.items["app::run"].finding is not None
-    assert result.items["app::helper"].reason == "not a real issue"
-
-
-def test_dismissed_only_run_has_no_findings():
-    model = FakeModel([("", [_dismiss_update("app::run")]),
-                       ("clean.", [])])
-
-    result = _run(model, _candidates("app::run"))
-
-    assert result.review_complete is True
-    assert result.findings == []
-    assert result.items["app::run"].state == "dismissed"
-
-
-def test_unresolved_empty_turns_fail_after_the_nudge_cap():
-    # three consecutive empty turns, none resolving the row -> explicit failure,
-    # never a silent "incomplete with no reason"
-    model = FakeModel([("no issues to flag.", []),
-                       ("", []),
-                       ("", [])])
-
-    result = _run(model, _candidates("app::run"), max_empty_turns=2)
-
-    assert result.review_complete is False
-    assert result.failure_reason is not None
-    assert "unresolved" in result.failure_reason
-    assert "1 candidate(s)" in result.failure_reason
-    assert result.items["app::run"].state == "candidate"
-    assert result.findings == []
-    assert result.tool_request_count == 0
-
-
-def test_empty_stop_between_updates_is_nudged_back_to_finish():
-    # an empty turn while rows remain unresolved is nudged (not finished), and
-    # the model comes back to resolve the leftover row
-    model = FakeModel([("", [_confirm_update("app::a")]),
-                       ("", [_dismiss_update("app::b")]),
-                       ("clean up.", []),
-                       ("", [_dismiss_update("app::c")])])
-
-    result = _run(model, _candidates("app::a", "app::b", "app::c"))
-
-    assert result.review_complete is True
-    assert result.failure_reason is None
-    assert result.items["app::a"].state == "confirmed"
-    assert result.items["app::b"].state == "dismissed"
-    assert result.items["app::c"].state == "dismissed"
-    assert len(result.findings) == 1
-    # the nudge named the pending row so the model knew what to finish
-    nudges = [str(message.content) for batch in model.invoked
-              for message in batch
-              if message.type == "human" and "app::c" in str(message.content)]
-    assert nudges
 
 
 def test_tool_less_assistant_turns_are_not_appended_to_history():
     # an empty assistant turn carries no state, and (DeepSeek) serializers have
     # hallucinated tool_calls onto such turns -> provider 400. It must not be
-    # sent back; only the nudge human message follows.
+    # sent back. An empty turn before finish_review is a failure, so the run
+    # stops there and the second turn's call never executes.
     model = FakeModel([("no issues to flag.", []),
-                       ("", [_dismiss_update("app::run")])])
+                       ("", [_call("impact", {"symbols": ["app::run"]}, "impact-app::run")])])
 
-    result = _run(model, _candidates("app::run"))
-
-    assert result.review_complete is True
-    nudge_batch = model.invoked[1]
-    assert all(message.type != "ai" for message in nudge_batch)
-    assert any(message.type == "human" for message in nudge_batch)
-
-
-def test_empty_turn_failure_records_each_turn_text_and_reasoning():
-    # the debugging record must keep what the model actually wrote across the
-    # empty turns (text + reasoning), even though those turns never re-enter the
-    # history (they carry no state and DeepSeek hallucinates tool_calls onto
-    # them). This is the payload a post-mortem reads on the rare empty-turn
-    # failure -- so a blank here means the transcript was lost before analysis.
-    model = FakeModel([("no issues to flag.", [], None, "scanning callers..."),
-                       ("", [], None, "still no call site"),
-                       ("nothing to confirm.", [], None, "decided: not a bug")])
-
-    result = _run(model, _candidates("app::run"), max_empty_turns=2)
+    result = _run(model)
 
     assert result.review_complete is False
-    assert result.failure_reason is not None
-    assert "unresolved after 3 empty turn(s)" in result.failure_reason
+    assert result.failure_reason == "agent stopped without submitting finish_review"
+    assert len(model.invoked) == 1  # the empty turn ended the run
+    assert all(message.type != "ai" for message in model.invoked[0])
+def test_empty_turn_failure_records_the_turn_text_and_reasoning():
+    # the debugging record must keep what the model actually wrote on the empty
+    # turn (text + reasoning), even though that turn never re-enters the history
+    # (it carries no state and DeepSeek hallucinates tool_calls onto them). This
+    # is the payload a post-mortem reads on the empty-turn failure -- so a blank
+    # here means the transcript was lost before analysis.
+    model = FakeModel([("no issues to flag.", [], None, "scanning callers...")])
+
+    result = _run(model)
+
+    assert result.review_complete is False
+    assert result.failure_reason == "agent stopped without submitting finish_review"
     recorded = result.assistant_turns
-    assert [turn.turn for turn in recorded] == [1, 2, 3]
-    assert [turn.content for turn in recorded] == ["no issues to flag.", "",
-                                                   "nothing to confirm."]
-    assert [turn.reasoning for turn in recorded] == ["scanning callers...",
-                                                     "still no call site",
-                                                     "decided: not a bug"]
+    assert [turn.turn for turn in recorded] == [1]
+    assert [turn.content for turn in recorded] == ["no issues to flag."]
+    assert [turn.reasoning for turn in recorded] == ["scanning callers..."]
     assert all(turn.tool_calls == [] for turn in recorded)
-    # the nudges the loop wrote are not mistaken for model speech
-    assert all("尚有 candidate" not in (turn.content or "") for turn in recorded)
-    # and the empty turns stayed out of the re-sent history: only nudges accrue
-    assert all(message.type != "ai" for message in model.invoked[-1])
-    assert any(message.type == "human" for message in model.invoked[-1])
-
-
 def test_hidden_tool_calls_are_promoted_and_executed():
     from code_review_ai.review_loop.loop import _promote_hidden_tool_calls
 
@@ -289,47 +182,7 @@ def test_hidden_tool_calls_are_promoted_and_executed():
     assert "tool_calls" not in assistant.additional_kwargs
 
 
-def test_invalid_update_payload_is_rejected_and_worksheet_untouched():
-    # turn 1: confirmed without a finding -> rejected, row untouched
-    model = FakeModel([("", [_update_call("app::run", state="confirmed")]),
-                       ("", [_dismiss_update("app::run"),
-                             _confirm_update("app::helper")])])
 
-    result = _run(model, _candidates("app::run", "app::helper"))
-
-    assert result.review_complete is True
-    assert result.items["app::run"].state == "dismissed"
-    assert result.tool_request_count == 3
-    statuses = [record["status"] for record in result.tool_trace]
-    assert statuses == ["error", "success", "success"]
-    assert any("invalid update_review_item payload" in content
-               for content in _tool_contents(model))
-
-
-def test_update_of_unknown_qname_is_rejected():
-    model = FakeModel([("", [_confirm_update("no::such::symbol")]),
-                       ("", [_dismiss_update("app::run")]),
-                       ("done.", [])])
-
-    result = _run(model, _candidates("app::run"))
-
-    assert result.review_complete is True
-    assert result.items["app::run"].state == "dismissed"
-    assert [record["status"] for record in result.tool_trace] == ["error", "success"]
-    assert any("is not an active candidate" in content
-               for content in _tool_contents(model))
-
-
-def test_resolving_last_candidate_in_an_action_turn_completes_the_run():
-    model = FakeModel([("", [_confirm_update("app::run"),
-                             _call("impact", {"symbols": ["app::run"]}, "impact-1")]),
-                       ("done.", [])])
-
-    result = _run(model, _candidates("app::run"))
-
-    assert result.review_complete is True
-    assert result.tool_calls == [UPDATE_REVIEW_TOOL, "impact"]
-    assert result.tool_call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -337,45 +190,44 @@ def test_resolving_last_candidate_in_an_action_turn_completes_the_run():
 # ---------------------------------------------------------------------------
 
 def test_usage_aggregates_model_reported_tokens_across_turns():
-    model = FakeModel([("", [_confirm_update("app::run")],
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")],
                         {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}),
-                       ("", [_dismiss_update("app::helper")],
-                        {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15})])
+                       ("", [_call("impact", {"symbols": ["app::helper"]}, "impact-app::helper")],
+                        {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}),
+                       ("", [_finish_call([])])])
 
-    result = _run(model, _candidates("app::run", "app::helper"))
+    result = _run(model)
 
     assert result.review_complete is True
     assert result.usage == {"input_tokens": 22, "output_tokens": 8, "total_tokens": 30}
-
-
 def test_usage_skips_absent_or_non_integral_provider_fields():
     # the provider reports only output_tokens on turn 1 and a non-int on turn 2
-    model = FakeModel([("", [_confirm_update("app::run")],
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")],
                         {"output_tokens": 7, "total_tokens": None}),
-                       ("", [_dismiss_update("app::helper")],
+                       ("", [_call("impact", {"symbols": ["app::helper"]}, "impact-app::helper")],
                         {"input_tokens": 3, "output_tokens": "five"})])
 
-    result = _run(model, _candidates("app::run", "app::helper"))
+    result = _run(model)
 
     assert result.usage == {"output_tokens": 7, "input_tokens": 3}
 
 
 def test_usage_stays_empty_when_provider_reports_none():
-    model = FakeModel([("", [_confirm_update("app::run")]),
-                       ("", [_dismiss_update("app::helper")])])
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")]),
+                       ("", [_call("impact", {"symbols": ["app::helper"]}, "impact-app::helper")])])
 
-    result = _run(model, _candidates("app::run", "app::helper"))
+    result = _run(model)
 
     assert result.usage == {}
 
 
 def test_provider_failure_keeps_usage_already_spent():
     # turn 1 reports usage before the call that should resolve the rest fails
-    model = FakeModel([("", [_confirm_update("app::run")],
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")],
                         {"input_tokens": 20, "output_tokens": 4, "total_tokens": 24}),
                        RuntimeError("connection reset")])
 
-    result = _run(model, _candidates("app::run", "app::helper"))
+    result = _run(model)
 
     assert result.review_complete is False
     assert result.failure_reason == "provider call failed: connection reset"
@@ -385,29 +237,28 @@ def test_provider_failure_keeps_usage_already_spent():
 def test_cache_read_accumulates_from_input_token_details():
     # input_tokens is the grand total (cache hits included); cache_read is the
     # cheaper slice, reported under input_token_details.
-    model = FakeModel([("", [_confirm_update("app::run")],
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")],
                         {"input_tokens": 200, "output_tokens": 10, "total_tokens": 210,
                          "input_token_details": {"cache_read": 150}}),
-                       ("", [_dismiss_update("app::helper")],
+                       ("", [_call("impact", {"symbols": ["app::helper"]}, "impact-app::helper")],
                         {"input_tokens": 400, "output_tokens": 20, "total_tokens": 420,
-                         "input_token_details": {"cache_read": 350}})])
+                         "input_token_details": {"cache_read": 350}}),
+                       ("", [_finish_call([])])])
 
-    result = _run(model, _candidates("app::run", "app::helper"))
+    result = _run(model)
 
     assert result.review_complete is True
     assert result.usage == {"input_tokens": 600, "output_tokens": 30,
                             "total_tokens": 630, "cache_read": 500}
-
-
 def test_cache_read_skipped_when_details_absent_or_non_int():
     # turn 1 has no input_token_details; turn 2's cache_read is not an int
-    model = FakeModel([("", [_confirm_update("app::run")],
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")],
                         {"input_tokens": 50, "output_tokens": 5, "total_tokens": 55}),
-                       ("", [_dismiss_update("app::helper")],
+                       ("", [_call("impact", {"symbols": ["app::helper"]}, "impact-app::helper")],
                         {"input_tokens": 60, "output_tokens": 6, "total_tokens": 66,
                          "input_token_details": {"cache_read": "lots"}})])
 
-    result = _run(model, _candidates("app::run", "app::helper"))
+    result = _run(model)
 
     assert result.usage == {"input_tokens": 110, "output_tokens": 11, "total_tokens": 121}
     assert "cache_read" not in result.usage
@@ -419,62 +270,54 @@ def test_cache_read_skipped_when_details_absent_or_non_int():
 
 def test_token_budget_stops_an_overspending_model():
     # turn 1 stays under the cap; turn 2 crosses it, so its calls never run
-    model = FakeModel([("", [_confirm_update("app::run")],
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")],
                         {"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500}),
-                       ("", [_dismiss_update("app::helper")],
+                       ("", [_call("impact", {"symbols": ["app::helper"]}, "impact-app::helper")],
                         {"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500})])
 
-    result = run_loop(model, _make_tools(), candidates=_candidates("app::run", "app::helper"),
-                      initial_messages=[], max_total_tokens=2000)
+    result = _run(model, max_total_tokens=2000)
 
     assert result.review_complete is False
     assert result.failure_reason == ("token budget exceeded: spent 3000 total_tokens, "
                                      "limit 2000")
-    assert result.items["app::run"].state == "confirmed"
-    assert result.items["app::helper"].state == "candidate"  # dropped before it ran
     assert result.usage["total_tokens"] == 3000
 
 
 def test_token_budget_allows_spending_up_to_the_cap():
-    # exactly at the cap is allowed; the run completes normally
-    model = FakeModel([("", [_confirm_update("app::run")],
+    # exactly at the cap is allowed; the model then submits and the run completes
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")],
                         {"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500}),
-                       ("", [_dismiss_update("app::helper")],
-                        {"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500})])
+                       ("", [_call("impact", {"symbols": ["app::helper"]}, "impact-app::helper")],
+                        {"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500}),
+                       ("", [_finish_call([])])])
 
-    result = run_loop(model, _make_tools(), candidates=_candidates("app::run", "app::helper"),
-                      initial_messages=[], max_total_tokens=3000)
+    result = _run(model, max_total_tokens=3000)
 
     assert result.review_complete is True
     assert result.failure_reason is None
-    assert result.items["app::helper"].state == "dismissed"
-
-
 def test_token_budget_ignores_non_reporting_turns():
     # turn 1 sits exactly at the cap; turn 2 reports no usage, so the cap never
     # sees further spend (a documented blind spot: the gate reads reported totals)
-    model = FakeModel([("", [_confirm_update("app::run")],
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")],
                         {"input_tokens": 1, "output_tokens": 0, "total_tokens": 1}),
-                       ("", [_dismiss_update("app::helper")])])
+                       ("", [_call("impact", {"symbols": ["app::helper"]}, "impact-app::helper")]),
+                       ("", [_finish_call([])])])
 
-    result = run_loop(model, _make_tools(), candidates=_candidates("app::run", "app::helper"),
-                      initial_messages=[], max_total_tokens=1)
+    result = _run(model, max_total_tokens=1)
 
     assert result.review_complete is True
     assert result.failure_reason is None
     assert result.usage["total_tokens"] == 1
-
-
 # ---------------------------------------------------------------------------
 # tool execution mechanics (kept from the natural-stop loop)
 # ---------------------------------------------------------------------------
 
 def test_bound_schemas_are_schema_only_dicts():
     model = FakeModel([("done.", [])])
-    _run(model, _candidates("app::run"))
+    _run(model)
 
     names = {schema["name"] for schema in model.bound_schemas}
-    assert names == {"echo", "impact", "boom", UPDATE_REVIEW_TOOL}
+    assert names == {"echo", "impact", "boom", FINISH_REVIEW_TOOL}
     assert all(isinstance(schema["input_schema"], dict) for schema in model.bound_schemas)
 
 
@@ -482,7 +325,7 @@ def test_invalid_args_are_an_error_not_an_execution():
     model = FakeModel([("", [_call("impact", {"symbols": "not-a-list"}, "impact-1")]),
                        ("done.", [])])
 
-    result = _run(model, _candidates("app::run"))
+    result = _run(model)
 
     assert result.tool_request_count == 1
     assert [record["status"] for record in result.tool_trace] == ["error"]
@@ -494,9 +337,8 @@ def test_runtime_tool_failure_is_answered_and_the_loop_continues():
     model = FakeModel([("", [_call("boom", {"text": "kaboom"}, "boom-1")]),
                        ("done.", [])])
 
-    result = _run(model, _candidates("app::run"))
+    result = _run(model)
 
-    assert result.items["app::run"].state == "candidate"
     assert [record["status"] for record in result.tool_trace] == ["error"]
     assert any("boom: kaboom" in content for content in _tool_contents(model))
 
@@ -506,7 +348,7 @@ def test_several_tools_in_one_turn_all_run_in_order():
                              _call("echo", {"text": "hi"}, "echo-1")]),
                        ("done.", [])])
 
-    result = _run(model, _candidates("app::run"))
+    result = _run(model)
 
     assert result.tool_calls == ["impact", "echo"]
     assert result.tool_call_count == 2
@@ -517,7 +359,7 @@ def test_unknown_tool_is_rejected_and_the_loop_continues():
     model = FakeModel([("", [_call("no_such_tool", ident="ghost-1")]),
                        ("done.", [])])
 
-    result = _run(model, _candidates("app::run"))
+    result = _run(model)
 
     assert result.tool_request_count == 1
     assert [record["status"] for record in result.tool_trace] == ["error"]
@@ -526,15 +368,13 @@ def test_unknown_tool_is_rejected_and_the_loop_continues():
 
 def test_provider_failure_keeps_the_partial_audit_trail():
     # one row is resolved before the provider call that should resolve the rest
-    model = FakeModel([("", [_confirm_update("app::run")]),
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")]),
                        RuntimeError("connection reset")])
 
-    result = _run(model, _candidates("app::run", "app::helper"))
+    result = _run(model)
 
     assert result.review_complete is False
     assert result.failure_reason == "provider call failed: connection reset"
-    assert result.items["app::run"].state == "confirmed"
-    assert result.items["app::helper"].state == "candidate"
     assert len(result.tool_trace) == 1
     assert result.tool_trace[0]["status"] == "success"
     assert result.tool_call_count == 1
@@ -546,8 +386,7 @@ def test_turn_cap_stops_a_looping_model():
                        ("", [_call("echo", {"text": "c"}, "c-1")]),
                        ("", [_call("echo", {"text": "d"}, "d-1")])])
 
-    result = run_loop(model, _make_tools(), candidates=_candidates("app::run"),
-                      initial_messages=[], max_turns=3)
+    result = _run(model, max_turns=3)
 
     assert result.review_complete is False
     assert result.failure_reason == "agent kept requesting tools for 3 turns"
@@ -560,10 +399,12 @@ def test_turn_cap_stops_a_looping_model():
 # ---------------------------------------------------------------------------
 
 def test_happy_path_emits_the_observer_event_sequence():
-    # turn 1 reads with a real tool; turn 2 resolves the only candidate and ends.
-    # the updater is applied by the loop, so resolving never fires pre/post_tool.
+    # turn 1 reads with a real tool; turn 2 submits findings and ends the run.
+    # finish_review is the loop's own control tool, so it never fires pre/post_tool
+    # -- only the real tool call in turn 1 does.
+    finding = {"file": "app.py", "line": 3, "title": "bug", "description": "why"}
     model = FakeModel([("", [_call("impact", {"symbols": ["x"]}, "impact-1")]),
-                       ("", [_confirm_update("app::run")])])
+                       ("", [_finish_call([finding])])])
     hooks = Hooks()
     seen: list[str] = []
     run_context: dict = {}
@@ -573,7 +414,7 @@ def test_happy_path_emits_the_observer_event_sequence():
         hooks.on(point, lambda event, context, point=point: seen.append(point))
     hooks.on(POINT_RUN_FINISHED, lambda _event, context: run_context.update(context))
 
-    result = _run(model, _candidates("app::run"), hooks=hooks)
+    result = _run(model, hooks=hooks)
 
     assert result.review_complete is True
     assert seen == ["model_request_started", "model_response_received",
@@ -582,8 +423,6 @@ def test_happy_path_emits_the_observer_event_sequence():
                     "run_finished"]
     assert run_context["finding_count"] == 1
     assert run_context["failure_reason"] is None
-
-
 def test_schema_rejected_call_never_fires_pre_or_post_tool():
     model = FakeModel([("", [_call("impact", {"symbols": "not-a-list"}, "impact-1")]),
                        ("done.", [])])
@@ -592,7 +431,7 @@ def test_schema_rejected_call_never_fires_pre_or_post_tool():
     for point in (POINT_PRE_TOOL, POINT_POST_TOOL):
         hooks.on(point, lambda event, _context, point=point: tool_events.append(point))
 
-    result = _run(model, _candidates("app::run"), hooks=hooks)
+    result = _run(model, hooks=hooks)
 
     assert tool_events == []  # the call was rejected before it could run
 
@@ -605,17 +444,17 @@ def test_pre_and_post_tool_fire_around_a_real_tool_run():
     hooks.on(POINT_PRE_TOOL, lambda _e, ctx: tool_events.append(("pre", ctx["name"])))
     hooks.on(POINT_POST_TOOL, lambda _e, ctx: tool_events.append(("post", ctx["name"])))
 
-    _run(model, _candidates("app::run"), hooks=hooks)
+    _run(model, hooks=hooks)
 
     assert tool_events == [("pre", "impact"), ("post", "impact")]
 
 
 def test_assistant_turn_precedes_tool_replies_in_history():
     # resolving one row keeps the run going, so a second model turn happens
-    model = FakeModel([("", [_confirm_update("app::run")]),
-                       ("", [_dismiss_update("app::helper")])])
+    model = FakeModel([("", [_call("echo", {"text": "app::run"}, "echo-app::run")]),
+                       ("", [_call("impact", {"symbols": ["app::helper"]}, "impact-app::helper")])])
 
-    _run(model, _candidates("app::run", "app::helper"))
+    _run(model)
 
     second_turn = model.invoked[1]
     types = [message.type for message in second_turn]
@@ -648,24 +487,13 @@ def test_hooks_emit_without_registered_observers_is_a_noop():
 
 
 # ---------------------------------------------------------------------------
-# free-form review (run_free_loop: no worksheet, finish_review submits)
+# the submission (finish_review ends the run)
 # ---------------------------------------------------------------------------
-
-def _free_tools():
-    """The action tools plus the schema-only finish_review submitter."""
-    tools = _make_tools()
-    tools.append(ToolSpec(
-        name=FINISH_REVIEW_TOOL, description="submit findings",
-        args_schema=ReviewSubmission, run=lambda **_kw: "unused"))
-    return tools
 
 
 def _finish_call(findings, ident="finish-1") -> dict:
     return _call(FINISH_REVIEW_TOOL, {"findings": findings}, ident)
 
-
-def _free_run(model, **kwargs):
-    return run_free_loop(model, _free_tools(), initial_messages=[], **kwargs)
 
 
 def test_free_loop_researches_then_submits_findings():
@@ -673,7 +501,7 @@ def test_free_loop_researches_then_submits_findings():
     model = FakeModel([("", [_call("impact", {"symbols": ["x"]}, "impact-1")]),
                        ("", [_finish_call([finding])])])
 
-    result = _free_run(model)
+    result = _run(model)
 
     assert result.review_complete is True
     assert result.failure_reason is None
@@ -686,7 +514,7 @@ def test_free_loop_researches_then_submits_findings():
 def test_free_loop_empty_submission_is_a_valid_no_regression_verdict():
     model = FakeModel([("", [_finish_call([])])])
 
-    result = _free_run(model)
+    result = _run(model)
 
     assert result.review_complete is True
     assert result.failure_reason is None
@@ -700,7 +528,7 @@ def test_free_loop_invalid_submission_is_answered_then_retried():
     model = FakeModel([("", [_finish_call([bad])]),
                        ("", [_finish_call([good])])])
 
-    result = _free_run(model)
+    result = _run(model)
 
     assert result.review_complete is True
     assert result.failure_reason is None
@@ -713,7 +541,7 @@ def test_free_loop_invalid_submission_is_answered_then_retried():
 def test_free_loop_empty_turn_before_submit_is_a_failure():
     model = FakeModel([("clean code, no regressions.", [])])
 
-    result = _free_run(model)
+    result = _run(model)
 
     assert result.review_complete is False
     assert "finish_review" in result.failure_reason
@@ -724,7 +552,7 @@ def test_free_loop_provider_failure_preserves_partial_research_trace():
     model = FakeModel([("", [_call("impact", {"symbols": ["x"]}, "impact-1")]),
                        RuntimeError("connection reset")])
 
-    result = _free_run(model)
+    result = _run(model)
 
     assert result.review_complete is False
     assert result.failure_reason == "provider call failed: connection reset"
@@ -744,9 +572,9 @@ def test_assistant_turns_record_text_and_reasoning_per_turn():
             reply.additional_kwargs["reasoning_content"] = "thinking through callers"
             return reply
 
-    result = _free_run(ReasoningTextModel())
+    result = _run(ReasoningTextModel())
 
-    # the empty turn fails the free run, but its text is kept for debugging
+    # the empty turn fails the run, but its text is kept for debugging
     assert result.review_complete is False
     assert result.assistant_turns[0].content == "clean code, no regression"
     assert result.assistant_turns[0].reasoning == "thinking through callers"
@@ -759,9 +587,9 @@ def test_assistant_turns_record_text_and_reasoning_per_turn():
 
 def test_tool_trace_excerpt_covers_a_short_tool_body_entirely():
     model = FakeModel([("", [_call("echo", {"text": "hi"}, "e-1")]),
-                       ("", [_confirm_update("app::run")])])
+                       ("", [_call("echo", {"text": "app::run"}, "echo-app::run")])])
 
-    result = _run(model, _candidates("app::run"))
+    result = _run(model)
 
     record = result.tool_trace[0]
     assert len(record["response_excerpt"]) == record["response_chars"]
@@ -771,9 +599,9 @@ def test_tool_trace_excerpt_is_capped_and_chars_stays_the_full_length():
     """The optimizer needs the body, but a 50-turn run over whole source files
     would balloon the payload unbounded."""
     model = FakeModel([("", [_call("echo", {"text": "x" * 5000}, "e-1")]),
-                       ("", [_confirm_update("app::run")])])
+                       ("", [_call("echo", {"text": "app::run"}, "echo-app::run")])])
 
-    result = _run(model, _candidates("app::run"))
+    result = _run(model)
 
     record = result.tool_trace[0]
     assert len(record["response_excerpt"]) == TRACE_RESPONSE_EXCERPT_CHARS
@@ -786,9 +614,9 @@ def test_tool_trace_excerpt_honors_a_custom_cap():
     """The cap is a parameter, not a constant: a caller may want a budget other
     than the default, and nothing else exercises that."""
     model = FakeModel([("", [_call("echo", {"text": "x" * 5000}, "e-1")]),
-                       ("", [_confirm_update("app::run")])])
+                       ("", [_call("echo", {"text": "app::run"}, "echo-app::run")])])
 
-    result = _run(model, _candidates("app::run"), trace_response_excerpt_chars=50)
+    result = _run(model, trace_response_excerpt_chars=50)
 
     record = result.tool_trace[0]
     assert len(record["response_excerpt"]) == 50
