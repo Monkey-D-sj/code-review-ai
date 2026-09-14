@@ -24,6 +24,7 @@ from code_review_ai.changes import build_change_summary, build_diff_text
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.installer import DEFAULT_SOURCE, install
+from code_review_ai.skills import strip_frontmatter
 from code_review_ai.update import sync
 
 # Framing for the CLI's one-shot review; the loop's own policy (evidence rules,
@@ -103,6 +104,17 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="also give the reviewer the index's change "
                              "summary (changed symbols and what the graph "
                              "could not attribute); needs --arm graph")
+    review.add_argument("--harness-skill",
+                        help="file holding the process-discipline skill to "
+                             "inject as a second system message (frontmatter "
+                             "stripped); omitted means no such message")
+    review.add_argument("--skill-review", dest="skill_review",
+                        help="after the review, run a retrospective over it "
+                             "and write a candidate harness skill into this "
+                             "directory (needs --harness-skill)")
+    review.add_argument("--skill-review-model",
+                        help="model for the retrospective (default: the "
+                             "review's own model)")
     review.add_argument("--no-progress", action="store_true",
                         help="suppress live review progress on stderr")
     # Kept for compatibility: the TTY dashboard lived in the retired agent
@@ -208,10 +220,40 @@ def _format_progress(event: str, data: dict) -> str:
 
 
 def _review_progress(event: str, data: dict, *, quiet: bool) -> None:
-    """The CLI's one-line progress, on stderr so stdout stays the JSON payload."""
+    """The CLI's one-line progress, on stderr so stdout stays the JSON payload.
+
+    A retrospective is a second run whose turns also count from 1, so its events
+    are labelled; without that the two runs' "模型第 3 轮" lines interleave
+    indistinguishably.
+    """
     if quiet:
         return
-    print(f"[review] {_format_progress(event, data)}", file=sys.stderr, flush=True)
+    from code_review_ai.review_loop.skill_review import SKILL_REVIEW_PHASE
+    prefix = "复盘：" if data.get("phase") == SKILL_REVIEW_PHASE else ""
+    print(f"[review] {prefix}{_format_progress(event, data)}",
+          file=sys.stderr, flush=True)
+
+
+def _report_skill_review(result, out_dir) -> None:
+    """Say what the retrospective produced, or why it produced nothing.
+
+    The candidate file holds only the revised text, so the reviewer's account of
+    what it changed and why is printed here -- otherwise a reader has to diff
+    the candidate against the skill to learn anything from it.
+    """
+    from code_review_ai.review_loop.skill_review import submission_changes
+    inner = getattr(result, "skill_review", None)
+    if inner is None:
+        print("[review] 复盘未运行", file=sys.stderr, flush=True)
+        return
+    if not len(getattr(inner.submission, "skill", "") or ""):
+        print(f"[review] 复盘未交卷："
+              f"{inner.failure_reason or '没有调用 submit_skill'}",
+              file=sys.stderr, flush=True)
+        return
+    print(f"[review] 复盘完成：候选写在 {out_dir}", file=sys.stderr, flush=True)
+    for change in submission_changes(inner):
+        print(f"[review]   改动：{change}", file=sys.stderr, flush=True)
 
 
 def _review_hooks(quiet: bool):
@@ -288,6 +330,74 @@ def _resolve_policy(args) -> str | None:
     return text
 
 
+def _resolve_harness_skill(args) -> str | None:
+    """The harness skill text to inject, or ``None`` to inject none.
+
+    Every failure raises ``ValueError`` so ``_cmd_review`` maps it to
+    ``_BAD_CONFIG`` (exit 2), for the same reason ``--policy-file`` does: a
+    skill that silently failed to load produces a run indistinguishable from
+    "the skill made no difference", which is the hardest result to read.
+
+    Frontmatter is stripped here rather than deeper down, so the second system
+    message is the skill's body and nothing else. The retrospective is told to
+    revise "the second system message"; that phrase only has one meaning if the
+    message never carries anything but the body.
+    """
+    if args.harness_skill is None:
+        return None
+    if not args.harness_skill.strip():
+        raise ValueError(
+            "--harness-skill was given an empty path (an unset shell "
+            "variable?); pass a path or omit the flag")
+    path = Path(args.harness_skill)
+    if not path.is_file():
+        raise ValueError(f"--harness-skill {args.harness_skill} does not exist")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(
+            f"--harness-skill {args.harness_skill} is unreadable: {exc}") from exc
+    body = strip_frontmatter(text)
+    if not body:
+        raise ValueError(f"--harness-skill {args.harness_skill} is empty")
+    return body
+
+
+def _skill_review_request(args):
+    """The retrospective to run after the review, or ``None`` (the default).
+
+    ``--skill-review`` without ``--harness-skill`` is bad configuration, not a
+    no-op: the retrospective is pointed at the second system message, and with
+    no skill injected there is nothing there to revise. Running anyway would
+    look exactly like "the retrospective found nothing to change".
+    """
+    from code_review_ai.review_loop.skill_review import SkillReview
+    if args.skill_review is None:
+        return None
+    if not args.harness_skill or not args.skill_review.strip():
+        raise ValueError(
+            "--skill-review needs a non-empty --harness-skill: the "
+            "retrospective revises the skill injected as the second system "
+            "message, and there is none to revise")
+    return SkillReview(out_dir=Path(args.skill_review),
+                       model=args.skill_review_model)
+
+
+class _Request(NamedTuple):
+    """What the review is handed beyond the diff.
+
+    Three values that travel together because the CLI resolves all three from
+    flags before dispatch, and because two of them are only meaningful together
+    (a retrospective is pointed at the harness skill). ``result``-style typing
+    on ``skill_review`` keeps this module free of a top-level ``review_loop``
+    import.
+    """
+
+    policy: str | None
+    harness_skill: str | None
+    skill_review: object | None  # review_loop.skill_review.SkillReview
+
+
 def _sync_index(args, ctx, conn) -> None:
     """Bring the index current before the graph arm reads it.
 
@@ -332,7 +442,8 @@ def _reject_summary_without_an_index(args) -> None:
             f"Use --arm {GRAPH_ARM} or drop --summary")
 
 
-def _graph_review(args, ctx, settings: _ModelSettings, hooks, policy) -> "_ArmRun":
+def _graph_review(args, ctx, settings: _ModelSettings, hooks,
+                  request: _Request) -> "_ArmRun":
     """The index arm: sync, then review the diff with the graph tools offered."""
     from code_review_ai.review_loop.runner import run_review
     conn = ctx.connect()
@@ -347,11 +458,14 @@ def _graph_review(args, ctx, settings: _ModelSettings, hooks, policy) -> "_ArmRu
                         api_key_env=settings.api_key_env,
                         max_turns=args.max_turns,
                         max_total_tokens=args.max_tokens,
-                        policy=policy, summary=summary)
+                        policy=request.policy, summary=summary,
+                        harness_skill=request.harness_skill,
+                        skill_review=request.skill_review)
     return _ArmRun(result, summary)
 
 
-def _noindex_review(args, ctx, settings: _ModelSettings, hooks, policy) -> "_ArmRun":
+def _noindex_review(args, ctx, settings: _ModelSettings, hooks,
+                    request: _Request) -> "_ArmRun":
     """The no-index arm: the same diff, read/search only -- no graph, no index.
 
     Never carries a summary: ``--summary`` is rejected before dispatch, since
@@ -366,7 +480,9 @@ def _noindex_review(args, ctx, settings: _ModelSettings, hooks, policy) -> "_Arm
                         tool_names=list(NOINDEX_TOOLS),
                         max_turns=args.max_turns,
                         max_total_tokens=args.max_tokens,
-                        policy=policy)
+                        policy=request.policy,
+                        harness_skill=request.harness_skill,
+                        skill_review=request.skill_review)
     return _ArmRun(result)
 
 
@@ -391,9 +507,13 @@ def _run_review_command(args, ctx, settings: _ModelSettings, hooks) -> dict:
     from code_review_ai.review_loop.runner import resolve_api_key
     started_at = time.perf_counter()
     resolve_api_key(ctx.cfg.repo_path, settings.api_key_env)
-    policy = _resolve_policy(args)
     _reject_summary_without_an_index(args)
-    run = _ARM_RUNNERS[args.arm](args, ctx, settings, hooks, policy)
+    request = _Request(policy=_resolve_policy(args),
+                       harness_skill=_resolve_harness_skill(args),
+                       skill_review=_skill_review_request(args))
+    run = _ARM_RUNNERS[args.arm](args, ctx, settings, hooks, request)
+    if request.skill_review is not None:
+        _report_skill_review(run.result, request.skill_review.out_dir)
     if not args.no_progress:
         elapsed = time.perf_counter() - started_at
         print(f"[review] 总耗时：{elapsed:.1f}s", file=sys.stderr, flush=True)

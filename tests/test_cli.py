@@ -432,3 +432,132 @@ def test_json_on_stdout_survives_a_non_utf8_console(monkeypatch):
     printed = narrow.buffer.getvalue().decode("gbk")
 
     assert json.loads(printed) == payload
+
+
+# ------------------------------------------------- the harness skill + review --
+
+
+def _review_argv(tmp_path, *extra: str) -> list[str]:
+    """A review command line that never touches an index or a model."""
+    return ["review", "--arm", "nograph", "--repo", str(tmp_path),
+            "--db", str(tmp_path / "i.db"), "--model", "m", *extra]
+
+
+def _capture_review(monkeypatch, calls: dict) -> None:
+    def fake_review(config, conn=None, **kwargs):
+        calls.update(kwargs)
+        return FakeResult()
+
+    monkeypatch.setattr("code_review_ai.review_loop.runner.run_review", fake_review)
+
+
+def test_review_parses_the_harness_skill_and_retrospective_flags():
+    args = cli._build_parser().parse_args(
+        ["review", "--harness-skill", "h.md", "--skill-review", "candidates",
+         "--skill-review-model", "m2"])
+
+    assert args.harness_skill == "h.md"
+    assert args.skill_review == "candidates"
+    assert args.skill_review_model == "m2"
+
+
+def test_review_retrospective_flags_default_to_off():
+    """Nothing about this feature is on by default: a run with no flags must
+    make the same request it made before it existed."""
+    args = cli._build_parser().parse_args(["review"])
+
+    assert args.harness_skill is None
+    assert args.skill_review is None
+    assert args.skill_review_model is None
+
+
+def test_cli_review_passes_the_harness_skill_body_to_the_arm(tmp_path, monkeypatch):
+    """The body, not the file: frontmatter belongs to the platform's skill
+    loader, and the second system message is the skill itself."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "build_diff_text", lambda cfg, files=None: "")
+    skill = tmp_path / "harness.md"
+    skill.write_text("---\nname: code-review-harness\n---\n\nONLY THE BODY\n",
+                     encoding="utf-8")
+    calls: dict = {}
+    _capture_review(monkeypatch, calls)
+
+    code = main(_review_argv(tmp_path, "--harness-skill", str(skill)))
+
+    assert code == 0
+    assert calls["harness_skill"] == "ONLY THE BODY"
+    assert calls["skill_review"] is None
+
+
+def test_cli_review_hands_the_retrospective_request_to_the_arm(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "build_diff_text", lambda cfg, files=None: "")
+    skill = tmp_path / "harness.md"
+    skill.write_text("HARNESS BODY", encoding="utf-8")
+    out_dir = tmp_path / "candidates"
+    calls: dict = {}
+    _capture_review(monkeypatch, calls)
+
+    code = main(_review_argv(tmp_path, "--harness-skill", str(skill),
+                             "--skill-review", str(out_dir),
+                             "--skill-review-model", "m2"))
+
+    assert code == 0
+    request = calls["skill_review"]
+    assert request.out_dir == out_dir
+    assert request.model == "m2"
+
+
+def test_missing_harness_skill_exits_2(tmp_path, monkeypatch, capsys):
+    """A skill that silently failed to load looks exactly like a skill that
+    changed nothing -- the hardest result to read, and the reason
+    ``--policy-file`` fails the same way."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+
+    code = main(_review_argv(tmp_path, "--harness-skill", "does-not-exist.md"))
+
+    assert code == 2
+    assert "does-not-exist.md" in capsys.readouterr().err
+
+
+def test_empty_harness_skill_argument_exits_2(tmp_path, monkeypatch, capsys):
+    """`--harness-skill ""` -- an unset shell variable -- must not fall through
+    to ``is_file()`` and blame the wrong problem."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+
+    code = main(_review_argv(tmp_path, "--harness-skill", ""))
+
+    assert code == 2
+    assert "harness-skill" in capsys.readouterr().err
+
+
+def test_a_harness_skill_with_no_body_exits_2(tmp_path, monkeypatch, capsys):
+    """Frontmatter alone is an empty skill: injecting it would put a blank
+    second system message in the request and call that a harness."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+    skill = tmp_path / "harness.md"
+    skill.write_text("---\nname: code-review-harness\n---\n", encoding="utf-8")
+
+    code = main(_review_argv(tmp_path, "--harness-skill", str(skill)))
+
+    assert code == 2
+    assert "empty" in capsys.readouterr().err
+
+
+def test_skill_review_without_a_harness_skill_exits_2(tmp_path, monkeypatch, capsys):
+    """Bad configuration, not a no-op.
+
+    The retrospective is told to revise the second system message. With none
+    injected there is nothing there, and running anyway would read exactly like
+    "the retrospective found nothing to change".
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.chdir(tmp_path)
+
+    code = main(_review_argv(tmp_path, "--skill-review", str(tmp_path / "out")))
+
+    assert code == 2
+    assert "--harness-skill" in capsys.readouterr().err

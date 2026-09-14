@@ -31,9 +31,17 @@ from code_review_ai.review_loop.schemas import (
     ToolTrace,
     Usage,
 )
+from code_review_ai.review_loop.skill_review import (
+    SUBMIT_SKILL_TOOL,
+    SkillReview,
+    SkillSubmission,
+    run_skill_review,
+    submit_skill_tool,
+)
 
 __all__ = [
     "FINISH_REVIEW_TOOL",
+    "SUBMIT_SKILL_TOOL",
     "AssistantTurn",
     "Finding",
     "Hooks",
@@ -44,6 +52,8 @@ __all__ = [
     "POINT_PRE_TOOL",
     "POINT_RUN_FINISHED",
     "ReviewSubmission",
+    "SkillReview",
+    "SkillSubmission",
     "ToolCallStatus",
     "ToolSpec",
     "ToolTrace",
@@ -51,4 +61,6 @@ __all__ = [
     "compute_cost",
     "loop_result_payload",
     "run_loop",
+    "run_skill_review",
+    "submit_skill_tool",
 ]

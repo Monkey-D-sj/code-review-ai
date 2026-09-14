@@ -26,12 +26,43 @@ def loop_result_payload(result, model_name: str | None = None,
         "tool_trace": [dict(record) for record in result.tool_trace],
         "assistant_turns": [turn.model_dump() for turn in result.assistant_turns],
         "change_summary_chars": len(summary or ""),
+        "skill_review": _skill_review(getattr(result, "skill_review", None)),
         "review_complete": result.review_complete,
         "usage": {"input_tokens": _token_count(usage, "input_tokens"),
                   "output_tokens": _token_count(usage, "output_tokens"),
                   "cache_read_input_tokens": _token_count(usage, "cache_read"),
                   "model": model_name},
         "failure_reason": result.failure_reason,
+    }
+
+
+def _skill_review(inner) -> dict | None:
+    """The retrospective's own run, reported apart from the review it read.
+
+    ``None`` when none ran. Its input is the parent's entire history and its
+    tokens bill separately, so folding its usage into the review's would make
+    two runs' costs indistinguishable -- which matters most when cost is the
+    thing under comparison. ``changes`` is the reviewer's own account of what it
+    edited and why; the candidate file itself holds only the revised text, so
+    this is the only place that account survives.
+    """
+    if inner is None:
+        return None
+    submission = getattr(inner, "submission", None)
+    usage = inner.usage if isinstance(inner.usage, dict) else {}
+    return {
+        "chars": len(getattr(submission, "skill", "") or ""),
+        "changes": [str(change) for change in
+                    (getattr(submission, "changes", None) or [])],
+        "review_complete": inner.review_complete,
+        "failure_reason": inner.failure_reason,
+        "turn_count": len(inner.assistant_turns),
+        "tool_calls": [record["tool"] for record in inner.tool_trace
+                       if isinstance(record.get("tool"), str)],
+        "cost": inner.cost,
+        "usage": {"input_tokens": _token_count(usage, "input_tokens"),
+                  "output_tokens": _token_count(usage, "output_tokens"),
+                  "cache_read_input_tokens": _token_count(usage, "cache_read")},
     }
 
 

@@ -12,11 +12,19 @@ from __future__ import annotations
 import importlib.resources
 import re
 
-_FRONTMATTER_RE = re.compile(r"^---\n.*?\n---\n", re.DOTALL)
+# ``\r?\n`` because a Windows checkout writes these files back with CRLF, and a
+# frontmatter block that fails to match does not error -- it ships the YAML into
+# whatever prompt the body was destined for.
+_FRONTMATTER_RE = re.compile(r"^---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
+
+
+def strip_frontmatter(text: str) -> str:
+    """Drop a leading YAML frontmatter block, if the text carries one."""
+    return _FRONTMATTER_RE.sub("", text).strip()
 
 
 def load_skill_body(name: str) -> str:
     """Return the body of a bundled skill's SKILL.md, frontmatter stripped."""
     path = importlib.resources.files("code_review_ai").joinpath(
         "skills", name, "SKILL.md")
-    return _FRONTMATTER_RE.sub("", path.read_text(encoding="utf-8")).strip()
+    return strip_frontmatter(path.read_text(encoding="utf-8"))

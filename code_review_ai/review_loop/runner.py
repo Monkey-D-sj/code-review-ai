@@ -30,6 +30,7 @@ from code_review_ai.review_loop.loop import MAX_TURNS, run_loop
 from code_review_ai.review_loop.pricing import compute_cost
 from code_review_ai.review_loop.providers import build_review_model
 from code_review_ai.review_loop.schemas import Finding, LoopResult, ToolSpec, Usage
+from code_review_ai.review_loop.skill_review import SkillReview, run_skill_review
 from code_review_ai.review_loop.tools import finish_review_tool, make_tools
 
 _API_KEY_ENV = "OPENAI_API_KEY"
@@ -111,7 +112,8 @@ def create_model(config: Config, *, model_name: str | None = None,
 
 
 def build_initial_messages(prompt: str, diff: str, policy: str | None = None,
-                           summary: str | None = None) -> list[BaseMessage]:
+                           summary: str | None = None,
+                           harness_skill: str | None = None) -> list[BaseMessage]:
     """The review request: policy as system, prompt (+ summary) + diff as user.
 
     A *falsy* ``policy`` -- ``None`` or ``""`` -- keeps the built-in ``_POLICY``
@@ -120,6 +122,14 @@ def build_initial_messages(prompt: str, diff: str, policy: str | None = None,
     empty file and an empty ``--policy-file`` argument before dispatch, so the
     two cases are indistinguishable only to a direct library caller. SkillOpt
     injects the policy under optimization here.
+
+    A non-empty ``harness_skill`` becomes a **second** system message, right
+    after the policy: the policy decides what counts as a regression, the
+    harness skill decides how far to look and when to stop. They are kept apart
+    so the retrospective can revise one without touching the other -- it is
+    pointed at "the second system message", which only means something if this
+    message is always the second one. Frontmatter, if the source file had any,
+    is the caller's to strip.
 
     A *falsy* ``summary`` is the baseline: the model gets the prompt and the
     diff, nothing else. A non-empty one is injected as its own ``CHANGE
@@ -133,10 +143,12 @@ def build_initial_messages(prompt: str, diff: str, policy: str | None = None,
     head = f"{prompt}\n\n"
     if summary:
         head += f"CHANGE SUMMARY\n{summary}\n\n"
-    return [
-        SystemMessage(content=policy or _POLICY),
-        HumanMessage(content=f"{head}DIFF\n{diff or '(no working-tree diff)'}"),
-    ]
+    messages = [SystemMessage(content=policy or _POLICY)]
+    if harness_skill:
+        messages.append(SystemMessage(content=harness_skill))
+    messages.append(
+        HumanMessage(content=f"{head}DIFF\n{diff or '(no working-tree diff)'}"))
+    return messages
 
 
 def _repo_tools(config: Config, conn,
@@ -151,6 +163,32 @@ def _repo_tools(config: Config, conn,
         return tools
     wanted = set(tool_names)
     return [tool for tool in tools if tool.name in wanted]
+
+
+def _review_harness_skill(config: Config, skill_review: SkillReview, *,
+                          result: LoopResult, tools: list[ToolSpec],
+                          parent_model: BaseChatModel, base_url: str | None,
+                          api_key_env: str, hooks=None) -> None:
+    """Retrospect the run that just finished, if one was asked for.
+
+    Lives here rather than in the CLI because this is the only layer holding
+    both halves of what a retrospective needs: the finished run's messages and
+    the tools that run was given. Model construction is the one failure allowed
+    to escape -- a bad ``--skill-review-model`` or a missing key is a
+    configuration error the caller should hear about, whereas a retrospective
+    that failed mid-run is simply a retrospective that produced nothing.
+
+    The parent's observers are handed on, so the retrospective's turns are
+    visible as its own (they carry ``SKILL_REVIEW_PHASE``) rather than being
+    silently dropped.
+    """
+    model = parent_model
+    if skill_review.model:
+        model = create_model(config, model_name=skill_review.model,
+                             base_url=base_url, api_key_env=api_key_env)
+    run_skill_review(model, result, tools, out_dir=skill_review.out_dir,
+                     max_turns=skill_review.max_turns,
+                     trigger=skill_review.trigger, hooks=hooks)
 
 
 def run_review(
@@ -169,6 +207,8 @@ def run_review(
     max_total_tokens: int | None = None,
     policy: str | None = None,
     summary: str | None = None,
+    harness_skill: str | None = None,
+    skill_review: SkillReview | None = None,
 ) -> LoopResult:
     """Run one code review of ``diff`` and return the model's findings.
 
@@ -180,19 +220,36 @@ def run_review(
     uncapped) stops the loop once the provider-reported total exceeds it.
     A falsy ``policy`` (``None`` or ``""``) keeps the built-in system policy;
     any other value replaces it (see :func:`build_initial_messages`).
+
+    ``harness_skill`` is injected as a second system message (see
+    :func:`build_initial_messages`). ``skill_review``, when given, runs a
+    retrospective over this review once it has finished, and writes a candidate
+    harness skill to its ``out_dir``; it needs ``harness_skill`` to have
+    something to revise, and saying so here beats letting a retrospective point
+    at a system message that does not exist.
+
     Returns the findings, plus ``usage`` and the yuan ``cost`` computed from it
     at the DeepSeek per-million rates (see ``compute_cost``).
     """
     if model is None:
         model = create_model(config, model_name=model_name, base_url=base_url,
                              api_key_env=api_key_env)
+    if skill_review is not None and not harness_skill:
+        raise ValueError(
+            "skill_review needs harness_skill: with no second system message "
+            "there is no harness skill for the retrospective to revise")
     messages = build_initial_messages(prompt, diff, policy=policy,
-                                      summary=summary)
+                                      summary=summary,
+                                      harness_skill=harness_skill)
     tools = [*_repo_tools(config, conn, tool_names), finish_review_tool()]
     result = run_loop(model, tools, initial_messages=messages, hooks=hooks,
                       max_turns=MAX_TURNS if max_turns is None else max_turns,
                       max_total_tokens=max_total_tokens)
     result.cost = compute_cost(result.usage)
+    if skill_review is not None:
+        _review_harness_skill(config, skill_review, result=result, tools=tools,
+                              parent_model=model, base_url=base_url,
+                              api_key_env=api_key_env, hooks=hooks)
     return result
 
 
@@ -200,6 +257,7 @@ __all__ = [
     "Finding",
     "LoopResult",
     "NOINDEX_TOOLS",
+    "SkillReview",
     "Usage",
     "build_initial_messages",
     "create_model",
