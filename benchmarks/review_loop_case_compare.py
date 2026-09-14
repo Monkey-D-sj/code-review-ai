@@ -64,7 +64,11 @@ from code_review_ai.indexer import rebuild  # noqa: E402
 
 ARMS = ("graph", "nograph")
 MAX_TURNS = 25
-MAX_TOTAL_TOKENS = 150_000
+# 250k, not 150k: the longest case (cb-recall-search-to-dict-fan-in) reached
+# 144,668 tokens on the index arm -- 96% of the old cap, so a budget kill was
+# one turn away and would have been recorded as a plain miss. 150k was a guess
+# with nothing behind it.
+MAX_TOTAL_TOKENS = 250_000
 DEFAULT_OUTPUT = REPO_ROOT / "eval-results" / "review-loop-ab.json"
 
 # Each case's scratch repo is one pristine commit plus a working-tree patch, so

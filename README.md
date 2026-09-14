@@ -156,7 +156,7 @@ command a user runs, so the harness cannot drift from the product:
   `read_file` / `search_code` plus `finish_review`, seeing only the diff.
 
 The arm is the only difference between a run and its counterpart, prompt
-included. Both run under the same 25-turn / 150k-token budget, so the cost
+included. Both run under the same 25-turn / 250k-token budget, so the cost
 columns are directly comparable. Scoring is one rule: a run hit if a reported
 finding lands on the gold fix site (`fix_file`, or an alternate file — the same
 regression can be repaired on either side of the broken contract). Whether the
