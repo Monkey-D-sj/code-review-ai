@@ -172,6 +172,43 @@ def test_build_initial_messages_defaults_to_the_builtin_policy():
     assert messages[0].content == _POLICY
 
 
+def test_build_initial_messages_omits_the_change_summary_by_default():
+    """The baseline stays the baseline: with no summary the model gets the
+    diff and nothing else. Every existing run must be byte-identical."""
+    messages = build_initial_messages("review auth", "+ x = None")
+
+    assert "CHANGE SUMMARY" not in messages[1].content
+
+
+def test_build_initial_messages_carries_the_summary_ahead_of_the_diff():
+    """When injected the summary is its own labelled block, not folded into
+    the diff -- and the diff stays last, so it is what the model reads before
+    it starts reasoning."""
+    messages = build_initial_messages("review auth", "+ x = None",
+                                      summary='{"qname": "m::UserModel"}')
+
+    body = messages[1].content
+    assert "CHANGE SUMMARY" in body
+    assert '{"qname": "m::UserModel"}' in body
+    assert body.index("CHANGE SUMMARY") < body.index("DIFF")
+
+
+def test_run_review_threads_the_summary_into_the_request(env):
+    config, conn = env
+    seen: dict = {}
+
+    class CapturingModel(ScriptedReviewModel):
+        def invoke(self, messages):
+            seen.setdefault("request", messages[1].content)
+            return super().invoke(messages)
+
+    run_review(config, conn, prompt="review this diff", diff="+ leaked = True",
+               summary="CHANGED: m::UserModel", model=CapturingModel(),
+               max_turns=5)
+
+    assert "CHANGED: m::UserModel" in seen["request"]
+
+
 def test_run_review_threads_the_policy_into_the_request(env):
     config, conn = env
     model = ScriptedReviewModel()

@@ -316,6 +316,101 @@ def test_non_utf8_policy_file_exits_2_and_names_the_file(tmp_path, monkeypatch, 
     assert "nonutf8.md" in capsys.readouterr().err
 
 
+def test_review_summary_flag_defaults_off():
+    args = cli._build_parser().parse_args(["review"])
+
+    assert args.summary is False
+
+
+def test_cli_review_injects_the_change_summary_into_the_graph_arm(
+        tmp_path, monkeypatch):
+    """`--summary` builds the index's change summary and hands it to the arm
+    as prompt text -- read-only orientation, not a worksheet: it names what
+    changed, it does not demand a verdict per row."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "build_diff_text", lambda cfg, files=None: "DIFF-BODY")
+    monkeypatch.setattr(cli, "sync", lambda *args, **kwargs: None)
+    seen: dict = {}
+
+    def fake_build(cfg, conn):
+        seen["cfg"] = cfg
+        return {"changed_functions": [{"qname": "m::UserModel"}]}
+
+    monkeypatch.setattr(cli, "build_change_summary", fake_build)
+    calls = {}
+
+    def fake_review(config, conn=None, **kwargs):
+        calls.update(kwargs)
+        return FakeResult()
+
+    monkeypatch.setattr("code_review_ai.review_loop.runner.run_review", fake_review)
+    code = main(["review", "--repo", FIX, "--db", str(tmp_path / "r.db"),
+                 "--model", "m", "--summary", "--out", str(tmp_path / "o.json")])
+
+    assert code == 0
+    assert calls["summary"] == '{"changed_functions": [{"qname": "m::UserModel"}]}'
+    # Metadata-only: the default `summary_source="diff"` would attach each
+    # function's own unified diff, sending the diff into the prompt twice.
+    assert seen["cfg"].summary_source == "none"
+
+
+def test_cli_review_builds_the_summary_after_syncing_the_index(
+        tmp_path, monkeypatch):
+    """Order matters, and only here is it visible: a summary built from a
+    stale index would describe a tree the reviewer is not looking at."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "build_diff_text", lambda cfg, files=None: "")
+    order: list[str] = []
+    monkeypatch.setattr(cli, "sync",
+                        lambda *args, **kwargs: order.append("sync"))
+
+    def fake_build(cfg, conn):
+        order.append("summary")
+        return {"changed_functions": []}
+
+    monkeypatch.setattr(cli, "build_change_summary", fake_build)
+    monkeypatch.setattr("code_review_ai.review_loop.runner.run_review",
+                        lambda *args, **kwargs: FakeResult())
+    code = main(["review", "--repo", FIX, "--db", str(tmp_path / "r.db"),
+                 "--model", "m", "--summary", "--out", str(tmp_path / "o.json")])
+
+    assert code == 0
+    assert order == ["sync", "summary"]
+
+
+def test_cli_review_without_summary_passes_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "build_diff_text", lambda cfg, files=None: "")
+    monkeypatch.setattr(cli, "sync", lambda *args, **kwargs: None)
+    calls = {}
+
+    def fake_review(config, conn=None, **kwargs):
+        calls.update(kwargs)
+        return FakeResult()
+
+    monkeypatch.setattr("code_review_ai.review_loop.runner.run_review", fake_review)
+    code = main(["review", "--repo", FIX, "--db", str(tmp_path / "r.db"),
+                 "--model", "m", "--out", str(tmp_path / "o.json")])
+
+    assert code == 0
+    assert calls["summary"] is None
+
+
+def test_summary_on_the_nograph_arm_exits_2(tmp_path, monkeypatch, capsys):
+    """The summary comes from the index, so the no-index arm cannot build one.
+    Refusing beats ignoring: silently dropping it would make the run look like
+    the summary made no difference."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "build_diff_text", lambda cfg, files=None: "")
+    monkeypatch.chdir(tmp_path)
+
+    code = main(["review", "--arm", "nograph", "--repo", str(tmp_path),
+                 "--db", str(tmp_path / "i.db"), "--model", "m", "--summary"])
+
+    assert code == 2
+    assert "summary" in capsys.readouterr().err
+
+
 def test_json_on_stdout_survives_a_non_utf8_console(monkeypatch):
     """stdout is the CLI's machine interface, and callers decode it -- but it
     is written with the *console's* code page, not a fixed one. On a Chinese

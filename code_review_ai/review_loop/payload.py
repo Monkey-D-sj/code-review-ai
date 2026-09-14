@@ -7,8 +7,15 @@ to the loop it summarises, so the review path owns its own output shape.
 from __future__ import annotations
 
 
-def loop_result_payload(result, model_name: str | None = None) -> dict:
-    """Map a ``LoopResult`` onto the review command's JSON payload."""
+def loop_result_payload(result, model_name: str | None = None,
+                        summary: str | None = None) -> dict:
+    """Map a ``LoopResult`` onto the review command's JSON payload.
+
+    ``summary`` is the change summary that was injected into the request, if
+    any, and is reported as a length rather than echoed: the payload's job here
+    is to say what the model was given, and 0 is the baseline (diff only), so a
+    consumer comparing two runs can tell which one had the summary.
+    """
     usage = result.usage if isinstance(result.usage, dict) else {}
     return {
         "findings": [finding.model_dump() for finding in result.findings],
@@ -18,6 +25,7 @@ def loop_result_payload(result, model_name: str | None = None) -> dict:
         "tool_call_count": len(result.tool_trace),
         "tool_trace": [dict(record) for record in result.tool_trace],
         "assistant_turns": [turn.model_dump() for turn in result.assistant_turns],
+        "change_summary_chars": len(summary or ""),
         "review_complete": result.review_complete,
         "usage": {"input_tokens": _token_count(usage, "input_tokens"),
                   "output_tokens": _token_count(usage, "output_tokens"),

@@ -30,3 +30,18 @@ def test_payload_assistant_turns_is_empty_without_turns():
     payload = loop_result_payload(LoopResult(), None)
 
     assert payload["assistant_turns"] == []
+
+
+def test_payload_reports_no_change_summary_by_default():
+    """0 is the baseline: this run was handed the diff and nothing else. An
+    A/B over the summary is only readable if each payload says which arm of it
+    produced the numbers."""
+    payload = loop_result_payload(LoopResult(), None)
+
+    assert payload["change_summary_chars"] == 0
+
+
+def test_payload_reports_the_change_summary_size():
+    payload = loop_result_payload(LoopResult(), None, summary="CHANGED: m::UserModel")
+
+    assert payload["change_summary_chars"] == len("CHANGED: m::UserModel")

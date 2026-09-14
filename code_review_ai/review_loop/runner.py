@@ -110,9 +110,9 @@ def create_model(config: Config, *, model_name: str | None = None,
     return build_review_model(resolved_model, resolved_base, api_key)
 
 
-def build_initial_messages(prompt: str, diff: str,
-                           policy: str | None = None) -> list[BaseMessage]:
-    """The review request: policy as system, prompt + diff as user.
+def build_initial_messages(prompt: str, diff: str, policy: str | None = None,
+                           summary: str | None = None) -> list[BaseMessage]:
+    """The review request: policy as system, prompt (+ summary) + diff as user.
 
     A *falsy* ``policy`` -- ``None`` or ``""`` -- keeps the built-in ``_POLICY``
     as the system message (the expression is ``policy or _POLICY``); any other
@@ -120,10 +120,22 @@ def build_initial_messages(prompt: str, diff: str,
     empty file and an empty ``--policy-file`` argument before dispatch, so the
     two cases are indistinguishable only to a direct library caller. SkillOpt
     injects the policy under optimization here.
+
+    A *falsy* ``summary`` is the baseline: the model gets the prompt and the
+    diff, nothing else. A non-empty one is injected as its own ``CHANGE
+    SUMMARY`` block **before** the diff, so the diff stays the last thing read
+    and remains what the model reasons from. The block is orientation, not
+    scope: it says which symbols changed (the qnames ``get_impact`` takes) and
+    what the graph could not attribute. It deliberately does not restate the
+    hunks -- the diff is already here, and a summary carrying its own copy of
+    them would send the same text twice.
     """
+    head = f"{prompt}\n\n"
+    if summary:
+        head += f"CHANGE SUMMARY\n{summary}\n\n"
     return [
         SystemMessage(content=policy or _POLICY),
-        HumanMessage(content=f"{prompt}\n\nDIFF\n{diff or '(no working-tree diff)'}"),
+        HumanMessage(content=f"{head}DIFF\n{diff or '(no working-tree diff)'}"),
     ]
 
 
@@ -156,6 +168,7 @@ def run_review(
     max_turns: int | None = None,
     max_total_tokens: int | None = None,
     policy: str | None = None,
+    summary: str | None = None,
 ) -> LoopResult:
     """Run one code review of ``diff`` and return the model's findings.
 
@@ -173,7 +186,8 @@ def run_review(
     if model is None:
         model = create_model(config, model_name=model_name, base_url=base_url,
                              api_key_env=api_key_env)
-    messages = build_initial_messages(prompt, diff, policy=policy)
+    messages = build_initial_messages(prompt, diff, policy=policy,
+                                      summary=summary)
     tools = [*_repo_tools(config, conn, tool_names), finish_review_tool()]
     result = run_loop(model, tools, initial_messages=messages, hooks=hooks,
                       max_turns=MAX_TURNS if max_turns is None else max_turns,

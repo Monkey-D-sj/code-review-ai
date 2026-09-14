@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from code_review_ai.changes import build_diff_text
+from code_review_ai.changes import build_change_summary, build_diff_text
 from code_review_ai.config import load_config
 from code_review_ai.db import connect, init_schema
 from code_review_ai.installer import DEFAULT_SOURCE, install
@@ -99,6 +99,10 @@ def _build_parser() -> argparse.ArgumentParser:
     review.add_argument("--policy-file",
                         help="markdown file to use as the review policy (the "
                              "system prompt); defaults to the built-in policy")
+    review.add_argument("--summary", action="store_true",
+                        help="also give the reviewer the index's change "
+                             "summary (changed symbols and what the graph "
+                             "could not attribute); needs --arm graph")
     review.add_argument("--no-progress", action="store_true",
                         help="suppress live review progress on stderr")
     # Kept for compatibility: the TTY dashboard lived in the retired agent
@@ -298,32 +302,84 @@ def _sync_index(args, ctx, conn) -> None:
         print("[review] 索引同步完成", file=sys.stderr, flush=True)
 
 
-def _graph_review(args, ctx, settings: _ModelSettings, hooks, policy) -> object:
+def _change_summary_text(cfg, conn) -> str:
+    """The index's change summary, as the text the reviewer is handed.
+
+    Built metadata-only: ``summary_source`` defaults to ``"diff"``, which
+    attaches each changed function's own unified diff -- and the diff is
+    already in the request, so that copy would be sent twice for nothing.
+
+    Kept to "what changed and what the graph could not attribute". It is
+    orientation, not scope: the regression this review is looking for is
+    usually at the *other* end of the changed contract, so the summary must
+    not read as a list of places to check.
+    """
+    from dataclasses import replace
+    summary = build_change_summary(replace(cfg, summary_source="none"), conn)
+    return json.dumps(summary, ensure_ascii=False)
+
+
+def _reject_summary_without_an_index(args) -> None:
+    """``--summary`` on the no-index arm is bad configuration, not a no-op.
+
+    The summary comes from the graph, and that arm has no index by definition.
+    Ignoring the flag would let a caller believe the summary was injected and
+    conclude it made no difference -- the hardest kind of result to read.
+    """
+    if args.summary and args.arm == NOINDEX_ARM:
+        raise ValueError(
+            f"--summary needs the index; the {NOINDEX_ARM} arm has none. "
+            f"Use --arm {GRAPH_ARM} or drop --summary")
+
+
+def _graph_review(args, ctx, settings: _ModelSettings, hooks, policy) -> "_ArmRun":
     """The index arm: sync, then review the diff with the graph tools offered."""
     from code_review_ai.review_loop.runner import run_review
     conn = ctx.connect()
     _sync_index(args, ctx, conn)
-    return run_review(ctx.cfg, conn, prompt=_CLI_REVIEW_PROMPT,
-                      diff=build_diff_text(ctx.cfg, args.files), hooks=hooks,
-                      model_name=settings.model_name,
-                      base_url=settings.base_url,
-                      api_key_env=settings.api_key_env,
-                      max_turns=args.max_turns, max_total_tokens=args.max_tokens,
-                      policy=policy)
+    # After the sync, never before: a summary built from a stale index would
+    # describe a tree the reviewer is not looking at.
+    summary = _change_summary_text(ctx.cfg, conn) if args.summary else None
+    result = run_review(ctx.cfg, conn, prompt=_CLI_REVIEW_PROMPT,
+                        diff=build_diff_text(ctx.cfg, args.files), hooks=hooks,
+                        model_name=settings.model_name,
+                        base_url=settings.base_url,
+                        api_key_env=settings.api_key_env,
+                        max_turns=args.max_turns,
+                        max_total_tokens=args.max_tokens,
+                        policy=policy, summary=summary)
+    return _ArmRun(result, summary)
 
 
-def _noindex_review(args, ctx, settings: _ModelSettings, hooks, policy) -> object:
-    """The no-index arm: the same diff, read/search only -- no graph, no index."""
+def _noindex_review(args, ctx, settings: _ModelSettings, hooks, policy) -> "_ArmRun":
+    """The no-index arm: the same diff, read/search only -- no graph, no index.
+
+    Never carries a summary: ``--summary`` is rejected before dispatch, since
+    there is no index here to build one from.
+    """
     from code_review_ai.review_loop.runner import NOINDEX_TOOLS, run_review
-    return run_review(ctx.cfg, prompt=_CLI_REVIEW_PROMPT,
-                      diff=build_diff_text(ctx.cfg, args.files), hooks=hooks,
-                      model_name=settings.model_name,
-                      base_url=settings.base_url,
-                      api_key_env=settings.api_key_env,
-                      tool_names=list(NOINDEX_TOOLS),
-                      max_turns=args.max_turns,
-                      max_total_tokens=args.max_tokens,
-                      policy=policy)
+    result = run_review(ctx.cfg, prompt=_CLI_REVIEW_PROMPT,
+                        diff=build_diff_text(ctx.cfg, args.files), hooks=hooks,
+                        model_name=settings.model_name,
+                        base_url=settings.base_url,
+                        api_key_env=settings.api_key_env,
+                        tool_names=list(NOINDEX_TOOLS),
+                        max_turns=args.max_turns,
+                        max_total_tokens=args.max_tokens,
+                        policy=policy)
+    return _ArmRun(result)
+
+
+class _ArmRun(NamedTuple):
+    """One arm's outcome: what the loop produced, and what it was handed.
+
+    The summary rides along because only the arm can build it -- it is derived
+    from the index, which must be synced first -- yet the payload has to report
+    it, so that two runs of the same case can be told apart afterwards.
+    """
+
+    result: object
+    summary: str | None = None
 
 
 _ARM_RUNNERS = {GRAPH_ARM: _graph_review, NOINDEX_ARM: _noindex_review}
@@ -336,11 +392,13 @@ def _run_review_command(args, ctx, settings: _ModelSettings, hooks) -> dict:
     started_at = time.perf_counter()
     resolve_api_key(ctx.cfg.repo_path, settings.api_key_env)
     policy = _resolve_policy(args)
-    result = _ARM_RUNNERS[args.arm](args, ctx, settings, hooks, policy)
+    _reject_summary_without_an_index(args)
+    run = _ARM_RUNNERS[args.arm](args, ctx, settings, hooks, policy)
     if not args.no_progress:
         elapsed = time.perf_counter() - started_at
         print(f"[review] 总耗时：{elapsed:.1f}s", file=sys.stderr, flush=True)
-    return loop_result_payload(result, settings.model_name)
+    return loop_result_payload(run.result, settings.model_name,
+                               summary=run.summary)
 
 
 @user_facing
