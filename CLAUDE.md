@@ -56,7 +56,7 @@ git ls-files *.py
 
 dynamic/unresolved edges are kept (so the AI can see resolution gaps) but never enter `flow_builder`.
 
-**Flow model — current implementation deliberately differs from the design spec.** `flow_builder.build_flows` emits **one flow per entry point**, BFS-flattening *all* reachable nodes into a single ordered `path` (visited set prevents cycles/diamond re-expansion). The design spec (`docs/superpowers/specs/2026-07-24-code-review-ai-design.md` §4.4) describes "one flow per reachable node via BFS shortest path" — that was superseded by recent refactors (see commit `cc346c6`). `flows.depth` is now unused (0) and `criticality` is NULL. Do not "fix" this back to per-node flows; the tests (`test_flow_builder.py`) assert the flat-single-flow behavior.
+**Flow model — current implementation deliberately differs from the design spec.** `flow_builder.build_flows` emits **one flow per entry point**, BFS-flattening *all* reachable nodes into a single ordered `path` (visited set prevents cycles/diamond re-expansion). The design spec (removed from the tree in `7a0f583`, so read it from history: `git show 7a0f583^:docs/superpowers/specs/2026-07-24-code-review-ai-design.md` §4.4) describes "one flow per reachable node via BFS shortest path" — that was superseded by recent refactors (see commit `cc346c6`). `flows.depth` is now unused (0) and `criticality` is NULL. Do not "fix" this back to per-node flows; the tests (`test_flow_builder.py`) assert the flat-single-flow behavior.
 
 **Impact query** (`impact.get_impact`): for a changed symbol, builds a **whole-graph resolved-call adjacency** once per call (`_resolved_call_adjacency` — all nodes + `kind='call' AND resolution='resolved'` edges → forward/reverse id-space maps, a fixed O(E) cost) and derives upstream/downstream by **whole-graph BFS** (`_true_chain_ids`), ordered by (BFS level, qname) and capped per direction at `max_nodes_per_direction`. This supersedes the old flow-membership slicing (`position <` / `>` within each `flow_memberships` flow; see commit `5a2ccf1`) and exactly reproduces the per-flow-constrained union, while also covering symbols on no flow. The **only remaining flow read** is `_affected_entries`: the affected business entries still come from the flows the symbol sits in (`flow_memberships`) — a BFS has no notion of entry point. `include_call_sites=true` (default) attaches a `call_site` (call_form/line/args/code snippet — the same shape as `get_change_context`) to DIRECT upstream/downstream neighbors, the call points where a contract change breaks a caller; transitive hops stay qname-only, and `testimpact` opts out (`include_call_sites=False`). The `tests` param (`"exclude"` default = business impact, drops test nodes; `"only"` = keep only test nodes; `"include"` = all) filters upstream/downstream/entries by `nodes.is_test`. Every result carries `uncertainty` (one-hop non-resolved edges, capped 20) and `coverage` (adjacent-edge counts per resolution), computed regardless of the `tests` filter; a symbol absent from `nodes` returns `found: False` with uncertainty/coverage still attached.
 
@@ -74,7 +74,14 @@ MCP is the primary interface (`code-review-ai-mcp`): tools `rebuild_index`, `get
 
 ## Design spec & dev history
 
-The authoritative design doc (in Chinese) is `docs/superpowers/specs/2026-07-24-code-review-ai-design.md` — read it for intent on data model, resolution semantics, and lifecycle. Note where the code has since diverged (flow model, see above). `.superpowers/sdd/` holds task briefs/reports from the spec-driven build; `progress.md` tracks the 11 completed tasks.
+The spec-driven build's docs — the authoritative design doc (in Chinese), its plans, and the conformance reports — were removed from the tree in `7a0f583`. Read them from history; the design doc is still the place for intent on data model, resolution semantics and lifecycle:
+
+```bash
+git show 7a0f583^:docs/superpowers/specs/2026-07-24-code-review-ai-design.md
+git ls-tree -r --name-only 7a0f583^ -- docs/     # everything that was removed
+```
+
+Note where the code has since diverged (flow model, see above). `.superpowers/sdd/` holds task briefs/reports from that build; `progress.md` tracks the 11 completed tasks.
 
 ## 代码架构规范（强制）
 

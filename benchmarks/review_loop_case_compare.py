@@ -24,7 +24,7 @@ columns (tokens, files read, tool calls), not off a second score.
 
 Usage:
     uv run python benchmarks/review_loop_case_compare.py \
-        [--case case-backend-decrypt-password-alias] [--runs 6] \
+        [--case case-backend-search-to-dict-between] [--runs 6] \
         [--arms graph nograph] [-o eval-results/review-loop-ab.json]
 
 Both the DeepSeek provider this needs and pytest live in the ``dev`` dependency

@@ -73,11 +73,20 @@ def _batch(cases=None, findings_for=None, arms=("graph", "nograph"), runs=2):
 
 class TestLoadCases:
     def test_reads_the_case_backend_manifest(self):
+        """The shipped manifest loads and every case is complete.
+
+        Deliberately no count and no difficulty spread: this corpus is being
+        retired in favour of the field-contract family
+        (`benchmarks/field-contract-cases.json`), which scores set recall over
+        cross-layer contract regressions instead of "did a finding land on the
+        fix site". Pinning 21 cases, or the trivial/medium/hard spread that
+        only 21 cases had, would fail for the wrong reason the moment another
+        one is dropped -- which is what happened here.
+        """
         cases = load_cases()
 
-        assert len(cases) == 21
+        assert cases, "the shipped manifest has no cases"
         assert all(case.patch and case.prompt and case.causes for case in cases)
-        assert {case.difficulty for case in cases} == {"trivial", "medium", "hard"}
 
     def test_every_case_has_a_fix_site_and_a_present_fixture(self):
         for case in load_cases():
@@ -86,9 +95,9 @@ class TestLoadCases:
                 f"{case.id}: fixture {case.source_dir} is missing"
 
     def test_narrows_to_requested_ids(self):
-        cases = load_cases(case_ids=["case-backend-decrypt-password-alias"])
+        cases = load_cases(case_ids=["case-backend-search-to-dict-between"])
 
-        assert [case.id for case in cases] == ["case-backend-decrypt-password-alias"]
+        assert [case.id for case in cases] == ["case-backend-search-to-dict-between"]
 
     def test_rejects_unknown_ids(self):
         with pytest.raises(ValueError, match="unknown case id"):
