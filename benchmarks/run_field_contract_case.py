@@ -12,9 +12,18 @@ Three things it does that the scratch scripts it replaces did not:
   is what made "why did these two runs differ?" unanswerable. That question is
   the whole point of an A/B here, so the result has to survive the next run.
 - **The configuration is recorded, not remembered.** Case, arm, whether the
-  summary was injected, and the budget all land in the filename and inside the
-  file, so the runs stay distinguishable without trusting the operator.
+  summary was injected, whether a harness skill was, and the budget all land in
+  the filename and inside the file, so the runs stay distinguishable without
+  trusting the operator.
 - **The scratch repo is released.** Each one carries a multi-megabyte index.
+
+`--harness-skill` injects a process-discipline skill as the review's second
+system message; `--skill-review` then has the loop retrospect each run and write
+a candidate skill. Both default off, and a run with neither is byte-identical to
+one from before they existed. The candidates all land in one directory under
+timestamped names, so a batch does not overwrite itself -- but a reader cannot
+tell which case produced which candidate, which is why the record carries each
+run's `skill_review` block (cost included, kept apart from the review's cost).
 
 Unlike `review_loop_case_compare.py` this drives the newer field-contract
 corpus, whose cases are cross-layer contract regressions scored by set recall
@@ -134,25 +143,32 @@ def _load_dotenv() -> None:
             os.environ.setdefault(name, value)
 
 
-def _review_command(arm: str, summary: bool, max_turns: int,
-                    max_tokens: int) -> list[str]:
+def _review_command(arm: str, summary: bool, max_turns: int, max_tokens: int,
+                    harness_skill: Path | None,
+                    skill_review_dir: Path | None) -> list[str]:
     command = [sys.executable, "-m", "code_review_ai.cli", "review",
                "--arm", arm, "--no-progress",
                "--max-turns", str(max_turns), "--max-tokens", str(max_tokens)]
     if summary:
         command.append("--summary")
+    if harness_skill:
+        command.extend(["--harness-skill", str(harness_skill)])
+    if skill_review_dir:
+        command.extend(["--skill-review", str(skill_review_dir)])
     return command
 
 
-def run_once(case, *, arm: str, summary: bool, max_turns: int,
-             max_tokens: int, run_index: int) -> dict:
+def run_once(case, *, arm: str, summary: bool, max_turns: int, max_tokens: int,
+             run_index: int, harness_skill: Path | None = None,
+             skill_review_dir: Path | None = None) -> dict:
     """Materialize, run one arm, score it, and return the whole record."""
     prepared = materialize(case)
     try:
         started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         started = time.perf_counter()
         completed = subprocess.run(
-            _review_command(arm, summary, max_turns, max_tokens),
+            _review_command(arm, summary, max_turns, max_tokens, harness_skill,
+                            skill_review_dir),
             cwd=str(prepared.path), capture_output=True, encoding="utf-8",
             errors="replace", env=_review_env())
         elapsed = time.perf_counter() - started
@@ -169,6 +185,9 @@ def run_once(case, *, arm: str, summary: bool, max_turns: int,
     result = score(case, payload.get("findings") or [])
     return {
         "run": {"case_id": case.id, "arm": arm, "summary": summary,
+                "harness_skill": str(harness_skill) if harness_skill else None,
+                "skill_review_dir": (str(skill_review_dir)
+                                     if skill_review_dir else None),
                 "max_turns": max_turns, "max_tokens": max_tokens,
                 "run_index": run_index, "started_at": started_at,
                 "elapsed_s": round(elapsed, 1)},
@@ -194,15 +213,51 @@ def _score_record(case, result, payload: dict) -> dict:
         "failure_reason": payload.get("failure_reason"),
         "change_summary_chars": payload.get("change_summary_chars"),
         "tool_call_count": payload.get("tool_call_count"),
+        "skill_review": _skill_review_record(payload),
+    }
+
+
+def _skill_review_record(payload: dict) -> dict | None:
+    """The retrospective's own cost, kept apart from the review's.
+
+    It rides along in the same payload and is a fixed addition per run whose
+    input is the review's entire history. Folding it into the review's cost
+    would make an arm comparison -- which is about the review -- read as though
+    the arm that ran a retrospective were the more expensive one.
+    """
+    block = payload.get("skill_review")
+    if not isinstance(block, dict):
+        return None
+    usage = block.get("usage") or {}
+    input_tokens = usage.get("input_tokens") or 0
+    cached = usage.get("cache_read_input_tokens") or 0
+    return {
+        "chars": block.get("chars"),
+        "changes": len(block.get("changes") or []),
+        "review_complete": block.get("review_complete"),
+        "failure_reason": block.get("failure_reason"),
+        "cost": block.get("cost"),
+        "input_tokens": input_tokens,
+        "cache_read_input_tokens": cached,
+        "cache_hit_rate": round(cached / input_tokens, 3) if input_tokens else None,
     }
 
 
 def _output_path(out_dir: Path, record: dict) -> Path:
     """One file per configuration, named so a directory listing reads as the
-    experiment: case, arm, whether the summary was injected, budget, repeat."""
+    experiment: case, arm, whether the summary was injected, whether a harness
+    skill was, budget, repeat.
+
+    The harness tag is in the name because it changes the *request*: two runs
+    that differ only there are not comparable, and a listing that hid the
+    difference would invite comparing them. Whether a retrospective ran is not
+    named -- it cannot change the review it reads -- so that axis lives in the
+    record alone.
+    """
     run = record["run"]
     summary_tag = "sum" if run["summary"] else "nosum"
-    name = (f"{run['case_id']}__{run['arm']}__{summary_tag}"
+    harness_tag = "hs" if run["harness_skill"] else "nohs"
+    name = (f"{run['case_id']}__{run['arm']}__{summary_tag}__{harness_tag}"
             f"__t{run['max_tokens']}__r{run['run_index']}.json")
     return out_dir / name
 
@@ -217,6 +272,28 @@ def _report(record: dict, path: Path) -> None:
           f"complete={score_record['review_complete']}] -> {path.name}")
     for site in score_record["missed"]:
         print(f"      missed {site}")
+    retrospective = score_record.get("skill_review")
+    if retrospective:
+        cached = retrospective["cache_hit_rate"]
+        cached_text = "n/a" if cached is None else f"{cached:.0%}"
+        print(f"      retrospective: {retrospective['chars']} chars, "
+              f"{retrospective['changes']} change(s), "
+              f"{retrospective['cost']:.4f} yuan, cache hit {cached_text}")
+
+
+def _run_paths(args, out_dir: Path) -> tuple:
+    """Resolve the two new paths against *this* process, not the scratch repo.
+
+    The review runs with `cwd=<scratch repo>`, so a relative path handed to it
+    would resolve inside a directory that is deleted moments later. Both are
+    made absolute here, before they ever reach the CLI.
+    """
+    harness_skill = Path(args.harness_skill).resolve() if args.harness_skill else None
+    skill_review_dir = None
+    if args.skill_review:
+        chosen = args.skill_review_dir or (out_dir / "skill-candidates")
+        skill_review_dir = Path(chosen).resolve()
+    return harness_skill, skill_review_dir
 
 
 def main() -> int:
@@ -226,6 +303,15 @@ def main() -> int:
     parser.add_argument("--arm", default="graph", choices=ARMS)
     parser.add_argument("--summary", action="store_true",
                         help="inject the index's change summary (graph arm only)")
+    parser.add_argument("--harness-skill", default=None,
+                        help="process-discipline skill to inject as the review's "
+                             "second system message (off by default)")
+    parser.add_argument("--skill-review", action="store_true",
+                        help="also have the loop retrospect each run, writing a "
+                             "candidate skill (needs --harness-skill)")
+    parser.add_argument("--skill-review-dir", default=None,
+                        help="where candidates go "
+                             "(default: <out-dir>/skill-candidates)")
     parser.add_argument("--runs", type=int, default=1,
                         help="repeat the run N times, to see whether it is stable")
     parser.add_argument("--max-turns", type=int, default=DEFAULT_MAX_TURNS)
@@ -235,6 +321,11 @@ def main() -> int:
 
     if args.summary and args.arm == "nograph":
         parser.error("--summary needs the index; the nograph arm has none")
+    if args.skill_review and not args.harness_skill:
+        # Caught here rather than by the CLI, which would fail once per run
+        # after materializing a scratch repo and building an index each time.
+        parser.error("--skill-review needs --harness-skill: the retrospective "
+                     "revises the skill injected as the second system message")
     if args.runs < 1:
         parser.error("--runs must be at least 1")
 
@@ -247,16 +338,22 @@ def main() -> int:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    harness_skill, skill_review_dir = _run_paths(args, out_dir)
     print(f"{case.id}  [{args.arm}, summary={args.summary}, "
+          f"harness_skill={harness_skill.name if harness_skill else None}, "
           f"budget={args.max_turns} turns / {args.max_tokens} tokens]")
     print(f"gold sites: {len(case.gold)}   motive: {case.motive}")
+    if skill_review_dir is not None:
+        print(f"candidates -> {skill_review_dir}")
 
     failures = 0
     for run_index in range(1, args.runs + 1):
         try:
             record = run_once(case, arm=args.arm, summary=args.summary,
                               max_turns=args.max_turns,
-                              max_tokens=args.max_tokens, run_index=run_index)
+                              max_tokens=args.max_tokens, run_index=run_index,
+                              harness_skill=harness_skill,
+                              skill_review_dir=skill_review_dir)
         except RuntimeError as exc:
             failures += 1
             print(f"  run {run_index}: FAILED -- {exc}", file=sys.stderr)
