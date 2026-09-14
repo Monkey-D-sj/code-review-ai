@@ -350,7 +350,7 @@ def _run_impact(config: Config, conn, symbols: list[str] | None,
 # ---------------------------------------------------------------------------
 
 def finish_review_tool() -> ToolSpec:
-    """The free-form submitter: schema-only; the loop validates and finishes."""
+    """The submitter: schema-only; the loop validates it and ends the run."""
 
     def _handled(*_args, **_kwargs) -> str:
         raise AssertionError("finish_review is applied by the loop, never run")
@@ -363,6 +363,7 @@ def finish_review_tool() -> ToolSpec:
                     "conclusion.",
         args_schema=ReviewSubmission,
         run=_handled,
+        terminates=True,
     )
 
 

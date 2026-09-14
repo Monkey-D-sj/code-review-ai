@@ -1,10 +1,12 @@
 """The hand-rolled ReAct loop over a review.
 
 The runner hands the model a policy, the change and a set of bounded tools; the
-loop lets it research and ends on an accepted ``finish_review`` (the submission
-is the result), on an empty turn before submitting (the model stopped without a
-verdict), or at ``max_turns``. The caller decides which tools exist -- the loop
-itself has no notion of "arms".
+loop lets it research and ends on an accepted submission from whichever tool is
+marked ``terminates`` (the submission is the result), on an empty turn before
+submitting (the model stopped without a verdict), or at ``max_turns``. The
+caller decides which tools exist -- the loop itself has no notion of "arms", and
+no notion of any tool's name or payload: a submitter is dispatched on the flag
+its ``ToolSpec`` carries, and what it handed in lands in a generic slot.
 
 Dependency discipline: this module imports only ``langchain_core`` message/model
 abstractions, never ``langgraph`` and never ``code_review_ai.review_agent``.
@@ -13,7 +15,7 @@ abstractions, never ``langgraph`` and never ``code_review_ai.review_agent``.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -24,7 +26,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.runnables import Runnable
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from code_review_ai.review_loop.hooks import (
     Hooks,
@@ -35,10 +37,8 @@ from code_review_ai.review_loop.hooks import (
     POINT_RUN_FINISHED,
 )
 from code_review_ai.review_loop.schemas import (
-    FINISH_REVIEW_TOOL,
     AssistantTurn,
     LoopResult,
-    ReviewSubmission,
     ToolCallStatus,
     ToolSpec,
     ToolTrace,
@@ -64,9 +64,11 @@ class _LoopState:
     max_turns: int = MAX_TURNS
     turn: int = 0
     trace_response_excerpt_chars: int = TRACE_RESPONSE_EXCERPT_CHARS
+    allowed_tools: Collection[str] | None = None  # None = every bound tool runs
+    phase: str = "review"  # which run this is, for observers of a nested one
 
     def emit(self, point: str, **context: object) -> None:
-        self.hooks.emit(point, **context)
+        self.hooks.emit(point, phase=self.phase, **context)
 
 
 def _error_content(status: str, message: str) -> str:
@@ -94,12 +96,14 @@ def _bound_schema(spec: ToolSpec) -> dict:
     }
 
 
-def _validate_args(spec: ToolSpec, call: ToolCall) -> tuple[dict | None, str | None]:
+def _validate_args(spec: ToolSpec, call: ToolCall) -> tuple[BaseModel | None, str | None]:
     """Schema-check a tool call before anything runs.
 
-    Returns ``(kwargs, None)`` when the args are valid, or ``(None, rejection)``
-    with a machine-readable ``error`` string when they are not. A call that fails
-    validation never runs, so it must not fire ``pre_tool``/``post_tool``.
+    Returns ``(validated, None)`` -- the pydantic model itself, so a terminating
+    tool's payload keeps its own type; ``_execute_call`` dumps it to kwargs --
+    or ``(None, rejection)`` with a machine-readable ``error`` string when the
+    args do not fit. A call that fails validation never runs, so it must not
+    fire ``pre_tool``/``post_tool``.
     """
     try:
         validated = spec.args_schema.model_validate(call["args"])
@@ -108,7 +112,7 @@ def _validate_args(spec: ToolSpec, call: ToolCall) -> tuple[dict | None, str | N
             "error",
             f"tool arguments do not match the allowed schema "
             f"({exc.error_count()} validation error(s))")
-    return validated.model_dump(exclude_unset=True), None
+    return validated, None
 
 
 def _execute_tool(spec: ToolSpec, kwargs: dict) -> str:
@@ -338,50 +342,70 @@ def _execute_call(state: _LoopState, call: ToolCall) -> None:
         _reply_call(state, call, name,
                     _error_content("error", f"unknown tool {name!r}"), "error")
         return
-    kwargs, rejection = _validate_args(spec, call)
+    validated, rejection = _validate_args(spec, call)
     if rejection is not None:
         _reply_call(state, call, name, rejection, "error")
         return
     state.emit(POINT_PRE_TOOL, name=spec.name, args=call["args"])
-    content = _execute_tool(spec, kwargs)
+    content = _execute_tool(spec, validated.model_dump(exclude_unset=True))
     status = _result_status(content)
     state.emit(POINT_POST_TOOL, name=spec.name, status=status,
                response_chars=len(content))
     _reply_call(state, call, name, content, status)
 
 
+def _allowed(state: _LoopState, name: str) -> bool:
+    """Whether this run permits ``name`` to run (bound is not the same as allowed)."""
+    return state.allowed_tools is None or name in state.allowed_tools
+
+
+def _refused(state: _LoopState, call: ToolCall, name: str) -> None:
+    """Answer a call the run's whitelist does not permit, without running it.
+
+    Answered rather than raised so the model can correct itself: a nested run
+    (the harness-skill review) binds the whole parent tool set so the history's
+    tool_call ids all resolve, and refuses everything but its own two tools
+    here. The refusal is a normal ``error`` reply, one per call as always.
+    """
+    allowed = ", ".join(sorted(state.allowed_tools or ()))
+    _reply_call(state, call, name, _error_content(
+        "error", f"tool {name!r} is not permitted in this run; allowed: {allowed}"),
+        "error")
+
+
+def _apply_terminating(state: _LoopState, call: ToolCall, spec: ToolSpec) -> bool:
+    """Answer a submitter and, if it validates, end the run.
+
+    Returns True only when the submission was accepted. An invalid payload is
+    answered as an error and the run continues so the model can retry -- the
+    same shape ``finish_review`` has always had. The payload lands in
+    ``result.submission``, a generic slot: the loop does not know what any
+    particular submission means, which is what lets a second submitter
+    (``submit_skill``) exist without the loop learning its name.
+    """
+    validated, rejection = _validate_args(spec, call)
+    if rejection is not None:
+        _reply_call(state, call, spec.name, rejection, "error")
+        return False
+    state.result.submission = validated
+    state.result.review_complete = True
+    _reply_call(state, call, spec.name,
+                json.dumps({"accepted": True}, ensure_ascii=False), "success")
+    return True
+
+
 def _settle_result(state: _LoopState) -> None:
-    """Shared tail: derive trace counts, emit run_finished."""
+    """Shared tail: derive trace counts, hand out the history, emit run_finished."""
     trace = state.result.tool_trace
     state.result.tool_request_count = len(trace)
     state.result.tool_call_count = sum(
         record["status"] == "success" for record in trace)
     state.result.tool_calls = [record["tool"] for record in trace]
+    # The run is over, so the caller may keep (or extend) the live list.
+    state.result.messages = state.messages
     state.emit(POINT_RUN_FINISHED,
                failure_reason=state.result.failure_reason,
                finding_count=len(state.result.findings))
-
-
-def _apply_finish(state: _LoopState, call: ToolCall) -> bool:
-    """Validate a ``finish_review`` submission and stop the run on success.
-
-    Returns True only when the submission was accepted (the review is done);
-    an invalid payload is answered as an error and the run continues so the
-    model can retry.
-    """
-    try:
-        submission = ReviewSubmission.model_validate(call["args"])
-    except ValidationError as exc:
-        _reply_call(state, call, FINISH_REVIEW_TOOL,
-                    _error_content("error", f"invalid finish_review payload: {exc}"),
-                    "error")
-        return False
-    state.result.findings = list(submission.findings)
-    state.result.review_complete = True
-    _reply_call(state, call, FINISH_REVIEW_TOOL,
-                json.dumps({"accepted": True, "findings": len(submission.findings)},
-                           ensure_ascii=False), "success")
-    return True
 
 
 def run_loop(
@@ -393,14 +417,23 @@ def run_loop(
     max_turns: int = MAX_TURNS,
     max_total_tokens: int | None = None,
     trace_response_excerpt_chars: int = TRACE_RESPONSE_EXCERPT_CHARS,
+    allowed_tools: Collection[str] | None = None,
+    phase: str = "review",
 ) -> LoopResult:
     """Run one review: the model researches with the tools, then reports.
 
     Input is only what the caller put in ``initial_messages`` (e.g. a diff plus
-    a policy). The model ends by calling ``finish_review`` with its structured
-    findings (empty is a valid "no regression" verdict); an empty turn before
-    that is a failure (the model stopped without submitting). Which tools exist
-    is entirely the caller's choice -- the loop does not distinguish arms.
+    a policy). The model ends by calling a tool marked ``terminates`` with its
+    structured submission (empty is a valid "no regression" verdict for a
+    review); an empty turn before that is a failure (the model stopped without
+    submitting). Which tools exist is entirely the caller's choice -- the loop
+    does not distinguish arms.
+
+    ``allowed_tools`` narrows what may *run* without narrowing what is *bound*:
+    a nested run binds the whole parent tool set (so the replayed history's
+    tool_call ids all resolve) and permits only its own tools. ``None`` permits
+    everything. ``phase`` labels the run in every hook event, so an observer can
+    tell a nested run's turns from the outer one's.
     """
     state = _LoopState(
         tool_map={spec.name: spec for spec in tools},
@@ -410,6 +443,8 @@ def run_loop(
         hooks=hooks if hooks is not None else Hooks(),
         max_turns=max_turns,
         trace_response_excerpt_chars=trace_response_excerpt_chars,
+        allowed_tools=allowed_tools,
+        phase=phase,
     )
     while True:
         if state.turn >= state.max_turns:
@@ -430,8 +465,7 @@ def run_loop(
             # A tool-less assistant turn carries no state (tools carry it) and
             # DeepSeek's serializer can hallucinate a tool_call onto some empty
             # reasoning turns, so it is never appended to the history.
-            state.result.failure_reason = (
-                "agent stopped without submitting finish_review")
+            state.result.failure_reason = "agent stopped without submitting"
             break
         state.messages.append(response)
         # TODO: history grows unboundedly and every invoke re-sends all of it (a
@@ -441,8 +475,13 @@ def run_loop(
         # tool_calls from the tool replies that follow it.
         submitted = False
         for call in calls:
-            if call["name"] == FINISH_REVIEW_TOOL:
-                if _apply_finish(state, call):
+            name = call["name"]
+            if not _allowed(state, name):
+                _refused(state, call, name)
+                continue
+            spec = state.tool_map.get(name)
+            if spec is not None and spec.terminates:
+                if _apply_terminating(state, call, spec):
                     submitted = True
                     break
                 continue  # invalid payload: answered as error, keep going

@@ -1,8 +1,10 @@
 """Contracts for the review_loop review flow.
 
 The model is given a policy, the change, and whatever tools the caller offers;
-it researches the change and ends by calling ``finish_review`` with its
-structured findings (an empty list is a valid "no regression" verdict). The
+it researches the change and ends by calling a tool the caller marked
+``terminates`` -- for a review, ``finish_review`` with its structured findings
+(an empty list is a valid "no regression" verdict). The validated payload lands
+in ``LoopResult.submission``; the review's ``findings`` is a view over it. The
 report is the whole result -- there is no per-row bookkeeping to reconcile.
 
 Depends only on ``langchain_core``/``pydantic`` -- no langgraph, no StructuredTool.
@@ -15,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -65,12 +68,20 @@ class ToolSpec:
 
     ``args_schema`` is plain pydantic (extra forbidden); ``run`` receives the
     validated keyword arguments and returns the content string verbatim.
+
+    ``terminates`` marks a submitter: the loop never runs it, it validates the
+    call against ``args_schema``, replies, stores the payload on
+    ``LoopResult.submission`` and ends the run. That is the whole of what makes
+    ``finish_review`` special -- the reply and the invalid-arguments path are
+    what the loop does for any tool. Because the payload lands in a generic
+    slot, the loop never learns the shape of any particular submission.
     """
 
     name: str
     description: str
     args_schema: type[BaseModel]
     run: Callable[..., str]
+    terminates: bool = False
 
 
 class Finding(BaseModel):
@@ -121,7 +132,8 @@ class AssistantTurn(BaseModel):
     name of turn N is the k-th trace record produced while executing turn N.
 
     Every call that executes produces exactly one record, in order (each of
-    ``_execute_call`` and ``_apply_finish`` ends in a single ``_reply_call``).
+    ``_execute_call`` and ``_apply_terminating`` ends in a single
+    ``_reply_call``).
     The pairing is therefore **prefix-correct but not total**: a trace record
     always sits where its name does, and names can outnumber records only as a
     *trailing* run of never-executed calls. Walk both lists in step and stop
@@ -149,17 +161,27 @@ class AssistantTurn(BaseModel):
 class LoopResult:
     """Outcome of one review run.
 
-    ``findings`` is the model's ``finish_review`` submission -- empty when the
-    run found nothing (a valid verdict) or when it never submitted.
+    ``submission`` is the terminating tool's validated payload -- for a review,
+    a ``ReviewSubmission``; empty when the run never submitted. ``findings`` is
+    a view over it (see the property), so a caller that only wants the review's
+    report reads the same field it always did.
     ``review_complete`` is true only when an accepted submission ended the run.
     ``usage`` aggregates the model-side tokens the provider reported across the
     run's model turns (see ``Usage``); it survives a partial run so a truncated
     review still shows what was spent. ``cost`` is the yuan estimate
     ``compute_cost`` derives from ``usage``; the runner fills it (the loop
     itself does not price) and it stays 0 until then.
+
+    ``messages`` is the run's whole history as sent -- system, the diff, every
+    assistant turn and every tool reply in full. It exists for the harness-skill
+    review, which replays the parent run verbatim; the trace and the assistant
+    turns cannot serve that (the trace truncates tool output at
+    ``TRACE_RESPONSE_EXCERPT_CHARS`` and the turns carry tool *names*, not the
+    calls). ``skill_review`` is that second run's own result, filled by the
+    runner, so its cost can be reported separately from the review's.
     """
 
-    findings: list[Finding] = field(default_factory=list)
+    submission: BaseModel | None = None
     review_complete: bool = False
     failure_reason: str | None = None
     usage: Usage = field(default_factory=dict)
@@ -169,3 +191,17 @@ class LoopResult:
     tool_calls: list[str] = field(default_factory=list)
     tool_call_count: int = 0
     tool_request_count: int = 0
+    messages: list[BaseMessage] = field(default_factory=list)
+    skill_review: "LoopResult | None" = None
+
+    @property
+    def findings(self) -> list[Finding]:
+        """The review's report, read off whatever the submitter handed in.
+
+        A property rather than a field because the loop stores submissions
+        generically (``submission``) and must not know that one of them happens
+        to carry findings. A run that never submitted, or one that submitted
+        something else, has no findings -- both are empty, not an error.
+        """
+        payload = self.submission
+        return list(payload.findings) if isinstance(payload, ReviewSubmission) else []

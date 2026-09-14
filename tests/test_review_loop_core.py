@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 
 from code_review_ai.review_loop import (
     Hooks,
+    LoopResult,
     POINT_MODEL_REQUEST_STARTED,
     POINT_MODEL_RESPONSE_RECEIVED,
     POINT_POST_TOOL,
@@ -116,7 +117,8 @@ def _tools():
         ToolSpec(name="boom", description="stub that fails", args_schema=BoomArgs,
                  run=_boom),
         ToolSpec(name=FINISH_REVIEW_TOOL, description="submit findings",
-                 args_schema=ReviewSubmission, run=lambda **_kw: "unused"),
+                 args_schema=ReviewSubmission, run=lambda **_kw: "unused",
+                 terminates=True),
     ]
 
 
@@ -147,7 +149,7 @@ def test_tool_less_assistant_turns_are_not_appended_to_history():
     result = _run(model)
 
     assert result.review_complete is False
-    assert result.failure_reason == "agent stopped without submitting finish_review"
+    assert result.failure_reason == "agent stopped without submitting"
     assert len(model.invoked) == 1  # the empty turn ended the run
     assert all(message.type != "ai" for message in model.invoked[0])
 def test_empty_turn_failure_records_the_turn_text_and_reasoning():
@@ -161,7 +163,7 @@ def test_empty_turn_failure_records_the_turn_text_and_reasoning():
     result = _run(model)
 
     assert result.review_complete is False
-    assert result.failure_reason == "agent stopped without submitting finish_review"
+    assert result.failure_reason == "agent stopped without submitting"
     recorded = result.assistant_turns
     assert [turn.turn for turn in recorded] == [1]
     assert [turn.content for turn in recorded] == ["no issues to flag."]
@@ -534,7 +536,7 @@ def test_free_loop_invalid_submission_is_answered_then_retried():
     assert result.failure_reason is None
     assert [f.line for f in result.findings] == [3]
     assert [record["status"] for record in result.tool_trace] == ["error", "success"]
-    assert any("invalid finish_review payload" in content
+    assert any("do not match the allowed schema" in content
                for content in _tool_contents(model))
 
 
@@ -544,7 +546,9 @@ def test_free_loop_empty_turn_before_submit_is_a_failure():
     result = _run(model)
 
     assert result.review_complete is False
-    assert "finish_review" in result.failure_reason
+    # The loop names no tool: a submitter is whatever carries `terminates`, so
+    # the failure says what happened, not which tool was expected.
+    assert "without submitting" in result.failure_reason
     assert result.findings == []
 
 
@@ -621,3 +625,137 @@ def test_tool_trace_excerpt_honors_a_custom_cap():
     record = result.tool_trace[0]
     assert len(record["response_excerpt"]) == 50
     assert record["response_chars"] == len(_tool_contents(model)[0])
+
+
+# ---------------------------------------------------------------------------
+# the terminating contract, and the whitelist
+# ---------------------------------------------------------------------------
+
+
+class NoteArgs(BaseModel):
+    """A submission that is not a review: the loop must not know its shape."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+
+
+def _note_tools():
+    """One action tool plus a submitter the loop has never heard of."""
+
+    def _unused(**_kwargs) -> str:
+        raise AssertionError("a submitter is applied by the loop, never run")
+
+    return [
+        ToolSpec(name="echo", description="echo", args_schema=EchoArgs, run=_echo),
+        ToolSpec(name="note", description="submit a note", args_schema=NoteArgs,
+                 run=_unused, terminates=True),
+    ]
+
+
+def test_a_terminating_tool_ends_the_run_and_parks_its_payload():
+    # The loop dispatches on `terminates`, never on a tool name, so a submitter
+    # it has never seen behaves exactly like finish_review -- that is what lets
+    # a second one exist without the loop learning its name.
+    model = FakeModel([("", [_call("echo", {"text": "hi"}, "echo-1")]),
+                       ("", [_call("note", {"text": "hello"}, "note-1")])])
+
+    result = run_loop(model, _note_tools(), initial_messages=[])
+
+    assert result.review_complete is True
+    assert result.failure_reason is None
+    assert isinstance(result.submission, NoteArgs)
+    assert result.submission.text == "hello"
+    assert result.tool_calls == ["echo", "note"]
+    assert result.tool_trace[-1]["response_excerpt"] == '{"accepted": true}'
+
+
+def test_an_invalid_submission_to_any_submitter_is_answered_and_the_run_goes_on():
+    model = FakeModel([("", [_call("note", {}, "note-bad")]),
+                       ("", [_call("note", {"text": "ok"}, "note-good")])])
+
+    result = run_loop(model, _note_tools(), initial_messages=[])
+
+    assert [record["status"] for record in result.tool_trace] == ["error", "success"]
+    assert result.submission.text == "ok"
+
+
+def test_findings_are_empty_when_the_submission_is_not_a_review():
+    # `findings` is a view over whatever was submitted, so a run that submitted
+    # something else -- or nothing -- reports none rather than raising.
+    result = LoopResult()
+
+    assert result.findings == []
+    assert result.review_complete is False  # the loop sets this, not the payload
+
+    result.submission = NoteArgs(text="hello")
+
+    assert result.findings == []
+
+
+def test_the_whitelist_refuses_bound_tools_without_running_them():
+    """Bound is not the same as allowed.
+
+    A nested run binds the whole parent tool set, because the replayed history
+    calls those tools by id, and permits only its own two.
+    """
+    ran: list[str] = []
+
+    def _spy(text: str) -> str:
+        ran.append(text)
+        return f"echo:{text}"
+
+    tools = [
+        ToolSpec(name="echo", description="echo", args_schema=EchoArgs, run=_spy),
+        ToolSpec(name=FINISH_REVIEW_TOOL, description="submit",
+                 args_schema=ReviewSubmission, run=lambda **_kw: "unused",
+                 terminates=True),
+    ]
+    model = FakeModel([("", [_call("echo", {"text": "hi"}, "echo-1"),
+                             _finish_call([])]),
+                       ("done.", [])])
+
+    result = run_loop(model, tools, initial_messages=[],
+                      allowed_tools={"impact"})
+
+    assert ran == []
+    # The whitelist is checked *before* the terminating dispatch. Reversed, a
+    # refused finish_review would still end the run and the whitelist -- the
+    # thing that makes searching structurally impossible for the retrospective
+    # -- would mean nothing.
+    assert result.review_complete is False
+    assert [record["status"] for record in result.tool_trace] == ["error", "error"]
+    assert all("not permitted in this run" in content
+               for content in _tool_contents(model))
+
+
+def test_every_hook_event_carries_the_run_phase():
+    """A nested run's turns must be tellable apart from the outer run's.
+
+    Both count from 1, so without a label the two runs' progress lines (and two
+    cost segments) are indistinguishable.
+    """
+    model = FakeModel([("", [_call("impact", {"symbols": ["x"]}, "impact-1")]),
+                       ("", [_finish_call([])])])
+    hooks = Hooks()
+    phases: set = set()
+    for point in (POINT_MODEL_REQUEST_STARTED, POINT_MODEL_RESPONSE_RECEIVED,
+                  POINT_PRE_TOOL, POINT_POST_TOOL, POINT_RUN_FINISHED):
+        hooks.on(point, lambda _event, context: phases.add(context.get("phase")))
+
+    run_loop(model, _tools(), initial_messages=[], hooks=hooks,
+             phase="skill_review")
+
+    assert phases == {"skill_review"}
+
+
+def test_the_run_phase_defaults_to_review():
+    model = FakeModel([("", [_finish_call([])])])
+    hooks = Hooks()
+    phases: set = set()
+    hooks.on(POINT_RUN_FINISHED,
+             lambda _event, context: phases.add(context.get("phase")))
+
+    run_loop(model, _tools(), initial_messages=[], hooks=hooks)
+
+    assert phases == {"review"}
